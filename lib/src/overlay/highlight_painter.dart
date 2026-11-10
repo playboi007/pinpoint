@@ -11,10 +11,25 @@ abstract final class HighlightColors {
   static const Color labelText = Color(0xFFFFFFFF);
 }
 
-/// The label pill text: widget name and size, for example
-/// `RichText 120.0 x 16.0`.
-String highlightLabel(PickResult pick) =>
-    '${pick.element.widget.runtimeType} ${formatSize(pick.globalRect.size)}';
+/// The selected widget and the local widgets above it, for example
+/// `SaveBar > ElevatedButton > Text`.
+String breadcrumbLabel(PickResult pick) =>
+    pick.chain.breadcrumb(pick.chainIndex).map((e) => e.name).join(' > ');
+
+/// Where the selected widget was created, relative to the project root,
+/// for example `lib/widgets/save_bar.dart:42`. Null when unknown.
+String? locationLabel(PickResult pick) {
+  final location = pick.entry.location;
+  return location == null ? null : pick.chain.resolver.paths.label(location);
+}
+
+/// The label pill text: breadcrumb, size and location, for example
+/// `Row > ElevatedButton > Text  48.0 x 20.0  lib/widgets/save_bar.dart:42`.
+String highlightLabel(PickResult pick) => [
+  breadcrumbLabel(pick),
+  formatSize(pick.globalRect.size),
+  ?locationLabel(pick),
+].join('  ');
 
 /// Where a label of [label] size goes for [target], inside [canvas].
 ///
@@ -99,6 +114,7 @@ class HighlightPainter extends CustomPainter {
       ),
       textDirection: TextDirection.ltr,
       maxLines: 1,
+      ellipsis: '…',
     )..layout(maxWidth: size.width);
     const padding = EdgeInsets.symmetric(horizontal: 6, vertical: 2);
     final pill = labelRect(

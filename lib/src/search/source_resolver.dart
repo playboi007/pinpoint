@@ -242,6 +242,20 @@ class SourceChain {
     return null;
   }
 
+  /// The entry at [index] and up to `max - 1` local entries above it,
+  /// outermost first, for example `Row > ElevatedButton > Text`.
+  List<ChainEntry> breadcrumb(int index, {int max = 3}) {
+    final crumbs = <ChainEntry>[this[index]];
+    for (
+      var i = nextLocal(index, up: true);
+      i != null && crumbs.length < max;
+      i = nextLocal(i, up: true)
+    ) {
+      crumbs.add(this[i]);
+    }
+    return crumbs.reversed.toList();
+  }
+
   /// Every local entry, nearest first. Reads the whole chain.
   List<ChainEntry> get localEntries => [
     for (var i = 0; i < length; i++)

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../core/pinpoint_controller.dart';
 import '../info/widget_info.dart';
 import '../search/pick_result.dart';
+import 'highlight_painter.dart';
 
 /// Covers the screen and places [InfoPanel] while there is a selection.
 ///
@@ -143,16 +144,16 @@ class InfoPanel extends StatelessWidget {
               // under the pointer instead of lagging by the touch slop.
               dragStartBehavior: DragStartBehavior.down,
               onPanUpdate: (details) => onDrag(details.delta),
-              child: _Header(
-                selection: selection,
-                renderType: info.renderType,
-                onClose: onClose,
-              ),
+              child: _Header(selection: selection, onClose: onClose),
             ),
             Flexible(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-                child: _InfoContent(info: info, theme: theme),
+                child: _InfoContent(
+                  info: info,
+                  breadcrumb: breadcrumbLabel(selection),
+                  theme: theme,
+                ),
               ),
             ),
           ],
@@ -163,14 +164,9 @@ class InfoPanel extends StatelessWidget {
 }
 
 class _Header extends StatelessWidget {
-  const _Header({
-    required this.selection,
-    required this.renderType,
-    required this.onClose,
-  });
+  const _Header({required this.selection, required this.onClose});
 
   final PickResult selection;
-  final String renderType;
   final VoidCallback onClose;
 
   @override
@@ -190,12 +186,12 @@ class _Header extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '${selection.element.widget.runtimeType}',
+                    selection.entry.name,
                     style: theme.textTheme.titleSmall,
                     overflow: TextOverflow.ellipsis,
                   ),
                   Text(
-                    renderType,
+                    locationLabel(selection) ?? 'source unavailable',
                     style: theme.textTheme.bodySmall,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -223,9 +219,14 @@ class _Header extends StatelessWidget {
 }
 
 class _InfoContent extends StatelessWidget {
-  const _InfoContent({required this.info, required this.theme});
+  const _InfoContent({
+    required this.info,
+    required this.breadcrumb,
+    required this.theme,
+  });
 
   final WidgetInfo info;
+  final String breadcrumb;
   final ThemeData theme;
 
   @override
@@ -236,6 +237,8 @@ class _InfoContent extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        _Row(name: 'chain', label: breadcrumb),
+        _Row(name: 'render', label: info.renderType),
         _Row(name: 'size', label: info.sizeLabel),
         _Row(name: 'position', label: info.positionLabel),
         _Row(name: 'constraints', label: info.constraintsLabel),
