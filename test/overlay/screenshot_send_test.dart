@@ -26,10 +26,17 @@ void main() {
     shift.dispose();
   });
 
-  Widget host(List<PinPointSink> sinks) => MaterialApp(
+  Widget host(
+    List<PinPointSink> sinks, {
+    int maxScreenshotWidth = 1600,
+    double targetWidth = 120,
+  }) => MaterialApp(
     builder: (context, child) => PinPointWrapper(
       controller: controller,
-      config: PinPointConfig(sinks: sinks),
+      config: PinPointConfig(
+        sinks: sinks,
+        maxScreenshotWidth: maxScreenshotWidth,
+      ),
       child: child,
     ),
     home: Scaffold(
@@ -38,9 +45,13 @@ void main() {
           valueListenable: shift,
           builder: (context, offset, child) =>
               Transform.translate(offset: offset, child: child),
-          child: const ColoredBox(
-            color: Color(0xFF00AA00),
-            child: SizedBox(width: 120, height: 40, child: Text('Target')),
+          child: ColoredBox(
+            color: const Color(0xFF00AA00),
+            child: SizedBox(
+              width: targetWidth,
+              height: 40,
+              child: Text('Target'),
+            ),
           ),
         ),
       ),
@@ -57,8 +68,19 @@ void main() {
     ),
   );
 
-  Future<void> writeComment(WidgetTester tester, FakeSink sink) async {
-    await tester.pumpWidget(host([sink]));
+  Future<void> writeComment(
+    WidgetTester tester,
+    FakeSink sink, {
+    int maxScreenshotWidth = 1600,
+    double targetWidth = 120,
+  }) async {
+    await tester.pumpWidget(
+      host(
+        [sink],
+        maxScreenshotWidth: maxScreenshotWidth,
+        targetWidth: targetWidth,
+      ),
+    );
     controller.startPicking();
     await tester.pump();
     await tester.tapAt(
@@ -189,5 +211,35 @@ void main() {
     await tester.pump();
     await tester.pump();
     expect(controller.mode, PinPointMode.idle);
+  });
+
+  group('the width cap (build step 4)', () {
+    testWidgets('acceptance: a 4K viewport capture stays under 1600 px '
+        'wide', (tester) async {
+      tester.view.physicalSize = const Size(3840, 2160);
+      tester.view.devicePixelRatio = 2;
+      addTearDown(tester.view.reset);
+      final sink = FakeSink();
+      // A full-width bar: 1920 logical px at 2x would be 3840 px.
+      await writeComment(tester, sink, targetWidth: double.infinity);
+      await send(tester);
+      final shot = sink.notes.single.screenshot!;
+      expect(shot.crop!.w, 1920);
+      expect(shot.width, lessThanOrEqualTo(1600));
+      expect(shot.pixelRatio, lessThan(2));
+    });
+
+    testWidgets('a crop wider than the cap lowers the ratio', (tester) async {
+      tester.view.physicalSize = const Size(3840, 2160);
+      tester.view.devicePixelRatio = 2;
+      addTearDown(tester.view.reset);
+      final sink = FakeSink();
+      await writeComment(tester, sink, maxScreenshotWidth: 400);
+      await send(tester);
+      final shot = sink.notes.single.screenshot!;
+      expect(shot.width, lessThanOrEqualTo(400));
+      expect(shot.pixelRatio, lessThan(2));
+      expect(shot.width, (shot.crop!.w * shot.pixelRatio).round());
+    });
   });
 }

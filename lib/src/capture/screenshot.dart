@@ -118,18 +118,54 @@ class CapturePlan {
   int get height => source.height.round();
 }
 
+/// The pixel ratio for a crop [cropWidth] logical pixels wide: the
+/// [devicePixelRatio] up to [maxPixelRatio], lowered so the image is at most
+/// [maxWidth] pixels wide.
+double capturePixelRatio(
+  double devicePixelRatio,
+  double cropWidth,
+  int maxWidth,
+) {
+  final ratio = math.min(devicePixelRatio, maxPixelRatio);
+  if (cropWidth * ratio <= maxWidth) return ratio;
+  return maxWidth / cropWidth;
+}
+
 /// The plan for [target] (the boundary's logical pixels) on a boundary of
-/// [bounds] at [pixelRatio], or null when nothing of it can be captured.
-CapturePlan? planCapture(Rect target, Size bounds, double pixelRatio) {
+/// [bounds], or null when nothing of it can be captured.
+///
+/// With [maxWidth], [pixelRatio] is the device pixel ratio and the plan
+/// picks the ratio with [capturePixelRatio]. Without it, [pixelRatio] is
+/// used as is.
+///
+/// The ratio is chosen before the capture, from the crop, so a wide crop is
+/// captured once at the lower ratio rather than captured, measured and
+/// captured again.
+CapturePlan? planCapture(
+  Rect target,
+  Size bounds,
+  double pixelRatio, {
+  int? maxWidth,
+}) {
   if (!pixelRatio.isFinite || pixelRatio <= 0) return null;
+  if (maxWidth != null && maxWidth < 1) return null;
   final crop = cropFor(target, bounds);
   if (crop.isEmpty) return null;
-  final source = pixelRectFor(
-    crop,
-    pixelRatio,
-    fullImageSize(bounds, pixelRatio),
-  );
+  var ratio = maxWidth == null
+      ? pixelRatio
+      : capturePixelRatio(pixelRatio, crop.width, maxWidth);
+  var source = pixelRectFor(crop, ratio, fullImageSize(bounds, ratio));
+  if (maxWidth != null && source.width > maxWidth) {
+    // Rounding outward adds less than a pixel on each side. Take two off
+    // the target width and it can no longer go over.
+    ratio = math.max(maxWidth - 2, 1) / crop.width;
+    source = pixelRectFor(crop, ratio, fullImageSize(bounds, ratio));
+  }
   if (source.isEmpty) return null;
+  return _plan(source, target, ratio);
+}
+
+CapturePlan _plan(Rect source, Rect target, double pixelRatio) {
   return CapturePlan(
     crop: Rect.fromLTRB(
       source.left / pixelRatio,
@@ -183,12 +219,16 @@ Future<void> paintSettled() async {
 /// [pixelRatio], with the outline drawn on. Null when the target is not on
 /// the boundary.
 ///
+/// With [maxWidth], [pixelRatio] is the device pixel ratio: the capture
+/// uses at most 2, lowered so the image is at most [maxWidth] wide.
+///
 /// The boundary holds only the app. Pinpoint's highlight and panel sit
 /// beside it (engineering rule 6), so the image is clean.
 Future<Screenshot?> captureScreenshot(
   RenderRepaintBoundary boundary,
   Rect target, {
   required double pixelRatio,
+  int? maxWidth,
 }) async {
   await paintSettled();
   if (!boundary.attached || !boundary.hasSize) return null;
@@ -201,7 +241,12 @@ Future<Screenshot?> captureScreenshot(
   final toLocal = Matrix4.tryInvert(toGlobal);
   if (toLocal == null) return null;
   final local = MatrixUtils.transformRect(toLocal, target);
-  final plan = planCapture(local, boundary.size, pixelRatio);
+  final plan = planCapture(
+    local,
+    boundary.size,
+    pixelRatio,
+    maxWidth: maxWidth,
+  );
   if (plan == null) return null;
 
   final full = await boundary.toImage(pixelRatio: plan.pixelRatio);

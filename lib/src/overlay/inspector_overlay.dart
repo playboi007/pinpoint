@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:flutter/foundation.dart' show kDebugMode, listEquals;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -304,16 +302,13 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
       final rect = selection == null
           ? null
           : RenderSearch.globalRectOf(selection.renderObject);
-      final ratio = math.min(
-        MediaQuery.devicePixelRatioOf(context),
-        maxPixelRatio,
-      );
       final shot = rect == null
           ? null
           : await captureScreenshot(
               boundary,
               rect,
-              pixelRatio: ratio,
+              pixelRatio: MediaQuery.devicePixelRatioOf(context),
+              maxWidth: widget.config.maxScreenshotWidth,
             ).timeout(const Duration(seconds: 5));
       if (shot == null) {
         if (mounted) {

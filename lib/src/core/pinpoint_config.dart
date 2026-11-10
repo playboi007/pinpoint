@@ -15,7 +15,13 @@ class PinPointConfig {
     this.projectRoot = const String.fromEnvironment('PINPOINT_ROOT'),
     this.localPathHints = const <String>[],
     this.sinks = const <PinPointSink>[],
-  });
+    this.maxScreenshotWidth = 1600,
+  }) : assert(maxScreenshotWidth > 0);
+
+  /// The widest screenshot, in image pixels. A wider crop is captured at a
+  /// lower pixel ratio. PNG encoding takes most of a capture's time, so this
+  /// is what keeps a capture inside its 300 ms budget.
+  final int maxScreenshotWidth;
 
   /// Where Send delivers each note, in order. With none, Send reports that
   /// nothing took the note; Copy as Markdown still works.

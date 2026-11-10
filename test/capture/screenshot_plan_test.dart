@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -174,6 +175,59 @@ void main() {
     test('is null for a ratio that is not positive or finite', () {
       expect(planCapture(target, bounds, 0), isNull);
       expect(planCapture(target, bounds, double.nan), isNull);
+    });
+  });
+
+  group('the width cap (build step 4)', () {
+    test('the device pixel ratio is used up to 2', () {
+      expect(capturePixelRatio(1, 320, 1600), 1);
+      expect(capturePixelRatio(1.25, 320, 1600), 1.25);
+      expect(capturePixelRatio(3, 320, 1600), maxPixelRatio);
+    });
+
+    test('a wide crop lowers the ratio to fit the cap', () {
+      expect(capturePixelRatio(2, 1920, 1600), closeTo(1600 / 1920, 1e-9));
+      expect(capturePixelRatio(1, 3840, 1600), closeTo(1600 / 3840, 1e-9));
+    });
+
+    test('acceptance: a 4K viewport capture stays under 1600 px wide', () {
+      for (final (logical, dpr) in [
+        (const Size(3840, 2160), 1.0), // 4K at 1x
+        (const Size(1920, 1080), 2.0), // 4K at 2x
+        (const Size(1536, 864), 2.5), // 4K at 2.5x
+      ]) {
+        final fullWidth = Offset.zero & Size(logical.width, 80);
+        final plan = planCapture(fullWidth, logical, dpr, maxWidth: 1600)!;
+        expect(plan.width, lessThanOrEqualTo(1600), reason: '$logical @ $dpr');
+        expect(plan.width, greaterThan(1590), reason: 'not lowered too far');
+      }
+    });
+
+    test('rounding outward never pushes the image over the cap', () {
+      final random = math.Random(6);
+      for (var i = 0; i < 2000; i++) {
+        final bounds = Size(
+          400 + random.nextDouble() * 3600,
+          300 + random.nextDouble() * 2000,
+        );
+        final target = Rect.fromLTWH(
+          random.nextDouble() * bounds.width * 0.9,
+          random.nextDouble() * bounds.height * 0.9,
+          1 + random.nextDouble() * bounds.width,
+          1 + random.nextDouble() * 200,
+        );
+        final dpr = 1 + random.nextDouble() * 2.5;
+        final maxWidth = 200 + random.nextInt(1800);
+        final plan = planCapture(target, bounds, dpr, maxWidth: maxWidth)!;
+        expect(plan.width, lessThanOrEqualTo(maxWidth));
+        expect(plan.pixelRatio, lessThanOrEqualTo(maxPixelRatio));
+        expect(plan.width, plan.source.width);
+      }
+    });
+
+    test('without a cap the given ratio is used as is', () {
+      final plan = planCapture(const Rect.fromLTWH(0, 0, 800, 80), bounds, 3)!;
+      expect(plan.pixelRatio, 3);
     });
   });
 }
