@@ -33,6 +33,7 @@ Result of the "Verify first" lists in `PLAN.md`. Where this file differs from th
 | 20 | Facts found in Session 4 | `ModalRoute.settingsOf` on an inherited element can self-depend; diagnostics formats; collection cost. |
 | 21 | Facts found in Session 5 | A text field outside the Navigator needs a `DismissIntent` action; key results for text fields; a focused field draws frames. |
 | 22 | Facts found in Session 6 | `RenderObject.layer` is protected, so capture the whole boundary; `endOfFrame` forces a frame; images in tests need `runAsync`. |
+| 23 | Facts found in Session 7 | `dart run pinpoint:bridge` works from a Flutter host app; an early 413 is lost unless the body is read; widget tests fake `HttpClient`. |
 
 ---
 
@@ -359,7 +360,7 @@ So the plan's check is: **works in `flutter run -d chrome` (DWDS attached); not 
 - `package:dart_mcp` **0.5.2** (published 2026-06-29; `sdk: ^3.7.0`; deps `async`, `collection`, `json_rpc_2`, `meta`, `stream_channel`, `stream_transform`). Servers and clients run over a `StreamChannel<String>`. The package ships **only `stdioChannel`** (`lib/stdio.dart`). There is no HTTP or SSE transport.
 - Result: the plan's preferred option (MCP over HTTP on the bridge port) needs a hand-written `StreamChannel` adapter over HTTP. The fallback (stdio shim that forwards to the running bridge) works with `dart_mcp` as is.
 - `dart_mcp` has no Flutter dependency, so `bin/bridge.dart` can use it. It is a **new dependency beyond `http`**. Engineering rule 10 needs a recorded decision before adding it.
-- Keep every file that `bin/` imports (for example `lib/src/model/annotation.dart`) free of `dart:ui` and `package:flutter`. A plain Dart process cannot import them. **[unverified]** Whether `dart run pinpoint:bridge` works from a host app that depends on a Flutter package. Check in Session 6.
+- Keep every file that `bin/` imports (for example `lib/src/model/annotation.dart`) free of `dart:ui` and `package:flutter`. A plain Dart process cannot import them. **[run]** `dart run pinpoint:bridge` works from `example/`, a Flutter app that depends on the package (Session 7, item 23).
 
 ## 16. Official Dart and Flutter MCP server
 
@@ -436,6 +437,15 @@ Extra tools exist behind `--enable` (`launch_app`, `list_devices`, `run_tests`, 
 - **[run-vm]** `200 * 1.1` is `220.00000000000003`. A plain `ceil()` on a scaled edge adds a pixel; `pixelRectFor` uses a slack of `1e-6`.
 - **[run-vm]** The flutter_tester renderer draws solid colours exactly. Pixel tests can sample the outline colour within 8 per channel at ratios 1, 1.25 and 2.
 - **[unverified]** Capture under CanvasKit and `--wasm` in Chrome, capture time in a browser (budget 300 ms), and blank platform views on the example's HTML view screen.
+
+## 23. Facts found in Session 7
+
+- **[run]** `cd example && dart run pinpoint:bridge` compiles and runs the bridge from a Flutter host app that depends on `pinpoint` (closes the item 15 check). Everything `bin/bridge.dart` imports is plain Dart; `test/bridge/bridge_options_test.dart` walks the imports to keep it so.
+- **[run-vm]** `dart:io` `HttpServer`: when a handler answers and closes while the request body is still unread, the connection is reset, and the client loses the answer too (`HttpException: Connection closed before full header was received`). For the 413 the bridge reads and drops the rest of the body, up to 40 MB, and then answers.
+- **[source]** `TestWidgetsFlutterBinding` sets `HttpOverrides.global` to a fake (`flutter_test/lib/src/binding.dart:1289`, `_binding_io.dart:27`) whose responses are all 400 (`_binding_io.dart:365`). A test that talks to a real server over `dart:io` must be a plain `test` in a file with no `testWidgets`. `package:http`'s `MockClient` is not affected.
+- **[source]** `package:http` 1.6 does not add `charset` to an `application/json` content type (`request.dart:20`). The request is still not a CORS "simple request", so a browser sends the preflight.
+- **[run]** Under fvm, `dart run` is a wrapper process around the Dart VM. A SIGINT sent only to the wrapper (for example `pkill -f pinpoint:bridge`) does not stop the bridge; Ctrl+C in a terminal signals both.
+- **[unverified]** In Chrome: the preflight and POST from the app to `http://127.0.0.1:4747`, the Private Network Access header, `Clipboard.setData` after the screenshot's awaits (the click's user activation must still hold), and the toast text for a refused connection (the browser gives only `XMLHttpRequest error`).
 
 ---
 
