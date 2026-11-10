@@ -4,7 +4,14 @@ A debug-only Flutter package. Click any widget in a running app, write a comment
 
 Web is the first target.
 
-> **Status: scaffold only (Session 0).** The package has no features yet. All files under `lib/src/` and `bin/` are empty on purpose. See `PLAN.md` for the build order.
+> **Status: Milestone 1 (Session 1).** The wrapper, the inspect mode (Alt+Shift+C or the launcher button), Esc and freeze (P while picking) work. Picking a widget comes in Milestone 2. Empty files under `lib/src/` and `bin/` are for later milestones. See `PLAN.md` for the build order.
+
+```dart
+MaterialApp(
+  builder: (context, child) => PinPointWrapper(child: child),
+  home: const HomeScreen(),
+)
+```
 
 ## What it will do
 
@@ -38,13 +45,16 @@ flutter analyze
 # the Session 0 spike: reads a real creation location from a Text widget
 flutter test test/source/spike_location_test.dart
 
+# Milestone 1: wrapper, modes, keys, launcher, freeze
+flutter test test/core
+
 # the example app
 cd example && flutter run -d chrome
 ```
 
 ## Example screens
 
-Long list, dialog and bottom sheet, nested navigator, `CustomPaint`, form with text fields, and `HtmlElementView` (web only).
+Counter and spinner, long list, dialog and bottom sheet, nested navigator, `CustomPaint`, form with text fields, and `HtmlElementView` (web only).
 
 ## License
 

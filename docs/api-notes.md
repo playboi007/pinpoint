@@ -27,6 +27,7 @@ Result of the "Verify first" lists in `PLAN.md`. Where this file differs from th
 | 14 | `registerExtension` on web | Works only with a debugger attached (DWDS). |
 | 15 | MCP transports and `package:dart_mcp` | Claude Code: stdio, HTTP, SSE. `dart_mcp`: stdio only. |
 | 16 | Tool list of the official Dart and Flutter MCP server | 14 tools by default. See overlap list. |
+| 17 | Facts found in Session 1 | Freeze jumps on resume; `FocusNode.context` outlives detach; `Overlay.wrap` exists. |
 
 ---
 
@@ -369,6 +370,15 @@ Do **not** duplicate:
 - `flutter_driver_command` — a different drive path (needs `flutter_driver`). Pinpoint's synthetic input does not need it.
 
 Extra tools exist behind `--enable` (`launch_app`, `list_devices`, `run_tests`, `stop_app`, `get_app_logs`, `get_active_location`, `create_project`, `dart_fix`, `dart_format`, ...). They are off by default. Re-check the list when the server version changes.
+
+## 17. Facts found in Session 1
+
+- **[source]** `Ticker.muted` (`scheduler/ticker.dart:119`) unschedules ticks but keeps `_startTime` (`:277`). After unmuting, elapsed time includes the muted period. `TickerMode` freeze therefore jumps animations forward on resume.
+- **[source]** `FocusNode.context` (`widgets/focus_manager.dart:638`) is set in `attach` and never cleared by `detach` (`:223`). Use `context?.mounted` to tell whether a saved node is still in the tree.
+- **[source]** `Overlay.wrap({child, clipBehavior, alwaysSizeToContent})` exists (`widgets/overlay.dart:501`). It needs no `OverlayEntry` lifecycle code.
+- **[source]** `Material(type: MaterialType.transparency)` does not absorb hits (`material/material.dart:491`). A layer built on it lets pointer events through except where a child takes them.
+- **[source]** `MaterialApp.builder` output is wrapped in `ScaffoldMessenger`, `Theme` and the `WidgetsApp` `Shortcuts`, `FocusTraversalGroup` and `Localizations` (`material/app.dart:1042`, `widgets/app.dart:1725`). A Pinpoint focus node that returns `handled` stops keys before those `Shortcuts`.
+- **[run-vm]** `WidgetsBinding.reassembleApplication()` completes after the next frame. In a test, pump before awaiting it.
 
 ---
 
