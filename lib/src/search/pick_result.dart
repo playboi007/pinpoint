@@ -276,7 +276,18 @@ class PickResult {
     final target = localOnly
         ? chain.nextLocal(chainIndex, up: up)
         : chainIndex + (up ? 1 : -1);
-    if (target == null || target < 0 || target >= chain.length) return this;
+    return target == null ? this : selecting(target);
+  }
+
+  /// This result with entry [target] of [chain] selected, as a click on a
+  /// breadcrumb does.
+  ///
+  /// The same instance when [target] is already selected, out of range, or
+  /// its element is gone.
+  PickResult selecting(int target) {
+    if (target == chainIndex || target < 0 || target >= chain.length) {
+      return this;
+    }
     if (!chain.elements[target].mounted) return this;
     return _build(
       position: position,

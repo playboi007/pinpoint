@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../core/pinpoint_controller.dart';
 import '../info/widget_info.dart';
 import '../search/pick_result.dart';
+import 'comment_form.dart';
 import 'highlight_painter.dart';
 
 /// Space kept between the panel and the viewport's edges.
@@ -23,41 +24,44 @@ double panelWidthFor(double viewportWidth) {
 /// The top-left of a [panel] that describes [target], inside [viewport].
 ///
 /// Below the target when it fits, then above, then to the right, then to
-/// the left. When no side fits, the panel goes below the target and is
-/// pushed back inside, over the target. Every result keeps [panelMargin]
-/// to each edge of the viewport, unless the panel is larger than the space.
+/// the left. When no side fits, the side with the most room, pushed back
+/// inside: the panel then covers as little of the target as it can, so the
+/// outline stays visible and the target can still be clicked. Every result
+/// keeps [panelMargin] to each edge of the viewport, unless the panel is
+/// larger than the space.
 ///
 /// All three are in one coordinate space (engineering rule 7).
 Offset placePanel(Rect target, Size panel, Size viewport) {
   if (!target.isFinite) {
     return clampPanel(Offset(viewport.width, 0), panel, viewport);
   }
-  final minTop = panelMargin;
-  final maxBottom = viewport.height - panelMargin;
-  final minLeft = panelMargin;
-  final maxRight = viewport.width - panelMargin;
-  bool fitsVertically(double top) =>
-      top >= minTop && top + panel.height <= maxBottom;
-  bool fitsHorizontally(double left) =>
-      left >= minLeft && left + panel.width <= maxRight;
-
   final below = target.bottom + panelGap;
-  if (fitsVertically(below)) {
-    return clampPanel(Offset(target.left, below), panel, viewport);
-  }
   final above = target.top - panelGap - panel.height;
-  if (fitsVertically(above)) {
-    return clampPanel(Offset(target.left, above), panel, viewport);
-  }
   final right = target.right + panelGap;
-  if (fitsHorizontally(right)) {
-    return clampPanel(Offset(right, target.top), panel, viewport);
-  }
   final left = target.left - panelGap - panel.width;
-  if (fitsHorizontally(left)) {
-    return clampPanel(Offset(left, target.top), panel, viewport);
+  // How far each side's panel would reach past the margin, in plan order.
+  // Zero or less means it fits.
+  final sides = <(double, Offset)>[
+    (
+      below + panel.height - (viewport.height - panelMargin),
+      Offset(target.left, below),
+    ),
+    (panelMargin - above, Offset(target.left, above)),
+    (
+      right + panel.width - (viewport.width - panelMargin),
+      Offset(right, target.top),
+    ),
+    (panelMargin - left, Offset(left, target.top)),
+  ];
+  var best = sides.first;
+  for (final side in sides) {
+    if (side.$1 <= 0) {
+      best = side;
+      break;
+    }
+    if (side.$1 < best.$1) best = side;
   }
-  return clampPanel(Offset(target.left, below), panel, viewport);
+  return clampPanel(best.$2, panel, viewport);
 }
 
 /// [position] moved the least distance that keeps a [panel] there inside
@@ -76,108 +80,208 @@ Offset clampPanel(Offset position, Size panel, Size viewport) {
   );
 }
 
+/// Which tab of the [InfoPanel] shows.
+enum PanelTab { info, comment }
+
+/// The crumbs to show for [pick]: the selected entry of its chain with up
+/// to [around] local entries above and below it, outermost first, and
+/// whether more exist beyond each end.
+({List<int> indices, bool moreAbove, bool moreBelow}) crumbsFor(
+  PickResult pick, {
+  int around = 3,
+}) {
+  final chain = pick.chain;
+  final above = <int>[];
+  int? i = chain.nextLocal(pick.chainIndex, up: true);
+  for (; i != null && above.length < around; i = chain.nextLocal(i, up: true)) {
+    above.add(i);
+  }
+  final moreAbove = i != null;
+  final below = <int>[];
+  int? j = chain.nextLocal(pick.chainIndex, up: false);
+  for (
+    ;
+    j != null && below.length < around;
+    j = chain.nextLocal(j, up: false)
+  ) {
+    below.add(j);
+  }
+  return (
+    indices: [...above.reversed, pick.chainIndex, ...below],
+    moreAbove: moreAbove,
+    moreBelow: j != null,
+  );
+}
+
 /// Covers the screen and places [InfoPanel] while there is a selection.
 ///
 /// Only the panel takes pointer events; the rest of the area lets them
 /// through to the trap.
 class InfoPanelLayer extends StatelessWidget {
-  const InfoPanelLayer({super.key, required this.controller});
+  const InfoPanelLayer({
+    super.key,
+    required this.controller,
+    required this.tab,
+    required this.commentFocus,
+    required this.onSend,
+    required this.onCopy,
+  });
 
   final PinPointController controller;
+  final ValueNotifier<PanelTab> tab;
+  final FocusNode commentFocus;
+  final VoidCallback onSend;
+  final VoidCallback onCopy;
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<PickResult?>(
-      valueListenable: controller.selection,
-      builder: (context, selection, _) {
+    return ListenableBuilder(
+      listenable: Listenable.merge([controller.selection, tab]),
+      builder: (context, _) {
+        final selection = controller.selection.value;
         if (selection == null) return const SizedBox.shrink();
-        return _PanelPlacement(controller: controller, selection: selection);
+        return _PanelPlacement(
+          controller: controller,
+          selection: selection,
+          panel: (onDrag) => InfoPanel(
+            selection: selection,
+            controller: controller,
+            tab: tab.value,
+            onTab: (value) => tab.value = value,
+            commentFocus: commentFocus,
+            onSend: onSend,
+            onCopy: onCopy,
+            onClose: controller.clearSelection,
+            onDrag: onDrag,
+          ),
+        );
       },
     );
   }
 }
 
 class _PanelPlacement extends StatefulWidget {
-  const _PanelPlacement({required this.controller, required this.selection});
+  const _PanelPlacement({
+    required this.controller,
+    required this.selection,
+    required this.panel,
+  });
 
   final PinPointController controller;
   final PickResult selection;
+
+  /// Builds the panel, given what a drag on its header does.
+  final InfoPanel Function(ValueChanged<Offset> onDrag) panel;
 
   @override
   State<_PanelPlacement> createState() => _PanelPlacementState();
 }
 
 class _PanelPlacementState extends State<_PanelPlacement> {
-  static const double _margin = 16;
+  /// The panel's box, read when a drag starts from the placed position.
+  final GlobalKey _box = GlobalKey(debugLabel: 'pinpoint panel box');
 
-  Offset _clamp(Offset position, Size area, double width) => Offset(
-    position.dx.clamp(0, (area.width - width).clamp(0, double.infinity)),
-    position.dy.clamp(
-      0,
-      (area.height - InfoPanel.headerHeight).clamp(0, double.infinity),
-    ),
-  );
+  void _drag(Offset delta) {
+    final box = _box.currentContext?.findRenderObject();
+    final area = context.findRenderObject();
+    if (box is! RenderBox || area is! RenderBox) return;
+    if (!box.hasSize || !area.hasSize) return;
+    // Several updates can arrive before the next layout, so add to the
+    // stored position, not to the one the last layout used.
+    final from =
+        widget.controller.panelPosition ??
+        box.localToGlobal(Offset.zero, ancestor: area);
+    setState(() {
+      widget.controller.panelPosition = clampPanel(
+        from + delta,
+        box.size,
+        area.size,
+      );
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
-      builder: (context, constraints) {
-        final area = constraints.biggest;
-        final width = area.width < InfoPanel.width
-            ? area.width
-            : InfoPanel.width;
-        // Clamped on every build too, so a window resize never leaves the
-        // header off screen.
-        final position = _clamp(
-          widget.controller.panelPosition ??
-              Offset(area.width - width - _margin, _margin),
-          area,
-          width,
-        );
-        return Stack(
-          children: [
-            Positioned(
-              left: position.dx,
-              top: position.dy,
-              width: width,
-              child: InfoPanel(
-                selection: widget.selection,
-                maxHeight: area.height - position.dy,
-                onClose: widget.controller.clearSelection,
-                onDrag: (delta) => setState(() {
-                  // Several updates can arrive before the next build, so add
-                  // to the stored position, not to the one this build used.
-                  final from = widget.controller.panelPosition ?? position;
-                  widget.controller.panelPosition = _clamp(
-                    _clamp(from, area, width) + delta,
-                    area,
-                    width,
-                  );
-                }),
-              ),
-            ),
-          ],
-        );
-      },
+      builder: (context, constraints) => CustomSingleChildLayout(
+        delegate: _PanelLayout(
+          // The layer covers PinPointWrapper from its top-left, and the
+          // wrapper sits at the view's origin in MaterialApp.builder, so a
+          // global rect is a rect in this layer too (engineering rule 7).
+          target: widget.selection.globalRect,
+          dragged: widget.controller.panelPosition,
+          width: panelWidthFor(constraints.maxWidth),
+        ),
+        child: KeyedSubtree(key: _box, child: widget.panel(_drag)),
+      ),
     );
   }
 }
 
-/// A card with the picked widget's [WidgetInfo]: labels, then sections.
+/// Lays the panel out at its own height, then places it next to the target
+/// with [placePanel], or where it was dragged. Clamped on every layout, so a
+/// window resize or a taller tab never pushes it off screen.
+class _PanelLayout extends SingleChildLayoutDelegate {
+  _PanelLayout({
+    required this.target,
+    required this.dragged,
+    required this.width,
+  });
+
+  final Rect target;
+  final Offset? dragged;
+  final double width;
+
+  @override
+  BoxConstraints getConstraintsForChild(BoxConstraints constraints) {
+    final height = constraints.maxHeight - 2 * panelMargin;
+    return BoxConstraints(
+      minWidth: width,
+      maxWidth: width,
+      maxHeight: height > 0 ? height : 0,
+    );
+  }
+
+  @override
+  Offset getPositionForChild(Size size, Size childSize) {
+    final at = dragged;
+    return at == null
+        ? placePanel(target, childSize, size)
+        : clampPanel(at, childSize, size);
+  }
+
+  @override
+  bool shouldRelayout(_PanelLayout oldDelegate) =>
+      target != oldDelegate.target ||
+      dragged != oldDelegate.dragged ||
+      width != oldDelegate.width;
+}
+
+/// A card for the selected widget: header, breadcrumb, then the Info tab
+/// (its [WidgetInfo]) or the Comment tab ([CommentForm]).
 ///
-/// Milestone 5 adds a Comment tab and Milestone 11 a Tweak tab; for now it
-/// shows the Info content only.
+/// Milestone 11 adds a Tweak tab.
 class InfoPanel extends StatelessWidget {
   const InfoPanel({
     super.key = panelKey,
     required this.selection,
+    required this.controller,
+    required this.tab,
+    required this.onTab,
+    required this.commentFocus,
+    required this.onSend,
+    required this.onCopy,
     required this.onClose,
-    required this.onDrag,
-    this.maxHeight = double.infinity,
+    this.onDrag,
   });
 
   static const Key panelKey = ValueKey<String>('pinpoint.infoPanel');
   static const Key headerKey = ValueKey<String>('pinpoint.infoPanel.header');
+  static const Key crumbsKey = ValueKey<String>('pinpoint.infoPanel.crumbs');
+  static const Key infoTabKey = ValueKey<String>('pinpoint.infoPanel.info');
+  static const Key commentTabKey = ValueKey<String>(
+    'pinpoint.infoPanel.comment',
+  );
 
   /// The widest the panel gets; narrower in a small viewport
   /// ([panelWidthFor]).
@@ -185,14 +289,59 @@ class InfoPanel extends StatelessWidget {
   static const double headerHeight = 48;
 
   final PickResult selection;
+  final PinPointController controller;
+  final PanelTab tab;
+  final ValueChanged<PanelTab> onTab;
+  final FocusNode commentFocus;
+  final VoidCallback onSend;
+  final VoidCallback onCopy;
   final VoidCallback onClose;
-  final ValueChanged<Offset> onDrag;
-  final double maxHeight;
+  final ValueChanged<Offset>? onDrag;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final WidgetInfo? info;
+    return Material(
+      elevation: 6,
+      borderRadius: BorderRadius.circular(8),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          GestureDetector(
+            key: headerKey,
+            // Count the movement from pointer down, so the panel stays
+            // under the pointer instead of lagging by the touch slop.
+            dragStartBehavior: DragStartBehavior.down,
+            onPanUpdate: onDrag == null
+                ? null
+                : (details) => onDrag!(details.delta),
+            child: _Header(selection: selection, onClose: onClose),
+          ),
+          _Crumbs(selection: selection, onSelect: controller.selectChainIndex),
+          _Tabs(tab: tab, onTab: onTab),
+          Flexible(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+              child: switch (tab) {
+                PanelTab.info => _info(theme),
+                PanelTab.comment => CommentForm(
+                  controller: controller,
+                  focusNode: commentFocus,
+                  onSend: onSend,
+                  onCopy: onCopy,
+                ),
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _info(ThemeData theme) {
+    final WidgetInfo info;
     try {
       info = WidgetInfo.fromRenderObject(selection.renderObject);
     } catch (_) {
@@ -200,38 +349,7 @@ class InfoPanel extends StatelessWidget {
       // frame; until then there is nothing to read.
       return const SizedBox.shrink();
     }
-    return Material(
-      elevation: 6,
-      borderRadius: BorderRadius.circular(8),
-      clipBehavior: Clip.antiAlias,
-      child: ConstrainedBox(
-        constraints: BoxConstraints(maxHeight: maxHeight),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            GestureDetector(
-              key: headerKey,
-              // Count the movement from pointer down, so the panel stays
-              // under the pointer instead of lagging by the touch slop.
-              dragStartBehavior: DragStartBehavior.down,
-              onPanUpdate: (details) => onDrag(details.delta),
-              child: _Header(selection: selection, onClose: onClose),
-            ),
-            Flexible(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-                child: _InfoContent(
-                  info: info,
-                  breadcrumb: breadcrumbLabel(selection),
-                  theme: theme,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+    return _InfoContent(info: info, theme: theme);
   }
 }
 
@@ -290,15 +408,146 @@ class _Header extends StatelessWidget {
   }
 }
 
-class _InfoContent extends StatelessWidget {
-  const _InfoContent({
-    required this.info,
-    required this.breadcrumb,
-    required this.theme,
+/// The local chain around the selection, outermost first. A click on a
+/// crumb selects that widget.
+class _Crumbs extends StatelessWidget {
+  const _Crumbs({required this.selection, required this.onSelect});
+
+  final PickResult selection;
+  final ValueChanged<int> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final crumbs = crumbsFor(selection);
+    final muted = theme.textTheme.bodySmall?.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+    );
+    Widget separator() => Text(' > ', style: muted);
+    return Padding(
+      key: InfoPanel.crumbsKey,
+      padding: const EdgeInsets.fromLTRB(8, 6, 8, 2),
+      child: Wrap(
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          if (crumbs.moreAbove) ...[Text('…', style: muted), separator()],
+          for (final (n, index) in crumbs.indices.indexed) ...[
+            if (n > 0) separator(),
+            _Crumb(
+              name: selection.chain[index].name,
+              selected: index == selection.chainIndex,
+              onTap: () => onSelect(index),
+            ),
+          ],
+          if (crumbs.moreBelow) ...[separator(), Text('…', style: muted)],
+        ],
+      ),
+    );
+  }
+}
+
+class _Crumb extends StatelessWidget {
+  const _Crumb({
+    required this.name,
+    required this.selected,
+    required this.onTap,
   });
 
+  final String name;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final style = theme.textTheme.bodySmall?.copyWith(
+      color: theme.colorScheme.primary,
+      fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
+    );
+    return InkWell(
+      onTap: selected ? null : onTap,
+      borderRadius: BorderRadius.circular(4),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+        child: Text(name, style: style),
+      ),
+    );
+  }
+}
+
+class _Tabs extends StatelessWidget {
+  const _Tabs({required this.tab, required this.onTab});
+
+  final PanelTab tab;
+  final ValueChanged<PanelTab> onTab;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        _TabButton(
+          key: InfoPanel.infoTabKey,
+          label: 'Info',
+          selected: tab == PanelTab.info,
+          onTap: () => onTab(PanelTab.info),
+        ),
+        _TabButton(
+          key: InfoPanel.commentTabKey,
+          label: 'Comment',
+          selected: tab == PanelTab.comment,
+          onTap: () => onTab(PanelTab.comment),
+        ),
+      ],
+    );
+  }
+}
+
+class _TabButton extends StatelessWidget {
+  const _TabButton({
+    super.key,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final color = selected
+        ? theme.colorScheme.primary
+        : theme.colorScheme.onSurfaceVariant;
+    return Expanded(
+      child: InkWell(
+        onTap: onTap,
+        child: Container(
+          height: 36,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            border: Border(
+              bottom: BorderSide(
+                color: selected ? color : theme.dividerColor,
+                width: selected ? 2 : 1,
+              ),
+            ),
+          ),
+          child: Text(
+            label,
+            style: theme.textTheme.labelLarge?.copyWith(color: color),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _InfoContent extends StatelessWidget {
+  const _InfoContent({required this.info, required this.theme});
+
   final WidgetInfo info;
-  final String breadcrumb;
   final ThemeData theme;
 
   @override
@@ -309,7 +558,6 @@ class _InfoContent extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _Row(name: 'chain', label: breadcrumb),
         _Row(name: 'render', label: info.renderType),
         _Row(name: 'size', label: info.sizeLabel),
         _Row(name: 'position', label: info.positionLabel),

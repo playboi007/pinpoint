@@ -31,6 +31,12 @@ void main() {
     await tester.pump();
   }
 
+  /// A new selection opens the Comment tab (Milestone 5).
+  Future<void> showInfo(WidgetTester tester) async {
+    await tester.tap(find.byKey(InfoPanel.infoTabKey));
+    await tester.pump();
+  }
+
   final panel = find.byKey(InfoPanel.panelKey);
   final header = find.byKey(InfoPanel.headerKey);
   Finder inPanel(String text) =>
@@ -54,15 +60,16 @@ void main() {
   testWidgets('shows the WidgetInfo labels and sections', (tester) async {
     await tester.pumpWidget(host());
     await selectText(tester);
+    await showInfo(tester);
 
     final info = WidgetInfo.fromRenderObject(tester.renderObject(appText));
     expect(inPanel('RenderParagraph'), findsOneWidget);
     expect(inPanel(info.sizeLabel), findsOneWidget);
     expect(inPanel(info.positionLabel), findsOneWidget);
     expect(inPanel(info.constraintsLabel), findsOneWidget);
-    // The selected widget (Milestone 3 refines RichText to Text) and the
-    // section title.
-    expect(inPanel('Text'), findsNWidgets(2));
+    // The selected widget (Milestone 3 refines RichText to Text) in the
+    // header and the breadcrumb, and the section title.
+    expect(inPanel('Text'), findsNWidgets(3));
     expect(inPanel('Save'), findsOneWidget);
     expect(inPanel('16.0'), findsOneWidget);
   });
@@ -75,13 +82,15 @@ void main() {
 
     final selected = controller.selection.value!;
     expect(selected.index, 1);
-    expect(inPanel('${selected.element.widget.runtimeType}'), findsOneWidget);
+    // In the header and in the breadcrumb.
+    expect(inPanel('${selected.element.widget.runtimeType}'), findsNWidgets(2));
     expect(inPanel('2 of ${selected.candidates.length}'), findsOneWidget);
   });
 
   testWidgets('a click on the panel does not pick through it', (tester) async {
     await tester.pumpWidget(host());
     await selectText(tester);
+    await showInfo(tester);
     final before = controller.selection.value;
 
     await tester.tap(inPanel('RenderParagraph'));
@@ -89,10 +98,20 @@ void main() {
     expect(controller.selection.value, same(before));
   });
 
-  testWidgets('drags, clamped to the viewport', (tester) async {
+  testWidgets('drags, clamped to the viewport with a margin', (tester) async {
+    // Tall enough to move the panel down from its start.
+    tester.view
+      ..physicalSize = const Size(800, 1000)
+      ..devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
     await tester.pumpWidget(host());
     await selectText(tester);
+    // From a known place with room on every side.
+    controller.panelPosition = const Offset(200, 100);
+    await tester.drag(header, Offset.zero);
+    await tester.pump();
     final start = tester.getTopLeft(panel);
+    expect(start, const Offset(200, 100));
 
     await tester.drag(header, const Offset(-100, 50));
     await tester.pump();
@@ -100,15 +119,14 @@ void main() {
 
     await tester.drag(header, const Offset(-5000, -5000));
     await tester.pump();
-    expect(tester.getTopLeft(panel), Offset.zero);
+    expect(tester.getTopLeft(panel), const Offset(panelMargin, panelMargin));
 
     await tester.drag(header, const Offset(5000, 5000));
     await tester.pump();
     final screen = tester.getSize(find.byType(PinPointWrapper));
     final rect = tester.getRect(panel);
-    expect(rect.right, screen.width);
-    expect(rect.top, lessThan(screen.height), reason: 'header stays visible');
-    expect(tester.getRect(header).bottom, lessThanOrEqualTo(screen.height));
+    expect(rect.right, screen.width - panelMargin);
+    expect(rect.bottom, lessThanOrEqualTo(screen.height - panelMargin));
   });
 
   testWidgets('keeps its place across reselection and stop', (tester) async {

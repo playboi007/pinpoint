@@ -58,7 +58,15 @@ void main() {
     final textLine = lineOf(saveBarFile, "child: const Text('Save')");
     expect(panelText('Text'), findsWidgets);
     expect(panelText('example/$saveBarFile:$textLine'), findsOneWidget);
-    expect(panelText('Row > ElevatedButton > Text'), findsOneWidget);
+    final crumbs = find.byKey(
+      const ValueKey<String>('pinpoint.infoPanel.crumbs'),
+    );
+    for (final name in ['Row', 'ElevatedButton', 'Text']) {
+      expect(
+        find.descendant(of: crumbs, matching: find.text(name)),
+        findsOneWidget,
+      );
+    }
 
     // Arrow Up: the button, then the Row, then SaveBar in the form screen.
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
@@ -70,7 +78,8 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
     await tester.pump();
     final barLine = lineOf(formFile, 'SaveBar(');
-    expect(panelText('SaveBar'), findsOneWidget);
+    // In the header and in the breadcrumb.
+    expect(panelText('SaveBar'), findsNWidgets(2));
     expect(panelText('example/$formFile:$barLine'), findsOneWidget);
 
     await shortcut(tester); // back to idle

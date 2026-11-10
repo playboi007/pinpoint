@@ -122,7 +122,35 @@ void main() {
     ) async {
       await selectSave(tester, config: rooted);
       expect(inPanel('$saveBarFixture:$saveLine'), findsOneWidget);
-      expect(inPanel('Row > ElevatedButton > Text'), findsOneWidget);
+      // Milestone 5: one clickable crumb per local widget.
+      final crumbs = find.byKey(InfoPanel.crumbsKey);
+      final names = ['Row', 'ElevatedButton', 'Text'];
+      for (final name in names) {
+        expect(
+          find.descendant(of: crumbs, matching: find.text(name)),
+          findsOneWidget,
+        );
+      }
+      // Reading order: by line, then from the left. The crumbs wrap.
+      final places = [
+        for (final name in names)
+          tester.getTopLeft(
+            find.descendant(of: crumbs, matching: find.text(name)),
+          ),
+      ];
+      for (var i = 1; i < places.length; i++) {
+        final before = places[i - 1];
+        final after = places[i];
+        expect(
+          after.dy > before.dy ||
+              (after.dy == before.dy && after.dx > before.dx),
+          isTrue,
+          reason: 'outermost first: ${names[i - 1]} before ${names[i]}',
+        );
+      }
+      // The body of the Info tab.
+      await tester.tap(find.byKey(InfoPanel.infoTabKey));
+      await tester.pump();
       expect(inPanel('RenderParagraph'), findsOneWidget);
     });
 

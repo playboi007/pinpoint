@@ -46,7 +46,18 @@ void main() {
       );
     });
 
-    test('over the target, clamped, when no side fits', () {
+    test('when no side fits, the side with the most room', () {
+      // A 300 px tall, 360 px wide panel reaches past the margin by 52 px
+      // below, 100 px above, 12 px to the right and 368 px to the left.
+      const target = Rect.fromLTWH(12, 220, 900, 232);
+      final at = placePanel(target, panel, viewport);
+      expect(at, Offset(viewport.width - margin - panel.width, 220));
+      // Pulled back 12 px, less the 8 px gap: 4 px over the target.
+      final covered = (at & panel).intersect(target);
+      expect(covered.width, closeTo(4, 1e-9));
+    });
+
+    test('over the target, clamped, when no side fits at all', () {
       const target = Rect.fromLTWH(0, 0, 1280, 720);
       final rect = placed(target);
       expect(inside(rect, viewport), isTrue);

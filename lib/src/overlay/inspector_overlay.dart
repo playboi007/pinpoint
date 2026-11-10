@@ -2,9 +2,12 @@ import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
+import '../capture/context_collector.dart';
 import '../core/pinpoint_config.dart';
 import '../core/pinpoint_controller.dart';
+import '../model/annotation.dart';
 import '../search/source_resolver.dart';
+import '../sink/pinpoint_sink.dart';
 import 'highlight_painter.dart';
 import 'info_panel.dart';
 import 'pick_tracker.dart';
@@ -60,9 +63,20 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     skipTraversal: true,
   );
 
+  /// The comment field's focus.
+  final FocusNode _commentFocus = FocusNode(debugLabel: 'pinpoint comment');
+
+  /// The info panel's tab. A new selection from picking opens Comment.
+  final ValueNotifier<PanelTab> _tab = ValueNotifier<PanelTab>(
+    PanelTab.comment,
+  );
+
+  final ContextCollector _collector = ContextCollector();
+
   /// The app's focus when the mode became active, restored on return to idle.
   FocusNode? _appFocus;
   bool _wasActive = false;
+  PinPointMode _lastMode = PinPointMode.idle;
 
   late PickTracker _tracker = _newTracker();
 
@@ -106,10 +120,17 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     widget.controller.removeListener(_onControllerChanged);
     _tracker.dispose();
     _holder.dispose();
+    _commentFocus.dispose();
+    _tab.dispose();
     super.dispose();
   }
 
   void _onControllerChanged() {
+    final mode = widget.controller.mode;
+    if (mode == PinPointMode.commenting && _lastMode == PinPointMode.picking) {
+      _tab.value = PanelTab.comment;
+    }
+    _lastMode = mode;
     final active = widget.controller.isActive;
     if (active == _wasActive) return;
     _wasActive = active;
@@ -142,6 +163,42 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
       _holder.unfocus();
     }
   }
+
+  /// Collects the note and gives it to every sink, in order. Goes idle and
+  /// clears the comment when all of them took it; otherwise back to
+  /// commenting with the comment kept.
+  Future<void> _send() async {
+    final controller = widget.controller;
+    final selection = controller.selection.value;
+    final draft = controller.draft;
+    if (selection == null || !draft.hasText) return;
+    if (!controller.submit()) return;
+    final Annotation note;
+    try {
+      // Pinpoint's own context: the page is read above the app.
+      note = _collector.collect(
+        selection,
+        draft.text.text,
+        draft.intent,
+        context: context,
+      );
+    } catch (error) {
+      controller.sendFailed();
+      return;
+    }
+    // Milestone 6: capture the screenshot here when
+    // draft.includeScreenshot is set.
+    final results = await sendToSinks(note, widget.config.sinks);
+    if (!mounted) return;
+    if (results.isNotEmpty && results.every((result) => result.ok)) {
+      draft.text.clear();
+      controller.sendSucceeded();
+    } else {
+      controller.sendFailed();
+    }
+  }
+
+  void _copy() {}
 
   @override
   Widget build(BuildContext context) {
@@ -204,7 +261,13 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
                       ),
                     ),
                     // Above the trap, so clicks on the panel never pick.
-                    InfoPanelLayer(controller: widget.controller),
+                    InfoPanelLayer(
+                      controller: widget.controller,
+                      tab: _tab,
+                      commentFocus: _commentFocus,
+                      onSend: _send,
+                      onCopy: _copy,
+                    ),
                     // Above the trap, so it can always stop picking. Always
                     // offered by default: some shortcuts never reach Flutter.
                     if (widget.config.showLauncher)

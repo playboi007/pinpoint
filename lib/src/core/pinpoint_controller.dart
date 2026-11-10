@@ -1,7 +1,7 @@
-import 'dart:ui' show Offset;
-
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 
+import '../model/annotation.dart';
 import '../search/pick_result.dart';
 
 /// What Pinpoint is doing right now.
@@ -18,6 +18,53 @@ enum PinPointMode {
 
   /// The note is on its way to the sinks.
   sending,
+}
+
+/// The comment being written: text, intent and whether to attach a
+/// screenshot.
+///
+/// It lives in the controller, not in the form, so it survives Esc, a new
+/// selection, a closed panel and a failed send. Only a successful send
+/// clears the text.
+class CommentDraft extends ChangeNotifier {
+  /// The comment field's text. Listen to it for edits; this draft notifies
+  /// only for [intent] and [includeScreenshot].
+  final TextEditingController text = TextEditingController();
+
+  AnnotationIntent _intent = AnnotationIntent.improve;
+  bool _includeScreenshot = true;
+
+  AnnotationIntent get intent => _intent;
+  set intent(AnnotationIntent value) {
+    if (value == _intent) return;
+    _intent = value;
+    notifyListeners();
+  }
+
+  /// On by default. The screenshot can show personal data that text
+  /// masking never sees, so the form shows this box on every send.
+  bool get includeScreenshot => _includeScreenshot;
+  set includeScreenshot(bool value) {
+    if (value == _includeScreenshot) return;
+    _includeScreenshot = value;
+    notifyListeners();
+  }
+
+  /// Whether anything but white space is typed.
+  bool get hasText => text.text.trim().isNotEmpty;
+
+  /// Whether an input method is composing text (for example Japanese input
+  /// before the candidate is chosen). Pinpoint's keys leave it alone then.
+  bool get composing {
+    final range = text.value.composing;
+    return range.isValid && !range.isCollapsed;
+  }
+
+  @override
+  void dispose() {
+    text.dispose();
+    super.dispose();
+  }
 }
 
 /// The mode state machine, plus hover, selection and freeze state.
@@ -49,6 +96,9 @@ class PinPointController extends ChangeNotifier {
     null,
   );
   final ValueNotifier<bool> _measuring = ValueNotifier<bool>(false);
+
+  /// The comment being written. Kept until a send succeeds.
+  final CommentDraft draft = CommentDraft();
 
   /// The current mode.
   PinPointMode get mode => _mode;
@@ -92,9 +142,13 @@ class PinPointController extends ChangeNotifier {
       _move(from: PinPointMode.idle, to: PinPointMode.picking);
 
   /// picking -> commenting, selecting [pick]. In commenting, replaces the
-  /// selection and stays in commenting.
+  /// selection and stays in commenting, unless a comment is typed.
   bool select(PickResult pick) {
     if (_mode == PinPointMode.commenting) {
+      // A click outside the panel is ambiguous. With a comment typed it does
+      // nothing, so a stray click never takes the comment off its widget.
+      // The breadcrumb, or Esc and a click, still choose another one.
+      if (draft.hasText) return false;
       _selection.value = pick;
       return true;
     }
@@ -182,6 +236,19 @@ class PinPointController extends ChangeNotifier {
     return true;
   }
 
+  /// Selects entry [chainIndex] of the selection's chain, as a click on a
+  /// breadcrumb does. Keeps the mode.
+  ///
+  /// Returns whether the selection changed.
+  bool selectChainIndex(int chainIndex) {
+    final current = _selection.value;
+    if (current == null) return false;
+    final next = current.selecting(chainIndex);
+    if (identical(next, current)) return false;
+    _selection.value = next;
+    return true;
+  }
+
   /// Pauses or resumes the app's tickers.
   void toggleFreeze() {
     _frozen = !_frozen;
@@ -213,6 +280,7 @@ class PinPointController extends ChangeNotifier {
     _hovered.dispose();
     _selection.dispose();
     _measuring.dispose();
+    draft.dispose();
     super.dispose();
   }
 }

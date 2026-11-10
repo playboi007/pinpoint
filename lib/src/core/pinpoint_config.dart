@@ -1,10 +1,11 @@
 import 'package:flutter/foundation.dart';
 
+import '../sink/pinpoint_sink.dart';
 import 'keymap.dart';
 
 /// Settings for [PinPointWrapper].
 ///
-/// Later milestones add sinks, the bridge URL and more.
+/// Later milestones add the bridge URL and more.
 @immutable
 class PinPointConfig {
   const PinPointConfig({
@@ -13,7 +14,12 @@ class PinPointConfig {
     this.shortcut = PinPointShortcut.altShiftC,
     this.projectRoot = const String.fromEnvironment('PINPOINT_ROOT'),
     this.localPathHints = const <String>[],
+    this.sinks = const <PinPointSink>[],
   });
+
+  /// Where Send delivers each note, in order. With none, Send reports that
+  /// nothing took the note; Copy as Markdown still works.
+  final List<PinPointSink> sinks;
 
   /// When false, the wrapper returns its child untouched and installs
   /// nothing. Defaults to [kDebugMode], so release builds carry nothing.
