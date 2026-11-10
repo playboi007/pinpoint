@@ -2,7 +2,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart';
 
 import '../search/render_search.dart';
+import 'extractors/constrained_box_extractor.dart';
 import 'extractors/decoration_extractor.dart';
+import 'extractors/flex_extractor.dart';
+import 'extractors/padding_extractor.dart';
 import 'extractors/paragraph_extractor.dart';
 
 /// Reads one section of [WidgetInfo] from a render object, or returns null
@@ -186,11 +189,15 @@ class WidgetInfo {
   /// One extractor per render type.
   static const List<InfoExtractor> renderExtractors = [
     paragraphSection,
+    paddingSection,
+    constrainedBoxSection,
     decorationSection,
+    coloredBoxSection,
+    flexSection,
   ];
 
   /// Values a parent keeps on its child, read from the child.
-  static const List<InfoExtractor> parentDataExtractors = [];
+  static const List<InfoExtractor> parentDataExtractors = [flexChildSection];
 
   /// Every extractor: [renderExtractors], then [parentDataExtractors].
   static const List<InfoExtractor> defaultExtractors = [

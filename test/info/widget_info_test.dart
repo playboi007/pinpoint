@@ -207,7 +207,8 @@ void main() {
       tester,
     ) async {
       const box = Key('box');
-      await pump(tester, const SizedBox(key: box));
+      // A SizedBox has a Size section since Milestone 11.
+      await pump(tester, const IgnorePointer(key: box));
       expect(infoOf(tester, find.byKey(box)).sections, isEmpty);
     });
   });
