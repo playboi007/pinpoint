@@ -14,7 +14,8 @@ import 'subtree_outline.dart';
 ///
 /// Each payload field has its own collector. One that throws records the
 /// field's name in [Annotation.errors] and leaves the field empty, so the
-/// note is still sent.
+/// note is still sent. Each field is capped as it is read, and the whole
+/// note is then cut to [maxPayloadBytes] (engineering rule 9).
 ///
 /// Nothing here subscribes an app element to an inherited widget
 /// (engineering rule 3): reads go through `getInheritedWidgetOfExactType`
@@ -109,7 +110,7 @@ class ContextCollector {
       ),
       inherited: field('inherited', () => _inherited(selection.element)),
       errors: fields.errors,
-    );
+    ).fitToBudget();
     lastElapsed = watch.elapsed;
     assert(() {
       if (watch.elapsedMilliseconds > 16) {
@@ -144,7 +145,7 @@ class ContextCollector {
       url: url == null ? null : clipText(url.toString(), maxShortText),
       // A widget above the Navigator, or in an overlay entry, has no
       // ModalRoute; the URL is then the best guess.
-      route: _clip(_routeOf(selection.pickedElement) ?? routeFromUrl(url)),
+      route: _clip(_routeOf(selection) ?? routeFromUrl(url)),
       viewport: media == null
           ? null
           : PayloadSize(media.size.width, media.size.height),
@@ -155,17 +156,30 @@ class ContextCollector {
     );
   }
 
-  /// The name of the route [picked] is in, or null.
+  /// The name of the route the selection is in, or null.
   ///
   /// The one accepted exception to engineering rule 3: no public lookup
-  /// finds a route without depending on it. It is read on the picked
-  /// element, which for a pick by position is the render object's own
-  /// element, not a widget the app's author wrote a build method for, and
-  /// through the settings aspect only, so it rebuilds only if the route's
-  /// settings change.
-  static String? _routeOf(Element picked) {
+  /// finds a route without depending on it. It is read on the element that
+  /// owns the picked render object, which is not a widget the app's author
+  /// wrote a build method for, and through the settings aspect only, so it
+  /// rebuilds only if the route's settings change.
+  ///
+  /// Never on the picked element as such: [PickResult.forElement] can pick
+  /// any element, the route's own `_ModalScopeStatus` included. That
+  /// element would then depend on itself, and the framework asserts when
+  /// the route's status next changes. A render object's element is never an
+  /// inherited element.
+  static String? _routeOf(PickResult selection) {
     try {
-      return ModalRoute.settingsOf(picked)?.name;
+      final picked = selection.pickedElement;
+      final creator = selection.pickedRenderObject.debugCreator;
+      final owner = picked is RenderObjectElement
+          ? picked
+          : creator is DebugCreator
+          ? creator.element
+          : null;
+      if (owner == null || !owner.mounted) return null;
+      return ModalRoute.settingsOf(owner)?.name;
     } catch (_) {
       return null;
     }

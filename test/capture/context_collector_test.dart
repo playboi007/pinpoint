@@ -229,6 +229,57 @@ void main() {
     });
   });
 
+  testWidgets('the route is read safely for any element, the route\'s own '
+      'inherited element included', (tester) async {
+    final navigator = GlobalKey<NavigatorState>();
+    await tester.pumpWidget(
+      MaterialApp(
+        navigatorKey: navigator,
+        builder: (context, child) =>
+            PinPointWrapper(controller: controller, child: child),
+        home: const OrderPage(),
+      ),
+    );
+    // Every element between the app and the page's label, the route's
+    // own `_ModalScopeStatus` among them.
+    final label = tester.element(find.text('Save changes'));
+    final elements = <Element>[label];
+    label.visitAncestorElements((e) {
+      elements.add(e);
+      return e.widget is! Navigator;
+    });
+    expect(
+      elements.map((e) => e.widget.runtimeType.toString()),
+      contains('_ModalScopeStatus'),
+    );
+    for (final element in elements) {
+      final pick = PickResult.forElement(
+        element,
+        rootElement: tester.binding.rootElement!,
+      );
+      if (pick == null) continue;
+      collect(tester, pick);
+    }
+    final route = collect(
+      tester,
+      PickResult.forElement(
+        elements.firstWhere(
+          (e) => e.widget.runtimeType.toString() == '_ModalScopeStatus',
+        ),
+        rootElement: tester.binding.rootElement!,
+      )!,
+    ).page.route;
+    expect(route, '/');
+
+    // A new route changes the old route's status, which notifies its
+    // dependents. A self-dependency would assert here.
+    navigator.currentState!.push(
+      MaterialPageRoute<void>(builder: (_) => const Text('next')),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('inherited values are read without subscribing', (tester) async {
     await tester.pumpWidget(
       host(
