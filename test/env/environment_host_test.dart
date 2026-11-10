@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pinpoint/pinpoint.dart';
 import 'package:pinpoint/src/env/device_presets.dart';
-import 'package:pinpoint/src/env/environment_controller.dart';
 import 'package:pinpoint/src/env/environment_host.dart';
 
 /// Milestone 9, build step 2: what the environment host provides. Each test
@@ -155,7 +154,15 @@ void main() {
         ),
       );
       await set(tester, (e) => e.copyWith(safeArea: () => notchSafeArea));
-      final media = MediaQuery.of(tester.element(find.byType(SafeArea)));
+      // The app's SafeArea, not the one of Pinpoint's what-if bar.
+      final media = MediaQuery.of(
+        tester.element(
+          find.descendant(
+            of: find.byType(Scaffold),
+            matching: find.byType(SafeArea),
+          ),
+        ),
+      );
       expect(media.padding, notchSafeArea);
       expect(media.viewPadding, notchSafeArea);
       expect(tester.getRect(find.byKey(_probeKey)).top, 59);

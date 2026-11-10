@@ -20,6 +20,7 @@ import '../sink/bridge_client.dart';
 import '../sink/http_sink.dart';
 import '../sink/markdown_formatter.dart';
 import '../sink/pinpoint_sink.dart';
+import 'environment_panel.dart';
 import 'highlight_painter.dart';
 import 'info_panel.dart';
 import 'note_view.dart';
@@ -95,6 +96,9 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
   final ValueNotifier<List<HttpSink>> _offline = ValueNotifier<List<HttpSink>>(
     const <HttpSink>[],
   );
+
+  /// Whether the what-if panel is open. It closes when the mode goes idle.
+  final ValueNotifier<bool> _environmentPanel = ValueNotifier<bool>(false);
 
   /// Counts health checks, so an older one never overwrites a newer one.
   int _healthCheck = 0;
@@ -233,6 +237,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     _tab.dispose();
     _toasts.dispose();
     _offline.dispose();
+    _environmentPanel.dispose();
     super.dispose();
   }
 
@@ -244,6 +249,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     // Polls only while active: an idle overlay must not keep the network
     // busy or the tab awake.
     _sync?.active = widget.controller.isActive;
+    if (mode == PinPointMode.idle) _environmentPanel.value = false;
     if (previous == PinPointMode.idle) {
       _saveAppFocus();
       // Once per start, never per frame (rule 2), and never while idle.
@@ -638,6 +644,10 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
 
   @override
   Widget build(BuildContext context) {
+    // The app's Material version, found as a widget: no dependency.
+    final material3 =
+        context.findAncestorWidgetOfExactType<Theme>()?.data.useMaterial3 ??
+        true;
     // `MaterialApp.builder` sits above the Navigator, so there is no Overlay
     // ancestor here. Text fields and tooltips in Pinpoint's UI need one.
     return Theme(
@@ -708,6 +718,18 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
                       onSaveDraft: _saveDraft,
                       onCopy: _copy,
                       noteActions: _noteActions,
+                    ),
+                    // Above the trap, so clicks on it never pick.
+                    EnvironmentPanelLayer(
+                      controller: widget.controller,
+                      panelOpen: _environmentPanel,
+                      themeVariants: widget.config.themeVariants.keys.toList(),
+                      material3: material3,
+                    ),
+                    // In idle too while an override is active.
+                    EnvironmentBar(
+                      controller: widget.controller,
+                      panelOpen: _environmentPanel,
                     ),
                     if (widget.controller.isActive)
                       ValueListenableBuilder<List<HttpSink>>(

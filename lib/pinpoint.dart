@@ -8,6 +8,8 @@ export 'src/core/pinpoint_config.dart';
 export 'src/core/pinpoint_controller.dart'
     show CommentDraft, PinPointController, PinPointMode;
 export 'src/core/pinpoint_wrapper.dart';
+export 'src/env/environment_controller.dart'
+    show Environment, EnvironmentController;
 export 'src/info/widget_info.dart'
     show InfoExtractor, InfoProperty, InfoSection, WidgetInfo;
 export 'src/model/annotation.dart'

@@ -5,7 +5,7 @@ import 'dart:ui' show ClipOp;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
-import 'package:flutter/scheduler.dart' show SchedulerPhase, timeDilation;
+import 'package:flutter/scheduler.dart' show timeDilation;
 
 import '../core/hook_registry.dart';
 import 'device_presets.dart';
@@ -487,14 +487,13 @@ class EnvironmentGlobals {
   /// state. A wrapper that owns its controller loses the environment; pass
   /// a `controller` to keep it. On web every platform has that layer.
   static void reassemble() {
-    final binding = WidgetsBinding.instance;
-    if (binding.schedulerPhase == SchedulerPhase.idle) {
-      unawaited(binding.reassembleApplication());
-      return;
-    }
-    // Never inside a frame (an environment set before the wrapper was
-    // built is applied from initState): a reassemble draws a warm-up frame
-    // of its own, and in a test that frame runs at once, inside this one.
-    Timer.run(() => unawaited(binding.reassembleApplication()));
+    // On the next turn of the event loop, between frames: never inside a
+    // frame, a build (an environment set before the wrapper was built is
+    // applied from initState) or a pointer event. A reassemble draws a
+    // warm-up frame of its own; in a test that frame runs at once, and
+    // inside another frame it fails.
+    Timer.run(
+      () => unawaited(WidgetsBinding.instance.reassembleApplication()),
+    );
   }
 }

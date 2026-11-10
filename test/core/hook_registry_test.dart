@@ -127,8 +127,8 @@ void main() {
     ).apply(const Environment(platform: TargetPlatform.iOS, timeDilation: 5));
     expect(debugDefaultTargetPlatformOverride, TargetPlatform.iOS);
     expect(timeDilation, 5);
-    // The platform change reassembles the app; let that frame finish.
-    await tester.pump();
+    // The platform change reassembles the app after a one-shot timer.
+    await tester.pump(Duration.zero);
 
     registry.dispose();
     expect(debugDefaultTargetPlatformOverride, isNull);

@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pinpoint/pinpoint.dart';
-import 'package:pinpoint/src/env/environment_controller.dart';
 
 /// Milestone 9, build step 2 (last part): the two globals, platform and
 /// slow motion, set through HookRegistry.
@@ -23,7 +22,9 @@ void main() {
     Environment Function(Environment e) change,
   ) async {
     controller.environment.update(change);
-    // The platform change reassembles the app, which ends with a frame.
+    // A platform change reassembles the app after a one-shot timer; a
+    // duration lets fake time fire it.
+    await tester.pump(Duration.zero);
     await tester.pump();
   }
 
@@ -79,6 +80,7 @@ void main() {
     expect(_Probe.reassembles, before + 1);
 
     controller.environment.reset();
+    await tester.pump(Duration.zero);
     await tester.pump();
     expect(_Probe.reassembles, before + 2);
     expect(debugDefaultTargetPlatformOverride, isNull);
@@ -92,6 +94,7 @@ void main() {
       expect(timeDilation, step);
     }
     controller.environment.reset();
+    await tester.pump(Duration.zero);
     await tester.pump();
     expect(timeDilation, 1.0);
   });
@@ -118,8 +121,6 @@ void main() {
       timeDilation: 2,
     );
     await tester.pumpWidget(_App(controller: controller));
-    // Applied in initState, inside a build: the reassemble waits for a
-    // one-shot timer. A duration lets fake time fire it.
     await tester.pump(Duration.zero);
     await tester.pump();
     expect(tester.takeException(), isNull);
