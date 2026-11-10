@@ -162,6 +162,12 @@ class SourcePaths {
     return path.substring(root.length + 1);
   }
 
+  /// Whether [location] (a creation-location URI) is [file], a path as
+  /// [relativePath] gives it. Case is ignored unless [caseSensitive].
+  bool sameFile(String location, String file) =>
+      _fold(relativePath(location)) ==
+      _fold(relativePath(normalizeSourcePath(file)));
+
   /// A short form of [file] for labels: relative to [projectRoot] when
   /// under it. Otherwise from the package directory, for example
   /// `example/lib/screens/form.dart`, or the whole path when there is no

@@ -659,3 +659,130 @@ String clipText(String text, int max) {
 }
 
 String _two(int n) => n.toString().padLeft(2, '0');
+
+/// Where a note's pin belongs, in terms that outlive the widget.
+///
+/// A pin cannot hold an `Element`: elements die on rebuild, hot reload and
+/// restart. The anchor names the widget by its constructor call instead,
+/// and `SourceIndex` finds the live element again.
+class NoteAnchor {
+  const NoteAnchor({
+    this.file,
+    this.line,
+    this.column,
+    this.widget,
+    this.key,
+    this.ordinal = 0,
+    this.itemIndex,
+    this.route,
+  });
+
+  /// [json] (a [toJson] map) as an anchor. Reads defensively: a field of
+  /// the wrong type is left out.
+  factory NoteAnchor.fromJson(Map<String, Object?> json) {
+    final ordinal = json['ordinal'];
+    return NoteAnchor(
+      file: _stringOrNull(json['file']),
+      line: _intOrNull(json['line']),
+      column: _intOrNull(json['column']),
+      widget: _stringOrNull(json['widget']),
+      key: _stringOrNull(json['key']),
+      ordinal: ordinal is int && ordinal >= 0 ? ordinal : 0,
+      itemIndex: _intOrNull(json['itemIndex']),
+      route: _stringOrNull(json['route']),
+    );
+  }
+
+  /// The source file, as in [SourceRef.file]: relative to the project root
+  /// when under it. Null outside debug, where no location exists.
+  final String? file;
+
+  /// 1-based.
+  final int? line;
+
+  /// 1-based.
+  final int? column;
+
+  /// The widget's type name, for example `Text`.
+  final String? widget;
+
+  /// The widget's key as text, for example `[<'save'>]`, or null.
+  final String? key;
+
+  /// Which of the widgets that match the rest of the anchor, in tree order.
+  /// One constructor call builds every row of a list.
+  final int ordinal;
+
+  /// The index of the lazy-list item (`ListView.builder`, `GridView`) the
+  /// widget is in, or null outside one. A scrolled list builds other items,
+  /// so the [ordinal] alone would move to another row.
+  final int? itemIndex;
+
+  /// The route the note was written on, for the agent and the bridge.
+  final String? route;
+
+  /// Whether a live widget can be looked up: only with a file and a line.
+  bool get resolvable => file != null && line != null;
+
+  /// This anchor at another place in the same file, for a widget that
+  /// moved after an edit. Each later edit is then measured from here.
+  NoteAnchor movedTo({required int line, int? column}) => NoteAnchor(
+    file: file,
+    line: line,
+    column: column,
+    widget: widget,
+    key: key,
+    ordinal: ordinal,
+    itemIndex: itemIndex,
+    route: route,
+  );
+
+  /// This anchor with [ordinal].
+  NoteAnchor withOrdinal(int ordinal) => NoteAnchor(
+    file: file,
+    line: line,
+    column: column,
+    widget: widget,
+    key: key,
+    ordinal: ordinal,
+    itemIndex: itemIndex,
+    route: route,
+  );
+
+  Map<String, Object?> toJson() => {
+    'file': file,
+    'line': line,
+    'column': column,
+    'widget': widget,
+    'key': key,
+    'ordinal': ordinal,
+    'itemIndex': itemIndex,
+    'route': route,
+  };
+
+  @override
+  bool operator ==(Object other) =>
+      other is NoteAnchor &&
+      other.file == file &&
+      other.line == line &&
+      other.column == column &&
+      other.widget == widget &&
+      other.key == key &&
+      other.ordinal == ordinal &&
+      other.itemIndex == itemIndex &&
+      other.route == route;
+
+  @override
+  int get hashCode =>
+      Object.hash(file, line, column, widget, key, ordinal, itemIndex, route);
+
+  @override
+  String toString() =>
+      'NoteAnchor(${widget ?? '?'} at ${file ?? '?'}:${line ?? '?'}'
+      '${itemIndex == null ? '' : ', item $itemIndex'}'
+      '${ordinal == 0 ? '' : ', #$ordinal'})';
+}
+
+String? _stringOrNull(Object? value) => value is String ? value : null;
+
+int? _intOrNull(Object? value) => value is int ? value : null;
