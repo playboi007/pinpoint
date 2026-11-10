@@ -42,7 +42,8 @@ class PinPointWrapper extends StatefulWidget {
 }
 
 class _PinPointWrapperState extends State<PinPointWrapper> {
-  final GlobalKey _appKey = GlobalKey(debugLabel: 'pinpoint app');
+  // Late, so a disabled wrapper (release builds) never creates it.
+  late final GlobalKey _appKey = GlobalKey(debugLabel: 'pinpoint app');
   PinPointController? _ownController;
   HookRegistry? _hooks;
 
