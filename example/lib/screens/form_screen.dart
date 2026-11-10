@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../widgets/save_bar.dart';
+
 class FormScreen extends StatefulWidget {
   const FormScreen({super.key});
 
@@ -40,9 +42,9 @@ class _FormScreenState extends State<FormScreen> {
               maxLines: 5,
             ),
             const SizedBox(height: 24),
-            FilledButton(
-              onPressed: () => _formKey.currentState!.validate(),
-              child: const Text('Submit'),
+            SaveBar(
+              onSave: () => _formKey.currentState!.validate(),
+              onCancel: () => _formKey.currentState!.reset(),
             ),
           ],
         ),
