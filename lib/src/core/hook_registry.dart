@@ -58,6 +58,11 @@ class HookRegistry {
     return slot;
   }
 
+  /// Runs [restore] on [dispose], with the slots, newest first: for a
+  /// global that a hook changes as a side effect, such as the repaint
+  /// rainbow's color.
+  void onDispose(VoidCallback restore) => _restores.add(restore);
+
   /// Restores every slot, newest first. Safe to call more than once.
   void dispose() {
     for (final restore in _restores.reversed) {

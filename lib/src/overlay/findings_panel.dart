@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../core/note_book.dart';
 import '../core/pinpoint_controller.dart';
+import '../detect/debug_paint.dart';
 import '../detect/detector.dart';
 import '../detect/findings_controller.dart';
 import '../search/render_search.dart';
@@ -99,6 +100,7 @@ class FindingsPanel extends StatelessWidget {
     required this.findings,
     required this.notes,
     required this.onScan,
+    required this.onAudit,
     required this.onMakeNote,
     required this.onClose,
   });
@@ -110,6 +112,12 @@ class FindingsPanel extends StatelessWidget {
   static const Key closeKey = ValueKey<String>('pinpoint.findings.close');
   static const Key errorsKey = ValueKey<String>('pinpoint.findings.errors');
   static const Key imagesKey = ValueKey<String>('pinpoint.findings.images');
+  static const Key auditKey = ValueKey<String>('pinpoint.findings.audit');
+  static const Key rebuildsKey = ValueKey<String>('pinpoint.findings.rebuilds');
+
+  /// The chip of the debug paint [flag].
+  static Key paintKey(DebugPaintFlag flag) =>
+      ValueKey<String>('pinpoint.findings.paint.${flag.name}');
 
   /// The heading of the group of [kind].
   static Key groupKey(String kind) =>
@@ -131,6 +139,10 @@ class FindingsPanel extends StatelessWidget {
   final NoteBook notes;
 
   final VoidCallback onScan;
+
+  /// Runs the accessibility audit.
+  final VoidCallback onAudit;
+
   final void Function(Finding finding) onMakeNote;
   final VoidCallback onClose;
 
@@ -154,15 +166,18 @@ class FindingsPanel extends StatelessWidget {
                   _header(theme, all.length),
                   const Divider(height: 1),
                   _actions(),
-                  _switches(theme),
-                  const Divider(height: 1),
                   Expanded(
-                    child: all.isEmpty
-                        ? _empty(theme)
-                        : ListView(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            children: _groups(theme, all),
-                          ),
+                    child: ListView(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      children: [
+                        _switches(theme),
+                        const Divider(height: 1),
+                        if (all.isEmpty)
+                          _empty(theme)
+                        else
+                          ..._groups(theme, all),
+                      ],
+                    ),
                   ),
                 ],
               );
@@ -205,6 +220,18 @@ class FindingsPanel extends StatelessWidget {
           icon: const Icon(Icons.search, size: 18),
           label: const Text('Scan this screen'),
         ),
+        OutlinedButton.icon(
+          key: auditKey,
+          // Semantics stay on for the audit's frame only.
+          onPressed: findings.auditing ? null : onAudit,
+          icon: findings.auditing
+              ? const SizedBox.square(
+                  dimension: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.accessibility_new, size: 18),
+          label: const Text('Check accessibility'),
+        ),
         TextButton(
           key: clearKey,
           onPressed: findings.clear,
@@ -229,6 +256,39 @@ class FindingsPanel extends StatelessWidget {
           'Track oversized images',
           findings.trackImages,
           (on) => findings.trackImages = on,
+        ),
+        _switch(
+          rebuildsKey,
+          'Rebuild heat (top ten on scan)',
+          findings.trackRebuilds,
+          (on) => findings.trackRebuilds = on,
+        ),
+        if (findings.rebuildsTakenOver)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+            child: Text(
+              'Rebuild tracking was taken over by DevTools.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.error,
+              ),
+            ),
+          ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+          child: Wrap(
+            spacing: 6,
+            runSpacing: 4,
+            children: [
+              for (final flag in DebugPaintFlag.values)
+                FilterChip(
+                  key: paintKey(flag),
+                  label: Text(flag.label),
+                  visualDensity: VisualDensity.compact,
+                  selected: findings.debugPaint.contains(flag),
+                  onSelected: (on) => findings.setDebugPaint(flag, on: on),
+                ),
+            ],
+          ),
         ),
       ],
     ),
@@ -379,12 +439,14 @@ class FindingsPanelLayer extends StatelessWidget {
     required this.controller,
     required this.panelOpen,
     required this.onScan,
+    required this.onAudit,
     required this.onMakeNote,
   });
 
   final PinPointController controller;
   final ValueNotifier<bool> panelOpen;
   final VoidCallback onScan;
+  final VoidCallback onAudit;
   final void Function(Finding finding) onMakeNote;
 
   @override
@@ -403,6 +465,7 @@ class FindingsPanelLayer extends StatelessWidget {
                 findings: controller.findings,
                 notes: controller.notes,
                 onScan: onScan,
+                onAudit: onAudit,
                 onMakeNote: onMakeNote,
                 onClose: () => panelOpen.value = false,
               ),
@@ -414,27 +477,40 @@ class FindingsPanelLayer extends StatelessWidget {
   }
 }
 
-/// Outlines the finding under the pointer in the list. The rect is read
-/// again from its render object when the widget is still there, so it
-/// follows a scroll since the scan.
+/// Outlines the finding under the pointer in the list, and while rebuild
+/// heat is on, tints the rects of the hot spots. A rect is read again from
+/// its render object when the widget is still there, so it follows a
+/// scroll since the scan.
 class FindingPainter extends CustomPainter {
-  FindingPainter({required this.hovered, required this.origin})
-    : super(repaint: hovered);
+  FindingPainter({required this.findings, required this.origin})
+    : super(repaint: Listenable.merge([findings, findings.hovered]));
 
-  final ValueNotifier<Finding?> hovered;
+  final FindingsController findings;
 
   /// The painter's own top-left in global logical pixels.
   final Offset Function() origin;
 
   static const Color color = Color(0xFFE65100);
 
+  /// The tint of a rebuild hot spot.
+  static const Color heat = Color(0xFFD50000);
+
   @override
   void paint(Canvas canvas, Size size) {
-    final finding = hovered.value;
+    final shift = -origin();
+    if (findings.trackRebuilds) {
+      final tint = Paint()..color = heat.withValues(alpha: 0.18);
+      for (final finding in findings.findings) {
+        if (finding.kind != 'rebuild_heat') continue;
+        final rect = _liveRect(finding) ?? finding.rect;
+        if (rect != null) canvas.drawRect(rect.shift(shift), tint);
+      }
+    }
+    final finding = findings.hovered.value;
     if (finding == null) return;
     final rect = _liveRect(finding) ?? finding.rect;
     if (rect == null) return;
-    final local = rect.shift(-origin());
+    final local = rect.shift(shift);
     canvas
       ..drawRect(local, Paint()..color = color.withValues(alpha: 0.15))
       ..drawRect(
@@ -457,5 +533,5 @@ class FindingPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(FindingPainter oldDelegate) =>
-      !identical(oldDelegate.hovered, hovered);
+      !identical(oldDelegate.findings, findings);
 }

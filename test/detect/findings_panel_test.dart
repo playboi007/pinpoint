@@ -1,7 +1,9 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pinpoint/pinpoint.dart';
+import 'package:pinpoint/src/detect/debug_paint.dart';
 import 'package:pinpoint/src/detect/detector.dart';
 import 'package:pinpoint/src/overlay/environment_panel.dart';
 import 'package:pinpoint/src/overlay/findings_panel.dart';
@@ -302,5 +304,102 @@ void main() {
     controller.startPicking();
     await tester.pump();
     expect(find.byKey(FindingsPanel.panelKey), findsNothing);
+  });
+
+  group('build step 4 controls', () {
+    Future<void> pumpButtonPage(WidgetTester tester) async {
+      tester.view.physicalSize = const Size(1200, 1000) * 3;
+      tester.view.devicePixelRatio = 3;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        MaterialApp(
+          builder: (context, child) =>
+              PinPointWrapper(controller: controller, child: child),
+          home: Scaffold(
+            body: Center(
+              child: IconButton(
+                onPressed: () {},
+                icon: const Icon(Icons.add, size: 16),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints.tightFor(
+                  width: 24,
+                  height: 24,
+                ),
+                style: IconButton.styleFrom(
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    testWidgets('Check accessibility lists the audit, then semantics go '
+        'off again', (tester) async {
+      await pumpButtonPage(tester);
+      await openPanel(tester);
+      await tester.tap(find.byKey(FindingsPanel.auditKey));
+      // One frame builds the semantics; the contrast capture then needs
+      // real time, outside the fake clock.
+      for (var i = 0; i < 10 && controller.findings.auditing; i++) {
+        await tester.pump();
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)),
+        );
+      }
+      await tester.pump();
+      expect(controller.findings.auditing, isFalse);
+      expect(controller.findings.findings.map((f) => f.kind).toSet(), {
+        'unlabeled_action',
+        'small_tap_target',
+      });
+      // Pinpoint's own small buttons are not the app's.
+      expect(
+        controller.findings.findings.every(
+          (f) => f.data['widget'] == 'IconButton',
+        ),
+        isTrue,
+      );
+      expect(SemanticsBinding.instance.semanticsEnabled, isFalse);
+    }, semanticsEnabled: false);
+
+    testWidgets('with rebuild heat on, a scan lists the hot spots and tints '
+        'them', (tester) async {
+      await pumpHost(tester);
+      await openPanel(tester);
+      await tester.tap(find.byKey(FindingsPanel.rebuildsKey));
+      await tester.pump();
+      expect(controller.findings.trackRebuilds, isTrue);
+      for (var i = 0; i < 12; i++) {
+        showRow.value = !showRow.value;
+        await tester.pump();
+      }
+      await scan(tester);
+      final heat = controller.findings.findings
+          .where((f) => f.kind == 'rebuild_heat')
+          .toList();
+      expect(heat, isNotEmpty);
+      expect(heat.first.data['count'], greaterThanOrEqualTo(12));
+      expect(
+        find.byKey(InspectorOverlay.findingKey),
+        paints..rect(color: FindingPainter.heat.withValues(alpha: 0.18)),
+      );
+
+      await tester.tap(find.byKey(FindingsPanel.rebuildsKey));
+      await tester.pump();
+      expect(debugOnRebuildDirtyWidget, isNull);
+    });
+
+    testWidgets('the debug paint chips set the flags', (tester) async {
+      await pumpHost(tester);
+      await openPanel(tester);
+      await tester.tap(find.byKey(FindingsPanel.paintKey(DebugPaintFlag.size)));
+      await tester.pump();
+      expect(debugPaintSizeEnabled, isTrue);
+      await tester.tap(find.byKey(FindingsPanel.paintKey(DebugPaintFlag.size)));
+      await tester.pump();
+      expect(debugPaintSizeEnabled, isFalse);
+    });
   });
 }

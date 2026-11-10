@@ -1,8 +1,14 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart' show debugOnRebuildDirtyWidget;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pinpoint/src/core/hook_registry.dart';
+import 'package:pinpoint/src/detect/debug_paint.dart';
+import 'package:pinpoint/src/detect/detector.dart';
+import 'package:pinpoint/src/detect/detector_hooks.dart';
+import 'package:pinpoint/src/detect/findings_controller.dart';
 import 'package:pinpoint/src/env/environment_controller.dart';
 import 'package:pinpoint/src/env/environment_host.dart';
 
@@ -133,6 +139,49 @@ void main() {
     registry.dispose();
     expect(debugDefaultTargetPlatformOverride, isNull);
     expect(timeDilation, 1.0);
+  });
+
+  // Milestone 10 acceptance: disposing restores all hooks. Every detector
+  // on at once, then one dispose.
+  testWidgets('the detector hooks are restored on dispose', (tester) async {
+    final flutterError = FlutterError.onError;
+    final platformError = PlatformDispatcher.instance.onError;
+    final registry = HookRegistry();
+    final findings = FindingsController()
+      ..trackRebuilds = true
+      ..captureErrors = true
+      ..trackImages = true;
+    for (final flag in DebugPaintFlag.values) {
+      findings.setDebugPaint(flag, on: true);
+    }
+    final hooks = DetectorHooks(
+      registry: registry,
+      findings: findings,
+      appRoot: () => null,
+      locator: FindingLocator.new,
+    );
+    expect(FlutterError.onError, isNot(same(flutterError)));
+    expect(PlatformDispatcher.instance.onError, isNot(same(platformError)));
+    expect(debugOnPaintImage, isNotNull);
+    expect(debugOnRebuildDirtyWidget, isNotNull);
+    expect(debugPaintSizeEnabled, isTrue);
+    expect(debugPaintBaselinesEnabled, isTrue);
+    expect(debugPaintLayerBordersEnabled, isTrue);
+    expect(debugPaintPointersEnabled, isTrue);
+    expect(debugRepaintRainbowEnabled, isTrue);
+
+    registry.dispose();
+    expect(FlutterError.onError, same(flutterError));
+    expect(PlatformDispatcher.instance.onError, same(platformError));
+    expect(debugOnPaintImage, isNull);
+    expect(debugOnRebuildDirtyWidget, isNull);
+    expect(debugPaintSizeEnabled, isFalse);
+    expect(debugPaintBaselinesEnabled, isFalse);
+    expect(debugPaintLayerBordersEnabled, isFalse);
+    expect(debugPaintPointersEnabled, isFalse);
+    expect(debugRepaintRainbowEnabled, isFalse);
+    hooks.dispose();
+    findings.dispose();
   });
 
   test('dispose twice is safe', () {

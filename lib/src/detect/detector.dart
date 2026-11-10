@@ -170,14 +170,29 @@ class FindingLocator {
   }
 
   /// The location of the nearest local widget at or above [element].
-  SourceLocation? sourceOf(Element element) {
+  SourceLocation? sourceOf(Element element) => localEntryOf(element)?.location;
+
+  /// The nearest local widget at or above [element], or null.
+  ChainEntry? localEntryOf(Element element) {
     try {
       final top = boundary;
       final chain = top == null
           ? resolver.chain(element, boundary: element)
           : resolver.chain(element, boundary: top);
       final index = chain.defaultIndex;
-      return index == null ? null : chain[index].location;
+      return index == null ? null : chain[index];
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// The type name of the nearest local widget at or above [element], else
+  /// of [element]'s own widget: `IconButton`, not the `Semantics` inside it.
+  String? widgetNameOf(Element element) {
+    final local = localEntryOf(element);
+    if (local != null) return local.name;
+    try {
+      return element.widget.runtimeType.toString();
     } catch (_) {
       return null;
     }

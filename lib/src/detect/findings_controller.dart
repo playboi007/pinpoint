@@ -1,13 +1,15 @@
 import 'package:flutter/foundation.dart';
 
+import 'debug_paint.dart';
 import 'detector.dart';
 
 /// The findings on the current screen, and which detectors are on.
 ///
-/// Two sources feed it: a scan ("Scan this screen") replaces the scanned
-/// findings, and the hooks (errors, images painted too large) add captured
-/// ones as they happen. Both are deduplicated by [Finding.key], a scanned
-/// finding first, so a re-scan never piles up copies.
+/// Three sources feed it: a scan ("Scan this screen") replaces the
+/// scanned findings, the accessibility audit replaces the audited ones,
+/// and the hooks (errors, images painted too large) add captured ones as
+/// they happen. All are deduplicated by [Finding.key], a scanned finding
+/// first, so a re-scan never piles up copies.
 class FindingsController extends ChangeNotifier {
   /// At most this many captured findings are kept, newest last.
   static const int maxCaptured = 100;
@@ -16,13 +18,15 @@ class FindingsController extends ChangeNotifier {
   final ValueNotifier<Finding?> hovered = ValueNotifier<Finding?>(null);
 
   List<Finding> _scanned = const <Finding>[];
+  List<Finding> _audited = const <Finding>[];
   final List<Finding> _captured = <Finding>[];
   List<Finding>? _merged;
   bool _hasScanned = false;
 
-  /// Every finding, deduplicated: the last scan's, then the captured ones.
+  /// Every finding, deduplicated: the last scan's, the last audit's, then
+  /// the captured ones.
   List<Finding> get findings => _merged ??= List<Finding>.unmodifiable(
-    dedupeFindings([..._scanned, ..._captured]),
+    dedupeFindings([..._scanned, ..._audited, ..._captured]),
   );
 
   /// Whether a scan has run since the last [clear].
@@ -33,6 +37,23 @@ class FindingsController extends ChangeNotifier {
     _scanned = List<Finding>.unmodifiable(findings);
     _hasScanned = true;
     _changed();
+  }
+
+  /// The findings of the last accessibility audit replace the earlier
+  /// audit's.
+  void setAudited(List<Finding> findings) {
+    _audited = List<Finding>.unmodifiable(findings);
+    _changed();
+  }
+
+  bool _auditing = false;
+
+  /// Whether an accessibility audit is running.
+  bool get auditing => _auditing;
+  set auditing(bool value) {
+    if (value == _auditing) return;
+    _auditing = value;
+    notifyListeners();
   }
 
   /// Adds findings from a hook. One with the key of an earlier one
@@ -52,6 +73,7 @@ class FindingsController extends ChangeNotifier {
   /// Drops every finding, scanned and captured.
   void clear() {
     _scanned = const <Finding>[];
+    _audited = const <Finding>[];
     _captured.clear();
     _hasScanned = false;
     _changed();
@@ -77,6 +99,42 @@ class FindingsController extends ChangeNotifier {
   set trackImages(bool value) {
     if (value == _trackImages) return;
     _trackImages = value;
+    notifyListeners();
+  }
+
+  bool _trackRebuilds = false;
+  bool _rebuildsTakenOver = false;
+
+  /// Whether `debugOnRebuildDirtyWidget` counts rebuilds per element. Off
+  /// by default: the hook runs on every rebuild.
+  bool get trackRebuilds => _trackRebuilds;
+  set trackRebuilds(bool value) {
+    if (value == _trackRebuilds) return;
+    _trackRebuilds = value;
+    if (value) _rebuildsTakenOver = false;
+    notifyListeners();
+  }
+
+  /// Whether DevTools held or took the rebuild hook, so tracking stopped.
+  bool get rebuildsTakenOver => _rebuildsTakenOver;
+
+  /// Records that the rebuild hook was taken, and turns tracking off.
+  void rebuildsWereTakenOver() {
+    _rebuildsTakenOver = true;
+    _trackRebuilds = false;
+    notifyListeners();
+  }
+
+  Set<DebugPaintFlag> _debugPaint = const <DebugPaintFlag>{};
+
+  /// The debug paint flags turned on from the list.
+  Set<DebugPaintFlag> get debugPaint => _debugPaint;
+
+  void setDebugPaint(DebugPaintFlag flag, {required bool on}) {
+    if (_debugPaint.contains(flag) == on) return;
+    _debugPaint = Set<DebugPaintFlag>.unmodifiable(
+      on ? {..._debugPaint, flag} : (_debugPaint.toSet()..remove(flag)),
+    );
     notifyListeners();
   }
 

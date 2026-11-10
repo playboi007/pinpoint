@@ -291,6 +291,7 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
           appKey: _appKey,
           contentKey: _contentKey,
           config: widget.config,
+          detectors: _detectors,
         ),
       ],
     );

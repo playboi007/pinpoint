@@ -12,7 +12,9 @@ import '../capture/screenshot.dart';
 import '../core/note_sync.dart';
 import '../core/pinpoint_config.dart';
 import '../core/pinpoint_controller.dart';
+import '../detect/a11y_audit.dart';
 import '../detect/detector.dart';
+import '../detect/detector_hooks.dart';
 import '../detect/image_detector.dart';
 import '../detect/overflow_detector.dart';
 import '../detect/truncation_detector.dart';
@@ -47,6 +49,7 @@ class InspectorOverlay extends StatefulWidget {
     required this.appKey,
     required this.contentKey,
     required this.config,
+    this.detectors,
   });
 
   /// Key of the pointer trap that covers the app while a mode is active.
@@ -70,6 +73,10 @@ class InspectorOverlay extends StatefulWidget {
   final GlobalKey contentKey;
 
   final PinPointConfig config;
+
+  /// The hook-based detectors, for rebuild heat in a scan. Null in tests
+  /// that build the overlay alone.
+  final DetectorHooks? detectors;
 
   @override
   State<InspectorOverlay> createState() => _InspectorOverlayState();
@@ -584,20 +591,51 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
   void _scanFindings() {
     final root = widget.appKey.currentContext?.findRenderObject();
     if (root == null) return;
+    final locator = _locator();
+    final result = scanTree(root, [
+      const OverflowDetector(),
+      const TruncationDetector(),
+      ImageDetector(devicePixelRatio: MediaQuery.devicePixelRatioOf(context)),
+    ], locator: locator);
+    widget.controller.findings.setScanned([
+      ...result.findings,
+      // Source locations of hot spots are resolved here, when the list
+      // asks, never in the rebuild hook.
+      ...?widget.detectors?.rebuildFindings(locator),
+    ]);
+  }
+
+  FindingLocator _locator() {
     final content = widget.contentKey.currentContext;
-    final result = scanTree(
-      root,
-      [
-        const OverflowDetector(),
-        const TruncationDetector(),
-        ImageDetector(devicePixelRatio: MediaQuery.devicePixelRatioOf(context)),
-      ],
-      locator: FindingLocator(
-        resolver: _tracker.resolver,
-        boundary: content is Element ? content : null,
-      ),
+    return FindingLocator(
+      resolver: _tracker.resolver,
+      boundary: content is Element ? content : null,
     );
-    widget.controller.findings.setScanned(result.findings);
+  }
+
+  /// Runs the accessibility audit: semantics on for one frame, then a
+  /// capture for contrast.
+  Future<void> _auditAccessibility() async {
+    final findings = widget.controller.findings;
+    final root = widget.appKey.currentContext?.findRenderObject();
+    if (root == null || findings.auditing) return;
+    findings.auditing = true;
+    try {
+      final result = await runAccessibilityAudit(
+        root,
+        locator: _locator(),
+        devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
+      );
+      if (!mounted) return;
+      findings.setAudited(result);
+      if (result.isEmpty) _toasts.show('No accessibility problems found');
+    } catch (error) {
+      if (mounted) {
+        _toasts.show('Audit failed: ${_short(error)}', error: true);
+      }
+    } finally {
+      if (mounted) findings.auditing = false;
+    }
   }
 
   /// A what-if change moves the layout: while the list is open, scan again
@@ -824,7 +862,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
                             CustomPaint(
                               key: InspectorOverlay.findingKey,
                               painter: FindingPainter(
-                                hovered: widget.controller.findings.hovered,
+                                findings: widget.controller.findings,
                                 origin: () => _originOf(paintContext),
                               ),
                             ),
@@ -857,6 +895,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
                       controller: widget.controller,
                       panelOpen: _findingsPanel,
                       onScan: _scanFindings,
+                      onAudit: () => unawaited(_auditAccessibility()),
                       onMakeNote: (finding) =>
                           unawaited(_noteFromFinding(finding)),
                     ),
