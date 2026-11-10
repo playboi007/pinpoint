@@ -36,6 +36,7 @@ Result of the "Verify first" lists in `PLAN.md`. Where this file differs from th
 | 23 | Facts found in Session 7 | `dart run pinpoint:bridge` works from a Flutter host app; an early 413 is lost unless the body is read; widget tests fake `HttpClient`. |
 | 24 | Facts found in Session 8 | A lazy list re-uses tree order, so pins need the item index; visibility from offstage marks and clips; Flutter PNGs decode with `dart:io` zlib; MCP over HTTP by hand. |
 | 25 | Facts found in Session 9 | Apple platforms add a `Shortcuts` layer outside web, so a platform switch remounts the builder subtree; reassemble from inside a frame fails in tests; the platform setter throws outside debug. |
+| 26 | Facts found in Session 10 | Overflow diagnostics confirmed in a run; `debugSemantics` maps render objects to semantics nodes; `testWidgets` turns semantics on by default; three more test invariants; label glyphs are painted lighter than their style color. |
 
 ---
 
@@ -469,6 +470,17 @@ Extra tools exist behind `--enable` (`launch_app`, `list_devices`, `run_tests`, 
 - **[run-vm]** `Scaffold` removes `viewInsets` from its body's `MediaQuery`. A probe inside the body reads 0 under the fake keyboard; read above the `Scaffold`.
 - **[run-vm]** A `RenderBox` that scales its child with `applyPaintTransform` (`RenderViewportFrame`) keeps every global rect right: `getTransformTo(null)` (picker, outlines, pins) and the screenshot's inverse transform both go through it. A pick walk that starts at the app's boundary does not see the frame's clip; `RenderSearch.isOnApp` refuses positions outside the boundary.
 - **[unverified]** In Chrome: the frame scaled down in a small window, the checker and label, the platform switch on web (no remount expected), and `View.of(context)` code next to the viewport override.
+
+
+## 26. Facts found in Session 10
+
+- **[run-vm]** Item 10 holds in a run: for a `Row` overflow, `informationCollector` gives a `DiagnosticsDebugCreator` whose value is a `DebugCreator` for the `Row`'s element, and a `describeForError` node whose value is the `RenderFlex`. For a build error, the collector of `ComponentElement.performRebuild` gives a `DiagnosticsDebugCreator` for the element whose `build` threw, so the finding has that widget's file and line. After two more viewport changes, Flutter reports the same overflow no more (`_overflowReportNeeded`); the measured detector finds it each time.
+- **[source]** `RenderObject.debugSemantics` (`rendering/object.dart:3893`) returns the node a render object owns, in debug and profile, once semantics are built. Walking the app's visible render objects and collecting it gives the app's semantics nodes only: Pinpoint's UI and offstage routes stay out, with no change to the app's tree. Flutter's own `MinimumTapTargetGuideline` (`flutter_test/lib/src/accessibility.dart:116`) measures a node through every transform up to the root, which scales to physical pixels, then divides by the view's ratio; Pinpoint copies it.
+- **[run-vm]** A Material 3 `IconButton` with `constraints: BoxConstraints.tightFor(width: 24, height: 24)`, `padding: EdgeInsets.zero` and `tapTargetSize: MaterialTapTargetSize.shrinkWrap` is 24 x 24, and so is its semantics node. Without a tooltip, its label is empty.
+- **[source]** `testWidgets` has `semanticsEnabled = true` by default (`flutter_test/lib/src/widget_tester.dart:153`). A test that checks that disposing a `SemanticsHandle` turns semantics off must pass `semanticsEnabled: false`. **[run-vm]** With no other handle, `SemanticsBinding.instance.semanticsEnabled` is false again after the audit's handle is disposed. **[unverified]** on web, that the `flt-semantics` DOM goes away.
+- **[source]** More values `flutter test` checks at the end of a test body, before any tear-down: `debugPrint` (`foundation/debug.dart:41`), and in `debugAssertAllRenderVarsUnset` (`rendering/debug.dart:328`) every debug paint flag and `debugCurrentRepaintColor`, which the repaint rainbow changes on every repaint. Restore them in the body. The tree is unmounted before the check (`flutter_test/lib/src/binding.dart:1960`), so a wrapper's own dispose counts.
+- **[run-vm]** A `TextFormField` label declared `#46464F` is painted `#56555E` in a test (lighter, as if see-through). A contrast check that takes the most common non-text color inside the text's rect takes those glyphs for the background (1.27:1). Pinpoint reads the background from a 3 px ring around the paragraph instead, and skips pixels that are not opaque: where the app's boundary paints nothing, the capture has alpha 0, which reads as black.
+- **[run-vm]** In `flutter test`, `paintImage` calls `debugOnPaintImage` for a `RawImage`, with `debugImageLabel` as the source, so a report can be matched to its `RenderImage` (item 8). `createTestImage` and `Picture.toImage` need `tester.runAsync`, as in item 22.
 
 ---
 
