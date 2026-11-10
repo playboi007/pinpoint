@@ -31,6 +31,7 @@ Result of the "Verify first" lists in `PLAN.md`. Where this file differs from th
 | 18 | Facts found in Session 2 | `RenderObject.constraints` is protected; transient callbacks see old layout; scroll passthrough rules. |
 | 19 | Facts found in Session 3 | Read locations from the widget's node; a custom widget shares its build root's render object; refinement cost. |
 | 20 | Facts found in Session 4 | `ModalRoute.settingsOf` on an inherited element can self-depend; diagnostics formats; collection cost. |
+| 21 | Facts found in Session 5 | A text field outside the Navigator needs a `DismissIntent` action; key results for text fields; a focused field draws frames. |
 
 ---
 
@@ -411,6 +412,16 @@ Extra tools exist behind `--enable` (`launch_app`, `list_devices`, `run_tests`, 
 - **[run-vm]** `jsonEncode` throws `JsonUnsupportedObjectError` on `double.infinity` and `NaN`. `BoxConstraints.toString()` prints `Infinity` inside a string, which is fine.
 - **[run-vm]** A Material button's own widgets are about 38 elements deep. With the plan's cap of 40, `frameworkChain` for a button label ends at the `ElevatedButton`.
 - **[run-vm]** Collection cost: sweep of every element on every example screen, VM debug test: 6604 notes, largest 3614 bytes, slowest 13.3 ms (a `Theme` near the top of a screen: its text scan and subtree are the largest). **[unverified]** On web (DDC, about 20 times slower) the slowest can be about 250 ms; it runs once per Send, not per frame.
+
+## 21. Facts found in Session 5
+
+- **[run-vm]** Esc in a focused `EditableText` runs its `DismissIntent` action (`widgets/editable_text.dart:5642`). With no text menu open, it calls `Actions.invoke(context, intent)` up the tree. In an app a route has that action; `WidgetsApp.defaultActions` (`widgets/app.dart:1408`) does not. A text field above the Navigator (Pinpoint's layer) then fails an assertion ("Unable to find an action for an Intent with type DismissIntent"). Give it `DismissIntent: DoNothingAction(consumesKey: false)`.
+- **[source]** `DefaultTextEditingShortcuts` maps plain Enter and Space to `DoNothingAndStopPropagationTextIntent` when a field has focus (`widgets/default_text_editing_shortcuts.dart:328`, "These keys should go to the IME"). A modifier makes a `SingleActivator` miss, so Ctrl+Enter falls through to an outer `Shortcuts`.
+- **[source]** `ShortcutManager.handleKeypress` (`widgets/shortcuts.dart:922`) returns `ignored` when the action is disabled (and the manager is not modal). The key goes on up the focus chain. A send action that is disabled while an input method composes lets Enter reach the input method.
+- **[source]** `KeyEventResult.skipRemainingHandlers` (`widgets/focus_manager.dart:87`) stops the key going up the focus chain, but the platform still acts on it (the browser types the character). `handled` stops both. A Focus with `skipRemainingHandlers` around Pinpoint's panel keeps typed keys from the app's `Shortcuts` and still lets the field get text.
+- **[run-vm]** A focused `TextField` draws frames on its own: about 170 ms after it gains focus (the decoration animates), about 100 ms after a metrics change (it scrolls the caret into view), and a caret blink twice a second. A test that checks `hasScheduledFrame` after a selection must wait about 300 ms, and can set `EditableText.debugDeterministicCursor`.
+- **[run-vm]** The first mouse event after a touch tap starts a ticker in Pinpoint's panel that stops after about 150 ms. The owner was not found; it is a Material animation, not a loop.
+- **[run-vm]** The `flutter test` font makes every glyph 1 em wide. Labels are wider than in a browser and wrap sooner (in the 360 px panel, the intent chips and the buttons wrap). Size checks in tests are pessimistic.
 
 ---
 

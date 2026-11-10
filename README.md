@@ -4,11 +4,14 @@ A debug-only Flutter package. Click any widget in a running app, write a comment
 
 Web is the first target.
 
-> **Status: Milestone 4 (Session 4).** The wrapper, the inspect mode (Alt+Shift+C or the launcher button), Esc and freeze (P while picking) work. Hover outlines the widget under the pointer, and a click selects the nearest widget written in your own project (a `Text`, not the `RichText` it builds), with a breadcrumb and `file:line` in the label and the draggable info panel. Arrow Up or `[` moves to the next local ancestor, Arrow Down or `]` moves back, and Alt plus an arrow steps through framework widgets too. Rulers measure to the nearest local ancestor (hold Alt and hover another widget to measure the gap), and the mouse wheel still scrolls the app. In code, `ContextCollector.collect` turns a selection into an `Annotation` (schema 1, under 8 KB as JSON) with the source location, layout, chains, siblings, subtree, page and inherited data. The comment form that sends it comes in Milestone 5. Empty files under `lib/src/` and `bin/` are for later milestones. See `PLAN.md` for the build order.
+> **Status: Milestone 5 (Session 5).** The wrapper, the inspect mode (Alt+Shift+C or the launcher button), Esc and freeze (P while picking) work. Hover outlines the widget under the pointer, and a click selects the nearest widget written in your own project (a `Text`, not the `RichText` it builds), with `file:line` in the label. The click opens a panel next to the widget with a clickable breadcrumb and two tabs. Comment: choose Bug, Improve or Question, type the comment, then Send (or Ctrl/Cmd+Enter) to every sink in `PinPointConfig.sinks`, with a toast per sink, or Copy as Markdown. The comment is kept until a send succeeds. Info: the widget's layout data; there, Arrow Up or `[` moves to the next local ancestor, Arrow Down or `]` moves back, and Alt plus an arrow steps through framework widgets too. Rulers measure to the nearest local ancestor (hold Alt and hover another widget to measure the gap), and the mouse wheel still scrolls the app. The note is an `Annotation` (schema 1, under 8 KB as JSON). Screenshots come in Milestone 6, and the HTTP and clipboard sinks in Milestone 7; the example app prints each note to the console. Empty files under `lib/src/` and `bin/` are for later milestones. See `PLAN.md` for the build order.
 
 ```dart
 MaterialApp(
-  builder: (context, child) => PinPointWrapper(child: child),
+  builder: (context, child) => PinPointWrapper(
+    config: const PinPointConfig(sinks: [MySink()]), // a PinPointSink
+    child: child,
+  ),
   home: const HomeScreen(),
 )
 ```
@@ -58,6 +61,10 @@ cd example && flutter test test/source_selection_test.dart
 # Milestone 4: payload model, context capture, size budget, example sweep
 flutter test test/model test/capture
 cd example && flutter test test/collect_sweep_test.dart
+
+# Milestone 5: panel placement, comment form, keys and focus, send flow
+flutter test test/overlay/place_panel_test.dart test/overlay/comment_form_test.dart \
+  test/overlay/comment_keys_test.dart test/overlay/comment_send_test.dart test/sink
 
 # after a deliberate change to the note's shape: rewrite the golden, review the diff
 flutter test --update-goldens test/capture/target_test.dart
