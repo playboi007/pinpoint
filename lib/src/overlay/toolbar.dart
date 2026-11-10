@@ -95,7 +95,8 @@ class PinPointLauncher extends StatelessWidget {
     final colors = Theme.of(context).colorScheme;
     final active = controller.isActive;
     return Tooltip(
-      message: 'Pinpoint ($shortcutLabel)',
+      message: 'Pinpoint ($shortcutLabel)'
+          '${controller.frozen ? ', app frozen: P while picking resumes' : ''}',
       child: Material(
         type: MaterialType.circle,
         elevation: 4,
@@ -105,10 +106,15 @@ class PinPointLauncher extends StatelessWidget {
           onTap: controller.toggle,
           child: SizedBox.square(
             dimension: size,
-            child: Icon(
-              active ? Icons.close : Icons.ads_click,
-              color: active ? colors.onPrimary : colors.primary,
-              size: 22,
+            child: Badge(
+              isLabelVisible: controller.frozen,
+              label: const Icon(Icons.ac_unit, size: 10),
+              backgroundColor: colors.tertiary,
+              child: Icon(
+                active ? Icons.close : Icons.ads_click,
+                color: active ? colors.onPrimary : colors.primary,
+                size: 22,
+              ),
             ),
           ),
         ),

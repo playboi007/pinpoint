@@ -134,7 +134,21 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
       // Not directional, so the wrapper works without a Directionality.
       alignment: Alignment.topLeft,
       children: [
-        RepaintBoundary(key: _appKey, child: app),
+        RepaintBoundary(
+          key: _appKey,
+          child: ListenableBuilder(
+            listenable: _controller,
+            // Always present; only `enabled` changes. TickerMode mutes the
+            // app's tickers, so no frames are drawn for them while frozen.
+            // It does not pause Timer or Future based logic. A muted ticker
+            // keeps its start time, so on resume an animation jumps ahead by
+            // the frozen time: a spinner looks continuous, a one-shot
+            // transition may finish at once.
+            builder: (context, child) =>
+                TickerMode(enabled: !_controller.frozen, child: child!),
+            child: app,
+          ),
+        ),
         InspectorOverlay(
           controller: _controller,
           appKey: _appKey,

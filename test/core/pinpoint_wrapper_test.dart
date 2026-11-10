@@ -485,6 +485,75 @@ void main() {
     });
   });
 
+  group('freeze', () {
+    double spin(WidgetTester tester) =>
+        tester.state<_SpinnerState>(find.byType(_Spinner)).animation.value;
+
+    testWidgets('P while picking pauses the app tickers and resumes them', (
+      tester,
+    ) async {
+      await tester.pumpWidget(host(home: const _Spinner()));
+      final stateBefore = tester.state(find.byType(_Spinner));
+      controller.startPicking();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyP);
+      await tester.pump();
+      expect(controller.frozen, isTrue);
+      final frozenAt = spin(tester);
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(spin(tester), frozenAt);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyP);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(controller.frozen, isFalse);
+      expect(spin(tester), isNot(frozenAt));
+
+      expect(controller.mode, PinPointMode.picking);
+      expect(tester.state(find.byType(_Spinner)), same(stateBefore));
+    });
+
+    testWidgets('a frozen app schedules no frames', (tester) async {
+      await tester.pumpWidget(host(home: const _Spinner()));
+      controller.toggleFreeze();
+      await tester.pump();
+      await tester.pump();
+      expect(tester.binding.hasScheduledFrame, isFalse);
+    });
+
+    testWidgets('only the app is frozen, not Pinpoint UI', (tester) async {
+      await tester.pumpWidget(host(home: const _Spinner()));
+      controller.toggleFreeze();
+      await tester.pump();
+
+      expect(
+        TickerMode.valuesOf(tester.element(find.byType(_Spinner))).enabled,
+        isFalse,
+      );
+      expect(
+        TickerMode.valuesOf(
+          tester.element(find.byType(PinPointLauncher)),
+        ).enabled,
+        isTrue,
+      );
+    });
+
+    testWidgets('the launcher shows that the app is frozen', (tester) async {
+      await tester.pumpWidget(host());
+      expect(find.byIcon(Icons.ac_unit), findsNothing);
+      controller.toggleFreeze();
+      await tester.pump();
+      expect(find.byIcon(Icons.ac_unit), findsOneWidget);
+    });
+
+    testWidgets('P in idle is left to the app', (tester) async {
+      await tester.pumpWidget(host());
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyP);
+      expect(controller.frozen, isFalse);
+    });
+  });
+
   testWidgets('hot reload clears the selection', (tester) async {
     await tester.pumpWidget(host());
     controller
@@ -501,6 +570,37 @@ void main() {
     expect(controller.selectedPosition, isNull);
     expect(controller.mode, PinPointMode.picking);
   });
+}
+
+/// An endlessly repeating animation, like a loading spinner.
+class _Spinner extends StatefulWidget {
+  const _Spinner();
+
+  @override
+  State<_Spinner> createState() => _SpinnerState();
+}
+
+class _SpinnerState extends State<_Spinner>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController animation;
+
+  @override
+  void initState() {
+    super.initState();
+    animation = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 1),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    animation.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => const SizedBox.expand();
 }
 
 /// An app page that records every key down event that reaches it.
