@@ -9,3 +9,16 @@ export 'src/core/pinpoint_controller.dart';
 export 'src/core/pinpoint_wrapper.dart';
 export 'src/info/widget_info.dart'
     show InfoExtractor, InfoProperty, InfoSection, WidgetInfo;
+export 'src/model/annotation.dart'
+    show
+        AncestorInfo,
+        Annotation,
+        AnnotationIntent,
+        AppInfo,
+        InheritedInfo,
+        PageInfo,
+        PayloadRect,
+        PayloadSize,
+        SiblingsInfo,
+        SourceRef,
+        TargetInfo;
