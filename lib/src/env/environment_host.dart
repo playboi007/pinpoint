@@ -1,9 +1,13 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' show ClipOp;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/scheduler.dart' show SchedulerPhase, timeDilation;
 
+import '../core/hook_registry.dart';
 import 'device_presets.dart';
 import 'environment_controller.dart';
 
@@ -425,5 +429,72 @@ class RenderViewportFrame extends RenderBox
       ..add(DiagnosticsProperty<Size?>('viewport', viewport))
       ..add(DoubleProperty('scale', scale, defaultValue: 1.0))
       ..add(DoubleProperty('keyboardHeight', keyboardHeight, defaultValue: 0));
+  }
+}
+
+/// Sets the two global switches, platform and slow motion, through
+/// [HookRegistry], so disposing the registry puts both back (engineering
+/// rule 1).
+class EnvironmentGlobals {
+  EnvironmentGlobals(HookRegistry hooks)
+    : _platform = hooks.slot<TargetPlatform?>(
+        key: #debugDefaultTargetPlatformOverride,
+        read: () => debugDefaultTargetPlatformOverride,
+        write: (value) => debugDefaultTargetPlatformOverride = value,
+      ),
+      _dilation = hooks.slot<double>(
+        key: #timeDilation,
+        read: () => timeDilation,
+        write: (value) => timeDilation = value,
+      );
+
+  final GlobalSlot<TargetPlatform?> _platform;
+  final GlobalSlot<double> _dilation;
+
+  /// Sets or releases each global to match [env].
+  void apply(Environment env) {
+    if (env.timeDilation case final dilation?) {
+      _dilation.set(dilation);
+    } else {
+      _dilation.release();
+    }
+
+    final before = debugDefaultTargetPlatformOverride;
+    // The setter throws outside debug builds.
+    if (env.platform case final platform? when kDebugMode) {
+      _platform.set(platform);
+    } else {
+      _platform.release();
+    }
+    if (debugDefaultTargetPlatformOverride != before) reassemble();
+  }
+
+  /// Widgets read `defaultTargetPlatform` while they build, and an app
+  /// builds its `ThemeData` (whose `platform` defaults to it) in its own
+  /// build. Only a reassemble, as the framework's own platform override
+  /// does, rebuilds them all.
+  ///
+  /// It rebuilds everything and drops held elements, exactly like hot
+  /// reload: the wrapper clears the selection in its `reassemble`, and the
+  /// pins look their widgets up again through `SourceIndex`.
+  ///
+  /// Outside web, `WidgetsApp` adds a `Shortcuts` layer only on Apple
+  /// platforms (`DefaultTextEditingShortcuts`), so a switch between iOS or
+  /// macOS and another platform changes the tree above the wrapper:
+  /// Flutter mounts everything from there down to the Navigator again,
+  /// this wrapper's State included (the slots handle the overlap). The
+  /// Navigator has a GlobalKey and moves over, so the routes keep their
+  /// state. A wrapper that owns its controller loses the environment; pass
+  /// a `controller` to keep it. On web every platform has that layer.
+  static void reassemble() {
+    final binding = WidgetsBinding.instance;
+    if (binding.schedulerPhase == SchedulerPhase.idle) {
+      unawaited(binding.reassembleApplication());
+      return;
+    }
+    // Never inside a frame (an environment set before the wrapper was
+    // built is applied from initState): a reassemble draws a warm-up frame
+    // of its own, and in a test that frame runs at once, inside this one.
+    Timer.run(() => unawaited(binding.reassembleApplication()));
   }
 }

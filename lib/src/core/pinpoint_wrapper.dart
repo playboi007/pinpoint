@@ -1,6 +1,8 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
+import '../env/environment_controller.dart';
 import '../env/environment_host.dart';
 import '../overlay/inspector_overlay.dart';
 import 'hook_registry.dart';
@@ -54,6 +56,12 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
   PinPointController? _ownController;
   HookRegistry? _hooks;
 
+  /// Sets platform and slow motion; null while disabled.
+  EnvironmentGlobals? _globals;
+
+  /// The environment [_applyEnvironment] listens to.
+  EnvironmentController? _environment;
+
   PinPointController get _controller =>
       widget.controller ?? (_ownController ??= PinPointController());
 
@@ -67,23 +75,60 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
   void didUpdateWidget(PinPointWrapper oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.controller != null && _ownController != null) {
+      _unwatchEnvironment();
       _ownController!.dispose();
       _ownController = null;
     }
     if (widget.config.enabled != oldWidget.config.enabled) {
-      _hooks?.dispose();
-      _hooks = null;
+      _uninstallHooks();
       if (widget.config.enabled) {
         _installHooks();
       } else {
         _controller.stop();
       }
+    } else if (widget.config.enabled) {
+      // The controller, and with it the environment, may have changed.
+      _watchEnvironment();
     }
   }
 
   void _installHooks() {
-    _hooks = HookRegistry()..addKeyHandler(_handleKey);
+    final hooks = _hooks = HookRegistry()..addKeyHandler(_handleKey);
+    _globals = EnvironmentGlobals(hooks);
+    _watchEnvironment();
   }
+
+  /// Restores every global slot, the environment's included.
+  void _uninstallHooks() {
+    _unwatchEnvironment();
+    _globals = null;
+    final platform = debugDefaultTargetPlatformOverride;
+    _hooks?.dispose();
+    _hooks = null;
+    // The widgets still on screen were built for the overridden platform.
+    // Rebuild them for the real one, so they never disagree with
+    // defaultTargetPlatform (for example a wrapper that owned its
+    // controller, mounted again by a platform switch outside web).
+    if (debugDefaultTargetPlatformOverride != platform) {
+      EnvironmentGlobals.reassemble();
+    }
+  }
+
+  void _watchEnvironment() {
+    final environment = _controller.environment;
+    if (!identical(environment, _environment)) {
+      _unwatchEnvironment();
+      _environment = environment..addListener(_applyEnvironment);
+    }
+    _applyEnvironment();
+  }
+
+  void _unwatchEnvironment() {
+    _environment?.removeListener(_applyEnvironment);
+    _environment = null;
+  }
+
+  void _applyEnvironment() => _globals?.apply(_controller.environment.value);
 
   bool _handleKey(KeyEvent event) {
     // Alt alone is not claimed: it only switches the rulers to measuring
@@ -146,7 +191,8 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
 
   @override
   void dispose() {
-    _hooks?.dispose();
+    // Puts timeDilation and the platform override back.
+    _uninstallHooks();
     _ownController?.dispose();
     super.dispose();
   }

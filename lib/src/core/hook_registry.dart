@@ -3,8 +3,9 @@ import 'package:flutter/services.dart';
 /// Installs global hooks and puts them back on [dispose] (engineering rule 1).
 ///
 /// Every single global slot Pinpoint touches goes through here:
-/// `HardwareKeyboard` handlers now, later `FlutterError.onError`, the debug
-/// callbacks, `timeDilation` and the debug paint flags.
+/// `HardwareKeyboard` handlers, `timeDilation` and
+/// `debugDefaultTargetPlatformOverride` now, later `FlutterError.onError`,
+/// the debug callbacks and the debug paint flags.
 ///
 /// `SchedulerBinding.addPersistentFrameCallback` has no remove method, so it
 /// cannot be registered here. Guard such callbacks with a disposed flag.
@@ -38,11 +39,79 @@ class HookRegistry {
     });
   }
 
+  /// A global slot written again and again, such as `timeDilation` from
+  /// the what-if panel. The value from before the first write comes back on
+  /// [GlobalSlot.release] or on [dispose].
+  ///
+  /// [key] names the global. Two registries can hold the same one: Flutter
+  /// can mount a new wrapper State before it disposes the old one. The
+  /// newest holder owns the slot and keeps the original value, so the old
+  /// State's dispose does not undo the new State's write.
+  GlobalSlot<T> slot<T>({
+    required Object key,
+    required T Function() read,
+    required void Function(T value) write,
+  }) {
+    final slot = GlobalSlot<T>._(key, read, write);
+    _restores.add(slot.release);
+    return slot;
+  }
+
   /// Restores every slot, newest first. Safe to call more than once.
   void dispose() {
     for (final restore in _restores.reversed) {
       restore();
     }
     _restores.clear();
+  }
+}
+
+/// One global slot from [HookRegistry.slot].
+class GlobalSlot<T> {
+  GlobalSlot._(this._key, this._read, this._write);
+
+  /// The holder of each global, by key.
+  static final Map<Object, GlobalSlot<Object?>> _holders =
+      <Object, GlobalSlot<Object?>>{};
+
+  final Object _key;
+  final T Function() _read;
+  final void Function(T value) _write;
+
+  bool _held = false;
+  late T _previous;
+  late T _ours;
+
+  /// Whether the slot holds a value written here.
+  bool get isHeld => _held;
+
+  /// Writes [value]. The first write keeps the value it replaces.
+  void set(T value) {
+    final holder = _holders[_key];
+    if (holder != null &&
+        !identical(holder, this) &&
+        holder._held &&
+        identical(_read(), holder._ours)) {
+      // Take over: the other holder no longer restores anything.
+      _previous = holder._previous as T;
+      holder._held = false;
+    } else if (!_held || !identical(_read(), _ours)) {
+      // First write, or someone outside Pinpoint wrote the slot since our
+      // last write: theirs is what comes back on release.
+      _previous = _read();
+    }
+    _holders[_key] = this;
+    _held = true;
+    _ours = value;
+    _write(value);
+  }
+
+  /// Puts back the value from before the first write, unless someone else
+  /// wrote the slot after us: then it is theirs and is left alone.
+  void release() {
+    if (!_held) return;
+    _held = false;
+    if (identical(_holders[_key], this)) _holders.remove(_key);
+    if (identical(_read(), _ours)) _write(_previous);
   }
 }
