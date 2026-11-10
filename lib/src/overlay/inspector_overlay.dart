@@ -149,66 +149,71 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     // ancestor here. Text fields and tooltips in Pinpoint's UI need one.
     return Theme(
       data: _theme,
-      child: Overlay.wrap(
-        child: Material(
-          // Transparency does not absorb hits, so in idle mode every pointer
-          // event outside Pinpoint's own controls falls through to the app.
-          type: MaterialType.transparency,
-          child: Focus(
-            focusNode: _holder,
-            // Every key that reaches the holder stops here while a mode is
-            // active, so it never bubbles up to the app's Shortcuts. Pinpoint's
-            // own keys arrive through the HardwareKeyboard handler instead.
-            // Milestone 5: the comment form needs its own traversal shortcuts,
-            // because Tab stops here too.
-            onKeyEvent: (node, event) => widget.controller.isActive
-                ? KeyEventResult.handled
-                : KeyEventResult.ignored,
-            child: ListenableBuilder(
-              listenable: widget.controller,
-              builder: (context, _) => Stack(
-                fit: StackFit.expand,
-                children: [
-                  // The trap stays while commenting and sending, so a stray
-                  // click never reaches the app behind the panel.
-                  if (widget.controller.isActive)
-                    _PointerTrap(tracker: _tracker),
-                  IgnorePointer(
-                    child: Builder(
-                      builder: (paintContext) => Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          CustomPaint(
-                            key: InspectorOverlay.rulerKey,
-                            painter: RulerPainter(
-                              selected: widget.controller.selection,
-                              hovered: widget.controller.hovered,
-                              measuring: widget.controller.measuring,
-                              origin: () => _originOf(paintContext),
+      // Fixed like the theme: the panel's header has a fixed height and
+      // overflows at a large system text scale. The page context the
+      // collector reads sits above this, so notes keep the real scale.
+      child: MediaQuery.withNoTextScaling(
+        child: Overlay.wrap(
+          child: Material(
+            // Transparency does not absorb hits, so in idle mode every pointer
+            // event outside Pinpoint's own controls falls through to the app.
+            type: MaterialType.transparency,
+            child: Focus(
+              focusNode: _holder,
+              // Every key that reaches the holder stops here while a mode is
+              // active, so it never bubbles up to the app's Shortcuts. Pinpoint's
+              // own keys arrive through the HardwareKeyboard handler instead.
+              // Milestone 5: the comment form needs its own traversal shortcuts,
+              // because Tab stops here too.
+              onKeyEvent: (node, event) => widget.controller.isActive
+                  ? KeyEventResult.handled
+                  : KeyEventResult.ignored,
+              child: ListenableBuilder(
+                listenable: widget.controller,
+                builder: (context, _) => Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    // The trap stays while commenting and sending, so a stray
+                    // click never reaches the app behind the panel.
+                    if (widget.controller.isActive)
+                      _PointerTrap(tracker: _tracker),
+                    IgnorePointer(
+                      child: Builder(
+                        builder: (paintContext) => Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            CustomPaint(
+                              key: InspectorOverlay.rulerKey,
+                              painter: RulerPainter(
+                                selected: widget.controller.selection,
+                                hovered: widget.controller.hovered,
+                                measuring: widget.controller.measuring,
+                                origin: () => _originOf(paintContext),
+                              ),
                             ),
-                          ),
-                          CustomPaint(
-                            key: InspectorOverlay.highlightKey,
-                            painter: HighlightPainter(
-                              hovered: widget.controller.hovered,
-                              selected: widget.controller.selection,
-                              origin: () => _originOf(paintContext),
+                            CustomPaint(
+                              key: InspectorOverlay.highlightKey,
+                              painter: HighlightPainter(
+                                hovered: widget.controller.hovered,
+                                selected: widget.controller.selection,
+                                origin: () => _originOf(paintContext),
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
-                  ),
-                  // Above the trap, so clicks on the panel never pick.
-                  InfoPanelLayer(controller: widget.controller),
-                  // Above the trap, so it can always stop picking. Always
-                  // offered by default: some shortcuts never reach Flutter.
-                  if (widget.config.showLauncher)
-                    LauncherLayer(
-                      controller: widget.controller,
-                      shortcutLabel: widget.config.shortcut.label,
-                    ),
-                ],
+                    // Above the trap, so clicks on the panel never pick.
+                    InfoPanelLayer(controller: widget.controller),
+                    // Above the trap, so it can always stop picking. Always
+                    // offered by default: some shortcuts never reach Flutter.
+                    if (widget.config.showLauncher)
+                      LauncherLayer(
+                        controller: widget.controller,
+                        shortcutLabel: widget.config.shortcut.label,
+                      ),
+                  ],
+                ),
               ),
             ),
           ),
