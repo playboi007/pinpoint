@@ -6,6 +6,76 @@ import '../info/widget_info.dart';
 import '../search/pick_result.dart';
 import 'highlight_painter.dart';
 
+/// Space kept between the panel and the viewport's edges.
+const double panelMargin = 12;
+
+/// Space between the panel and the widget it describes.
+const double panelGap = 8;
+
+/// The panel's width in a viewport [viewportWidth] wide: [InfoPanel.width],
+/// or less where that would not fit between the margins.
+double panelWidthFor(double viewportWidth) {
+  final room = viewportWidth - 2 * panelMargin;
+  if (room <= 0) return 0;
+  return room < InfoPanel.width ? room : InfoPanel.width;
+}
+
+/// The top-left of a [panel] that describes [target], inside [viewport].
+///
+/// Below the target when it fits, then above, then to the right, then to
+/// the left. When no side fits, the panel goes below the target and is
+/// pushed back inside, over the target. Every result keeps [panelMargin]
+/// to each edge of the viewport, unless the panel is larger than the space.
+///
+/// All three are in one coordinate space (engineering rule 7).
+Offset placePanel(Rect target, Size panel, Size viewport) {
+  if (!target.isFinite) {
+    return clampPanel(Offset(viewport.width, 0), panel, viewport);
+  }
+  final minTop = panelMargin;
+  final maxBottom = viewport.height - panelMargin;
+  final minLeft = panelMargin;
+  final maxRight = viewport.width - panelMargin;
+  bool fitsVertically(double top) =>
+      top >= minTop && top + panel.height <= maxBottom;
+  bool fitsHorizontally(double left) =>
+      left >= minLeft && left + panel.width <= maxRight;
+
+  final below = target.bottom + panelGap;
+  if (fitsVertically(below)) {
+    return clampPanel(Offset(target.left, below), panel, viewport);
+  }
+  final above = target.top - panelGap - panel.height;
+  if (fitsVertically(above)) {
+    return clampPanel(Offset(target.left, above), panel, viewport);
+  }
+  final right = target.right + panelGap;
+  if (fitsHorizontally(right)) {
+    return clampPanel(Offset(right, target.top), panel, viewport);
+  }
+  final left = target.left - panelGap - panel.width;
+  if (fitsHorizontally(left)) {
+    return clampPanel(Offset(left, target.top), panel, viewport);
+  }
+  return clampPanel(Offset(target.left, below), panel, viewport);
+}
+
+/// [position] moved the least distance that keeps a [panel] there inside
+/// [viewport] with [panelMargin] to each edge. A panel larger than the space
+/// sits at the top-left margin.
+Offset clampPanel(Offset position, Size panel, Size viewport) {
+  double clampAxis(double value, double size, double extent) {
+    final max = extent - panelMargin - size;
+    if (max <= panelMargin || value.isNaN) return panelMargin;
+    return value.clamp(panelMargin, max);
+  }
+
+  return Offset(
+    clampAxis(position.dx, panel.width, viewport.width),
+    clampAxis(position.dy, panel.height, viewport.height),
+  );
+}
+
 /// Covers the screen and places [InfoPanel] while there is a selection.
 ///
 /// Only the panel takes pointer events; the rest of the area lets them
@@ -109,7 +179,9 @@ class InfoPanel extends StatelessWidget {
   static const Key panelKey = ValueKey<String>('pinpoint.infoPanel');
   static const Key headerKey = ValueKey<String>('pinpoint.infoPanel.header');
 
-  static const double width = 300;
+  /// The widest the panel gets; narrower in a small viewport
+  /// ([panelWidthFor]).
+  static const double width = 360;
   static const double headerHeight = 48;
 
   final PickResult selection;
