@@ -1,0 +1,101 @@
+{
+  "schema": 1,
+  "id": "pp_20261110_143205_a1f3",
+  "createdAt": "2026-11-10T14:32:05Z",
+  "intent": "improve",
+  "comment": "Label truncates at narrow widths",
+  "app": {
+    "buildMode": "debug",
+    "platform": "web",
+    "projectRoot": "/Users/me/app"
+  },
+  "page": {
+    "url": "http://localhost:5000/#/orders/12",
+    "route": "/orders/:id",
+    "viewport": {
+      "width": 1280,
+      "height": 720
+    },
+    "devicePixelRatio": 2,
+    "textScale": 1,
+    "brightness": "dark",
+    "locale": "en_US"
+  },
+  "target": {
+    "widget": "Text",
+    "description": "Text(\"Save changes\")",
+    "key": null,
+    "source": {
+      "file": "lib/widgets/save_bar.dart",
+      "line": 42,
+      "column": 18
+    },
+    "sourceUnavailable": false,
+    "rect": {
+      "x": 912,
+      "y": 648,
+      "w": 96,
+      "h": 20
+    },
+    "renderObject": "RenderParagraph",
+    "constraints": "BoxConstraints(0.0<=w<=96.0, 0.0<=h<=Infinity)",
+    "parentData": "offset=Offset(16.0, 10.0)",
+    "text": "Save changes",
+    "properties": {
+      "maxLines": "1",
+      "overflow": "ellipsis"
+    },
+    "sections": {}
+  },
+  "ancestors": [
+    {
+      "widget": "ElevatedButton",
+      "source": {
+        "file": "lib/widgets/save_bar.dart",
+        "line": 40,
+        "column": 14
+      }
+    },
+    {
+      "widget": "SaveBar",
+      "source": {
+        "file": "lib/pages/order_page.dart",
+        "line": 88,
+        "column": 22
+      }
+    }
+  ],
+  "frameworkChain": [
+    "RichText",
+    "Text",
+    "DefaultTextStyle",
+    "ElevatedButton"
+  ],
+  "siblings": {
+    "parent": "Row",
+    "index": 1,
+    "count": 3,
+    "firstIndex": 0,
+    "children": [
+      "Icon",
+      "Text",
+      "Spacer"
+    ]
+  },
+  "subtree": "Text  lib/widgets/save_bar.dart:42\n  RichText",
+  "inherited": {
+    "themeBrightness": "dark",
+    "useMaterial3": true,
+    "textDirection": "ltr"
+  },
+  "screenshot": {
+    "file": "pp_20261110_143205_a1f3.png",
+    "pixelRatio": 1,
+    "width": 1,
+    "height": 1,
+    "crop": null,
+    "hasPlatformViews": false,
+    "debugPaint": [],
+    "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4b23wHwAGEQJq+GwfDQAAAABJRU5ErkJggg=="
+  }
+}
