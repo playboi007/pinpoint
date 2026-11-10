@@ -1,5 +1,9 @@
 import 'dart:math' as math;
-import 'dart:ui';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+
+import 'package:flutter/rendering.dart';
+import 'package:flutter/scheduler.dart';
 
 /// Logical pixels kept around the target on each side.
 const double cropMargin = 48;
@@ -122,4 +126,101 @@ CapturePlan? planCapture(Rect target, Size bounds, double pixelRatio) {
       target.bottom * pixelRatio - source.top,
     ),
   );
+}
+
+/// The outline's colour in the screenshot.
+const Color outlineColor = Color(0xFFFF3B30);
+
+/// The outline's stroke in image pixels: 2 logical pixels, at least 1 image
+/// pixel.
+double outlineWidthFor(double pixelRatio) => math.max(2 * pixelRatio, 1);
+
+/// A PNG crop of the app with the target outlined.
+class Screenshot {
+  const Screenshot({required this.png, required this.plan, required this.crop});
+
+  final Uint8List png;
+  final CapturePlan plan;
+
+  /// [CapturePlan.crop] in global logical pixels.
+  final Rect crop;
+}
+
+/// Captures [target] (global logical pixels) from the app's [boundary] at
+/// [pixelRatio], with the outline drawn on. Null when the target is not on
+/// the boundary.
+///
+/// The boundary holds only the app. Pinpoint's highlight and panel sit
+/// beside it (engineering rule 6), so the image is clean.
+Future<Screenshot?> captureScreenshot(
+  RenderRepaintBoundary boundary,
+  Rect target, {
+  required double pixelRatio,
+}) async {
+  // toImage asserts that nothing needs paint. A change since the last frame
+  // has scheduled one; wait for it. With nothing scheduled, no frame is
+  // forced.
+  final scheduler = SchedulerBinding.instance;
+  if (scheduler.hasScheduledFrame ||
+      scheduler.schedulerPhase != SchedulerPhase.idle) {
+    await scheduler.endOfFrame;
+  }
+  if (!boundary.attached || !boundary.hasSize) return null;
+
+  // Global to the boundary's own logical pixels. Today the boundary fills
+  // the view from the origin, so this is the identity. With a what-if
+  // viewport (Milestone 9) the boundary moves and scales; converting here
+  // keeps the crop on the target either way.
+  final toGlobal = boundary.getTransformTo(null);
+  final toLocal = Matrix4.tryInvert(toGlobal);
+  if (toLocal == null) return null;
+  final local = MatrixUtils.transformRect(toLocal, target);
+  final plan = planCapture(local, boundary.size, pixelRatio);
+  if (plan == null) return null;
+
+  final full = await boundary.toImage(pixelRatio: plan.pixelRatio);
+  // ui.Image is not garbage collected promptly: dispose every image and
+  // picture made here, on every path.
+  try {
+    // Clamp again to the image as it came: the plan assumed toImage rounds
+    // up, and drawImageRect must never sample outside the image.
+    final source = plan.source.intersect(
+      Offset.zero & Size(full.width.toDouble(), full.height.toDouble()),
+    );
+    final recorder = ui.PictureRecorder();
+    Canvas(recorder)
+      ..drawImageRect(
+        full,
+        source,
+        Offset.zero & source.size,
+        Paint()..filterQuality = FilterQuality.none,
+      )
+      ..drawRect(
+        plan.outline,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = outlineWidthFor(plan.pixelRatio)
+          ..color = outlineColor,
+      );
+    final picture = recorder.endRecording();
+    final ui.Image out;
+    try {
+      out = await picture.toImage(plan.width, plan.height);
+    } finally {
+      picture.dispose();
+    }
+    try {
+      final bytes = await out.toByteData(format: ui.ImageByteFormat.png);
+      if (bytes == null) return null;
+      return Screenshot(
+        png: bytes.buffer.asUint8List(bytes.offsetInBytes, bytes.lengthInBytes),
+        plan: plan,
+        crop: MatrixUtils.transformRect(toGlobal, plan.crop),
+      );
+    } finally {
+      out.dispose();
+    }
+  } finally {
+    full.dispose();
+  }
 }
