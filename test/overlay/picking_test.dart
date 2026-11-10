@@ -137,7 +137,9 @@ void main() {
 
       final selection = controller.selection.value!;
       expect(controller.mode, PinPointMode.commenting);
-      expect(selection.element.widget, isA<RichText>());
+      // The Text written in this test, not the RichText it builds.
+      expect(selection.element.widget, isA<Text>());
+      expect(selection.pickedElement.widget, isA<RichText>());
       expect(selection.element.mounted, isTrue);
       expect(
         highlight(tester),

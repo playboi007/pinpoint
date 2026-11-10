@@ -6,6 +6,7 @@ import '../core/pinpoint_controller.dart';
 import '../search/pick_result.dart';
 import '../search/render_search.dart';
 import '../search/scroll_passthrough.dart';
+import '../search/source_resolver.dart';
 
 /// Prints p50 and p95 pick time after every 200 hover picks, in debug.
 ///
@@ -26,7 +27,12 @@ bool debugPrintPickTimings = const bool.fromEnvironment(
 /// It never schedules a frame on its own while nothing changes (engineering
 /// rule 2).
 class PickTracker {
-  PickTracker({required this.controller, required this.appKey}) {
+  PickTracker({
+    required this.controller,
+    required this.appKey,
+    required this.contentKey,
+    this.resolver = const SourceResolver(),
+  }) {
     _frameHook.tracker = this;
     // There is no way to remove a persistent frame callback
     // (docs/api-notes.md, item 7). The hook drops its tracker on dispose, so
@@ -38,6 +44,14 @@ class PickTracker {
 
   /// Key of the app's `RepaintBoundary`: the root of every pick.
   final GlobalKey appKey;
+
+  /// Key of the element directly above the app's own widgets, where a
+  /// picked widget's chain stops.
+  final GlobalKey contentKey;
+
+  /// Reads source locations and decides which are local. Replaced when the
+  /// project root or the path hints change.
+  SourceResolver resolver;
 
   /// Number of hover and click picks run, for tests.
   @visibleForTesting
@@ -113,10 +127,13 @@ class PickTracker {
     debugPickCount++;
     final search = RenderSearch.find(root, position);
     if (timed) _recordTiming(search.elapsed);
+    final boundary = contentKey.currentContext;
     return PickResult.fromSearch(
       search,
       position: position,
       rootElement: context,
+      chainBoundary: boundary is Element ? boundary : null,
+      resolver: resolver,
       previous: previous,
     );
   }

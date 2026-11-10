@@ -56,12 +56,13 @@ void main() {
     await selectText(tester);
 
     final info = WidgetInfo.fromRenderObject(tester.renderObject(appText));
-    expect(inPanel('RichText'), findsOneWidget);
     expect(inPanel('RenderParagraph'), findsOneWidget);
     expect(inPanel(info.sizeLabel), findsOneWidget);
     expect(inPanel(info.positionLabel), findsOneWidget);
     expect(inPanel(info.constraintsLabel), findsOneWidget);
-    expect(inPanel('Text'), findsOneWidget, reason: 'section title');
+    // The selected widget (Milestone 3 refines RichText to Text) and the
+    // section title.
+    expect(inPanel('Text'), findsNWidgets(2));
     expect(inPanel('Save'), findsOneWidget);
     expect(inPanel('16.0'), findsOneWidget);
   });

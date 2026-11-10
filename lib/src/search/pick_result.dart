@@ -2,9 +2,15 @@ import 'package:flutter/widgets.dart';
 
 import 'element_lookup.dart';
 import 'render_search.dart';
+import 'source_resolver.dart';
 
-/// What is under the pointer: every candidate, which one is chosen, and the
-/// chosen one's element and rect.
+/// What is under the pointer: every candidate, which one is chosen, the
+/// chain of widgets above it, and which of those is selected.
+///
+/// The picked render object almost always belongs to a framework widget
+/// (`RichText`, `DecoratedBox`). The selection is the nearest widget in the
+/// chain written in the project's own source, so the outline and the
+/// location name the widget the user wrote.
 ///
 /// A value: [refreshed] returns a new result when the rect moves, and the
 /// same instance when nothing changed, so listeners are only told about real
@@ -15,63 +21,121 @@ class PickResult {
     required this.position,
     required this.candidates,
     required this.index,
-    required this.element,
+    required this.chain,
+    required this.chainIndex,
+    required this.renderObject,
     required this.globalRect,
     required this.ancestor,
     required this.ancestorRect,
+    required this.sourceUnavailable,
   });
 
-  /// A result built by hand, for tests that need no render tree.
+  /// A result built by hand, for tests that need no render tree. The chain
+  /// holds [element] alone, with no location.
   @visibleForTesting
-  const PickResult.debug({
-    required this.position,
-    required this.candidates,
-    required this.index,
-    required this.element,
-    required this.globalRect,
-    this.ancestor,
-    this.ancestorRect,
-  });
+  factory PickResult.debug({
+    required Offset position,
+    required List<RenderCandidate> candidates,
+    required int index,
+    required Element element,
+    required Rect globalRect,
+    RenderObject? ancestor,
+    Rect? ancestorRect,
+  }) => PickResult._(
+    position: position,
+    candidates: candidates,
+    index: index,
+    chain: SourceChain([element], const SourceResolver(tracked: false)),
+    chainIndex: 0,
+    renderObject: candidates[index].renderObject,
+    globalRect: globalRect,
+    ancestor: ancestor,
+    ancestorRect: ancestorRect,
+    sourceUnavailable: true,
+  );
 
   /// Builds a result from [search] at [position].
   ///
+  /// Each candidate's element starts a chain up to [chainBoundary] (by
+  /// default [rootElement]), and the chain's default entry is selected.
+  ///
   /// When [previous] has the same candidates (the same spot clicked again),
-  /// the next candidate is chosen, wrapping around. That reaches a small
-  /// widget hidden under an opaque sibling. Otherwise the first is chosen.
-  /// Candidates whose element cannot be found are passed over. Null when
-  /// nothing is under [position].
+  /// the next candidate whose selection differs from [previous]'s is chosen,
+  /// wrapping around. Several candidates inside one button all refine to the
+  /// button, so this climbs instead of selecting the button again. It also
+  /// reaches a small widget hidden under an opaque sibling. Otherwise the
+  /// first is chosen. Candidates whose element cannot be found are passed
+  /// over. Null when nothing is under [position].
   static PickResult? fromSearch(
     RenderSearchResult search, {
     required Offset position,
     required Element rootElement,
+    Element? chainBoundary,
+    SourceResolver resolver = const SourceResolver(),
     PickResult? previous,
   }) {
     final candidates = search.candidates;
     if (candidates.isEmpty) return null;
-    final start = previous != null && previous._sameCandidates(candidates)
-        ? previous.index + 1
-        : 0;
+    final cycling = previous != null && previous._sameCandidates(candidates);
+    final start = cycling ? previous.index + 1 : 0;
+    PickResult? fallback;
     for (var step = 0; step < candidates.length; step++) {
       final index = (start + step) % candidates.length;
       final candidate = candidates[index];
-      final element = elementFor(candidate.renderObject, root: rootElement);
-      if (element == null) continue;
-      final ancestor = _ancestorOf(
-        candidate.renderObject,
-        candidate.globalRect,
-        root: rootElement.renderObject,
+      final picked = elementFor(candidate.renderObject, root: rootElement);
+      if (picked == null) continue;
+      final chain = resolver.chain(
+        picked,
+        boundary: chainBoundary ?? rootElement,
       );
-      return PickResult._(
+      final chosen = chain.defaultIndex;
+      final result = _build(
         position: position,
         candidates: candidates,
         index: index,
-        element: element,
-        globalRect: candidate.globalRect,
-        ancestor: ancestor?.$1,
-        ancestorRect: ancestor?.$2,
+        chain: chain,
+        chainIndex: chosen ?? 0,
+        sourceUnavailable: chosen == null,
+        root: rootElement.renderObject,
       );
+      if (!cycling || !identical(result.element, previous.element)) {
+        return result;
+      }
+      fallback ??= result;
     }
-    return null;
+    return fallback;
+  }
+
+  static PickResult _build({
+    required Offset position,
+    required List<RenderCandidate> candidates,
+    required int index,
+    required SourceChain chain,
+    required int chainIndex,
+    required bool sourceUnavailable,
+    required RenderObject? root,
+  }) {
+    final picked = candidates[index];
+    final renderObject =
+        _renderObjectOf(chain.elements[chainIndex]) ?? picked.renderObject;
+    final rect = identical(renderObject, picked.renderObject)
+        ? picked.globalRect
+        : RenderSearch.globalRectOf(renderObject) ?? picked.globalRect;
+    final ancestor =
+        _localAncestorOf(chain, chainIndex, rect) ??
+        _renderAncestorOf(renderObject, rect, root: root);
+    return PickResult._(
+      position: position,
+      candidates: candidates,
+      index: index,
+      chain: chain,
+      chainIndex: chainIndex,
+      renderObject: renderObject,
+      globalRect: rect,
+      ancestor: ancestor?.$1,
+      ancestorRect: ancestor?.$2,
+      sourceUnavailable: sourceUnavailable,
+    );
   }
 
   /// Where the pointer was, in global logical pixels.
@@ -83,51 +147,114 @@ class PickResult {
   /// Which of [candidates] is chosen.
   final int index;
 
-  /// The element that owns [renderObject].
-  final Element element;
+  /// The widgets from [pickedElement] up to the app.
+  final SourceChain chain;
+
+  /// Which entry of [chain] is selected.
+  final int chainIndex;
+
+  /// The render object of the selected element: its own, or for a
+  /// component element the nearest one beneath it. The outline and the
+  /// info panel describe this.
+  final RenderObject renderObject;
 
   /// [renderObject]'s paint bounds in global logical pixels, as of the last
   /// [refreshed].
   final Rect globalRect;
 
-  /// The nearest render ancestor whose rect differs from [globalRect], below
-  /// the app root. The rulers measure to it. Milestone 3 changes this to the
-  /// nearest local-project ancestor.
+  /// What the rulers measure to: the nearest local ancestor in [chain]
+  /// whose rect differs from [globalRect]; without one, the nearest render
+  /// ancestor whose rect differs.
   final RenderObject? ancestor;
 
   /// [ancestor]'s paint bounds in global logical pixels.
   final Rect? ancestorRect;
 
-  RenderObject get renderObject => candidates[index].renderObject;
+  /// True when no entry in [chain] has a local source location: outside
+  /// debug, or for a widget built entirely by the framework. The selection
+  /// is then the picked element itself.
+  final bool sourceUnavailable;
+
+  /// The selected entry of [chain].
+  ChainEntry get entry => chain[chainIndex];
+
+  /// The selected element.
+  Element get element => chain.elements[chainIndex];
+
+  /// The element that owns the picked render object.
+  Element get pickedElement => chain.elements.first;
+
+  /// The render object the search found under the pointer.
+  RenderObject get pickedRenderObject => candidates[index].renderObject;
 
   /// This result with [globalRect] read again from the render tree.
   ///
-  /// Null when the element is no longer mounted. The same instance when the
-  /// rect has not changed, or cannot be read right now (for example a scale
-  /// of 0 mid-animation).
+  /// Null when the picked or the selected element is no longer mounted. The
+  /// same instance when nothing has changed, or the rect cannot be read
+  /// right now (for example a scale of 0 mid-animation).
   PickResult? refreshed() {
-    if (!element.mounted) return null;
-    final rect = RenderSearch.globalRectOf(renderObject) ?? globalRect;
+    if (!pickedElement.mounted || !element.mounted) return null;
+    // A component's nearest render object changes when its child is
+    // replaced.
+    final current = _renderObjectOf(element) ?? renderObject;
+    final rect = RenderSearch.globalRectOf(current) ?? globalRect;
     final parent = ancestor;
     final parentRect = parent == null
         ? null
         : RenderSearch.globalRectOf(parent) ?? ancestorRect;
-    if (rect == globalRect && parentRect == ancestorRect) return this;
+    if (identical(current, renderObject) &&
+        rect == globalRect &&
+        parentRect == ancestorRect) {
+      return this;
+    }
     return PickResult._(
       position: position,
       candidates: candidates,
       index: index,
-      element: element,
+      chain: chain,
+      chainIndex: chainIndex,
+      renderObject: current,
       globalRect: rect,
       ancestor: parent,
       ancestorRect: parentRect,
+      sourceUnavailable: sourceUnavailable,
     );
   }
 
+  static RenderObject? _renderObjectOf(Element element) {
+    try {
+      return element.renderObject;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// The nearest local entry above [index] whose render object's rect
+  /// differs from [rect]. A custom widget shares its rect with the root of
+  /// its build, and a ruler of 0 to each edge says nothing.
+  static (RenderObject, Rect)? _localAncestorOf(
+    SourceChain chain,
+    int index,
+    Rect rect,
+  ) {
+    for (
+      int? i = chain.nextLocal(index, up: true);
+      i != null;
+      i = chain.nextLocal(i, up: true)
+    ) {
+      final renderObject = _renderObjectOf(chain.elements[i]);
+      if (renderObject == null) continue;
+      final ancestorRect = RenderSearch.globalRectOf(renderObject);
+      if (ancestorRect != null && ancestorRect != rect) {
+        return (renderObject, ancestorRect);
+      }
+    }
+    return null;
+  }
+
   /// Steps up from [node] until a rect differs from [rect]. Wrappers often
-  /// share one rect (`Padding` inside `Align`), and a ruler of 0 to each
-  /// edge says nothing. Bounded like every walk.
-  static (RenderObject, Rect)? _ancestorOf(
+  /// share one rect (`Padding` inside `Align`). Bounded like every walk.
+  static (RenderObject, Rect)? _renderAncestorOf(
     RenderObject node,
     Rect rect, {
     required RenderObject? root,
@@ -156,6 +283,6 @@ class PickResult {
 
   @override
   String toString() =>
-      'PickResult(${element.widget.runtimeType}, $globalRect, '
+      'PickResult(${entry.name}, $globalRect, '
       '${index + 1} of ${candidates.length})';
 }

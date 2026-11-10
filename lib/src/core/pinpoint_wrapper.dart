@@ -44,6 +44,12 @@ class PinPointWrapper extends StatefulWidget {
 class _PinPointWrapperState extends State<PinPointWrapper> {
   // Late, so a disabled wrapper (release builds) never creates it.
   late final GlobalKey _appKey = GlobalKey(debugLabel: 'pinpoint app');
+
+  /// Directly above the app's own widgets, below Pinpoint's wrappers. A
+  /// picked widget's chain stops here.
+  late final GlobalKey _contentKey = GlobalKey(
+    debugLabel: 'pinpoint app content',
+  );
   PinPointController? _ownController;
   HookRegistry? _hooks;
 
@@ -150,12 +156,15 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
             // transition may finish at once.
             builder: (context, child) =>
                 TickerMode(enabled: !_controller.frozen, child: child!),
-            child: app,
+            // Innermost, so wrappers added later (Milestone 9) stay out of
+            // the chain too.
+            child: KeyedSubtree(key: _contentKey, child: app),
           ),
         ),
         InspectorOverlay(
           controller: _controller,
           appKey: _appKey,
+          contentKey: _contentKey,
           config: widget.config,
         ),
       ],

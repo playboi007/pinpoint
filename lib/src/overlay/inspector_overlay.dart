@@ -1,8 +1,10 @@
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../core/pinpoint_config.dart';
 import '../core/pinpoint_controller.dart';
+import '../search/source_resolver.dart';
 import 'highlight_painter.dart';
 import 'info_panel.dart';
 import 'pick_tracker.dart';
@@ -18,6 +20,7 @@ class InspectorOverlay extends StatefulWidget {
     super.key,
     required this.controller,
     required this.appKey,
+    required this.contentKey,
     required this.config,
   });
 
@@ -34,6 +37,9 @@ class InspectorOverlay extends StatefulWidget {
 
   /// Key of the app's `RepaintBoundary`.
   final GlobalKey appKey;
+
+  /// Key of the element directly above the app's own widgets.
+  final GlobalKey contentKey;
 
   final PinPointConfig config;
 
@@ -60,8 +66,12 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
 
   late PickTracker _tracker = _newTracker();
 
-  PickTracker _newTracker() =>
-      PickTracker(controller: widget.controller, appKey: widget.appKey);
+  PickTracker _newTracker() => PickTracker(
+    controller: widget.controller,
+    appKey: widget.appKey,
+    contentKey: widget.contentKey,
+    resolver: SourceResolver.forConfig(widget.config),
+  );
 
   @override
   void initState() {
@@ -73,9 +83,16 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
   void didUpdateWidget(InspectorOverlay oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != widget.controller ||
-        oldWidget.appKey != widget.appKey) {
+        oldWidget.appKey != widget.appKey ||
+        oldWidget.contentKey != widget.contentKey) {
       _tracker.dispose();
       _tracker = _newTracker();
+    } else if (oldWidget.config.projectRoot != widget.config.projectRoot ||
+        !listEquals(
+          oldWidget.config.localPathHints,
+          widget.config.localPathHints,
+        )) {
+      _tracker.resolver = SourceResolver.forConfig(widget.config);
     }
     if (oldWidget.controller != widget.controller) {
       oldWidget.controller.removeListener(_onControllerChanged);

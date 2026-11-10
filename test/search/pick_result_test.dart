@@ -84,7 +84,10 @@ void main() {
       final pick = pickAt(root, at)!;
       expect(pick.index, 0);
       expect(pick.position, at);
-      expect(pick.element.widget, isA<RichText>());
+      // The Text written here is local; the RichText it builds is not.
+      expect(pick.element.widget, isA<Text>());
+      expect(pick.pickedElement.widget, isA<RichText>());
+      expect(pick.sourceUnavailable, isFalse);
       expect(pick.renderObject, same(tester.renderObject(find.text('hi'))));
       expect(pick.globalRect, tester.getRect(find.text('hi')));
     });
