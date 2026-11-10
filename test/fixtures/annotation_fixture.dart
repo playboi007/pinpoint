@@ -1,16 +1,25 @@
 import 'package:flutter/material.dart';
 
-/// Fixture for the context-capture tests (Milestone 4).
-///
-/// Each `// PIN:<name>` marker names a constructor call: the call on the
-/// same line, or on the next line when the marker stands alone.
+// Fixture for the context-capture tests (Milestone 4).
+//
+// Each `// PIN:<name>` marker names a constructor call: the call on the
+// same line, or on the next line when the marker stands alone.
+
+/// The page as a test's `home`, built here so that every local location
+/// in the golden note is in this file.
+// PIN:order_page
+Widget orderHome() => const OrderPage();
+
 class OrderPage extends StatelessWidget {
   const OrderPage({super.key});
 
   @override
   Widget build(BuildContext context) {
+    // PIN:order_scaffold
     return Scaffold(
+      // PIN:order_center
       body: Center(
+        // PIN:order_column
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [

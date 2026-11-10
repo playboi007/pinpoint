@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../info/widget_info.dart';
 import '../model/annotation.dart';
 import '../model/source_location.dart';
 import '../search/pick_result.dart';
@@ -46,8 +47,14 @@ class ContextCollector {
   /// Longest widget label in the siblings and the subtree.
   static const int maxLabel = 80;
 
-  /// Longest key, URL or route.
+  /// Longest key, URL, route, constraints or parent data.
   static const int maxShortText = 300;
+
+  /// Entries in [TargetInfo.properties].
+  static const int maxProperties = 20;
+
+  /// Longest description, property value or section label.
+  static const int maxPropertyText = 200;
 
   /// Field names whose collector throws, to test the error path.
   @visibleForTesting
@@ -68,19 +75,8 @@ class ContextCollector {
     required BuildContext context,
   }) {
     final watch = Stopwatch()..start();
-    final errors = <String>[];
-    T? field<T extends Object>(String name, T? Function() read) {
-      try {
-        if (debugFailFields.contains(name)) {
-          throw StateError('pinpoint: $name failed on purpose');
-        }
-        return read();
-      } catch (_) {
-        errors.add(name);
-        return null;
-      }
-    }
-
+    final fields = _Fields();
+    final field = fields.read;
     final paths = selection.chain.resolver.paths;
     final now = _clock();
     final note = Annotation(
@@ -91,7 +87,7 @@ class ContextCollector {
       app: _app(paths),
       page: field('page', () => _page(context, selection)) ?? const PageInfo(),
       target:
-          field('target', () => _target(selection, paths)) ??
+          field('target', () => _target(selection, paths, fields)) ??
           TargetInfo(
             widget: typeName(selection.element),
             sourceUnavailable: selection.sourceUnavailable,
@@ -112,7 +108,7 @@ class ContextCollector {
         ),
       ),
       inherited: field('inherited', () => _inherited(selection.element)),
-      errors: errors,
+      errors: fields.errors,
     );
     lastElapsed = watch.elapsed;
     assert(() {
@@ -186,15 +182,132 @@ class ContextCollector {
     return url.path.isEmpty ? null : url.path;
   }
 
-  static TargetInfo _target(PickResult selection, SourcePaths paths) {
+  /// The selected widget, from the same [WidgetInfo] the info panel
+  /// shows, so the panel and the note never disagree.
+  ///
+  /// Text from an obscured field never leaves: its own text is replaced,
+  /// and any other value that contains it is masked whole (engineering
+  /// rule 9). Masking cannot fail on its own; if the scan for obscured
+  /// fields throws, the whole target is left empty.
+  static TargetInfo _target(
+    PickResult selection,
+    SourcePaths paths,
+    _Fields fields,
+  ) {
+    final field = fields.read;
     final entry = selection.entry;
+    final element = selection.element;
+    final widget = element.widget;
+    final scan = _TextScan.of(element);
+    final mask = scan.mask;
+    final info = field(
+      'target.info',
+      () => WidgetInfo.fromRenderObject(selection.renderObject),
+    );
     final key = entry.key;
     return TargetInfo(
       widget: entry.name,
-      key: key == null ? null : clipText(key.toString(), maxShortText),
+      description: field('target.description', () => mask(_describe(widget))),
+      key: key == null ? null : mask(clipText(key.toString(), maxShortText)),
       source: _ref(entry.location, paths),
       sourceUnavailable: selection.sourceUnavailable,
+      rect: info == null
+          ? null
+          : PayloadRect(
+              info.globalPosition.dx,
+              info.globalPosition.dy,
+              info.size.width,
+              info.size.height,
+            ),
+      renderObject: info?.renderType,
+      // Strings, so unbounded constraints (`Infinity`) stay valid JSON.
+      constraints: field(
+        'target.constraints',
+        () => _clip(info?.constraints?.toString()),
+      ),
+      // Flex factor, fit and offset live here.
+      parentData: field(
+        'target.parentData',
+        () => _clip(selection.renderObject.parentData?.toString(), mask),
+      ),
+      text: field('target.text', () => scan.text),
+      properties:
+          field('target.properties', () => _properties(widget, mask)) ??
+          const <String, String>{},
+      sections: info == null
+          ? const <String, Map<String, String>>{}
+          : field(
+                  'target.sections',
+                  () => {
+                    for (final section in info.sections)
+                      section.title: {
+                        for (final p in section.properties)
+                          p.name: mask(clipText(p.label, maxPropertyText)),
+                      },
+                  },
+                ) ??
+                const <String, Map<String, String>>{},
     );
+  }
+
+  /// `toStringShort()` plus the values shown without a name, for example
+  /// `Text("Save changes")` or `Icon(IconData(U+0E161))`.
+  static String _describe(Widget widget) {
+    String short;
+    try {
+      short = widget.toStringShort();
+    } catch (_) {
+      short = widget.runtimeType.toString();
+    }
+    final unnamed = <String>[];
+    try {
+      for (final property in widget.toDiagnosticsNode().getProperties()) {
+        if (property.showName) continue;
+        final description = _describeProperty(property);
+        if (description != null) unnamed.add(description);
+      }
+    } catch (_) {
+      // Author code; the short form alone is still useful.
+    }
+    final text = unnamed.isEmpty ? short : '$short(${unnamed.join(', ')})';
+    return clipText(text, maxPropertyText);
+  }
+
+  /// The widget's own named diagnostics at info level or above with a
+  /// value, as `name: description`. At most [maxProperties].
+  static Map<String, String> _properties(
+    Widget widget,
+    String Function(String) mask,
+  ) {
+    final properties = <String, String>{};
+    for (final property in widget.toDiagnosticsNode().getProperties()) {
+      if (properties.length >= maxProperties) break;
+      final name = property.name;
+      if (name == null || !property.showName) continue;
+      final description = _describeProperty(property);
+      if (description == null) continue;
+      properties[clipText(name, maxLabel)] = mask(description);
+    }
+    return properties;
+  }
+
+  /// [property]'s description, or null when it is below info level, has no
+  /// value, or its author code throws. Colors are hex: `Color.toString()`
+  /// changed format across Flutter releases.
+  static String? _describeProperty(DiagnosticsNode property) {
+    try {
+      final level = property.level;
+      if (level.index < DiagnosticLevel.info.index ||
+          level == DiagnosticLevel.off) {
+        return null;
+      }
+      final value = property.value;
+      if (value == null) return null;
+      if (value is Color) return formatColor(value);
+      return clipText(property.toDescription(), maxPropertyText);
+    } catch (_) {
+      return null;
+    }
   }
 
   static List<AncestorInfo> _ancestors(
@@ -278,6 +391,87 @@ class ContextCollector {
           column: location.column,
         );
 
-  static String? _clip(String? text) =>
-      text == null ? null : clipText(text, maxShortText);
+  static String? _clip(String? text, [String Function(String)? mask]) {
+    if (text == null) return null;
+    final clipped = clipText(text, maxShortText);
+    return mask == null ? clipped : mask(clipped);
+  }
+}
+
+/// Runs each payload field's collector and records the ones that fail.
+class _Fields {
+  final List<String> errors = <String>[];
+
+  T? read<T extends Object>(String name, T? Function() collect) {
+    try {
+      if (ContextCollector.debugFailFields.contains(name)) {
+        throw StateError('pinpoint: $name failed on purpose');
+      }
+      return collect();
+    } catch (_) {
+      errors.add(name);
+      return null;
+    }
+  }
+}
+
+/// The text under an element, and the text of every obscured field in it
+/// or around it, which must never leave the app.
+class _TextScan {
+  _TextScan._(this._parts, this._secrets);
+
+  /// Scans at most [maxNodes] elements under [element], depth first. An
+  /// obscured field beyond that is not read either, so its text cannot
+  /// leak through [text].
+  factory _TextScan.of(Element element, {int maxNodes = 5000}) {
+    final secrets = <String>{};
+    final parts = <String>[];
+    void field(EditableText editable) {
+      final value = editable.controller.text;
+      if (editable.obscureText && value.isNotEmpty) secrets.add(value);
+    }
+
+    // The target can be inside the field, for example its EditableText's
+    // own render widget.
+    final around = element.findAncestorWidgetOfExactType<EditableText>();
+    if (around != null) field(around);
+    final stack = <Element>[element];
+    var length = 0;
+    for (var visited = 0; stack.isNotEmpty && visited < maxNodes; visited++) {
+      final current = stack.removeLast();
+      final widget = current.widget;
+      String? part;
+      if (widget is RichText) {
+        part = widget.text.toPlainText();
+      } else if (widget is EditableText) {
+        field(widget);
+        part = widget.obscureText ? masked : widget.controller.text;
+      }
+      if (part != null && part.isNotEmpty && length <= maxText) {
+        parts.add(part);
+        length += part.length + 1;
+      }
+      final children = <Element>[];
+      current.visitChildren(children.add);
+      stack.addAll(children.reversed);
+    }
+    return _TextScan._(parts, secrets);
+  }
+
+  static const String masked = '[masked]';
+
+  /// Longest [text].
+  static const int maxText = 300;
+
+  final List<String> _parts;
+  final Set<String> _secrets;
+
+  /// Text shown under the element, joined with spaces and cut to
+  /// [maxText]. Null when there is none.
+  late final String? text = _parts.isEmpty
+      ? null
+      : mask(clipText(_parts.join(' '), maxText));
+
+  /// [value], or [masked] when it holds an obscured field's text.
+  String mask(String value) => _secrets.any(value.contains) ? masked : value;
 }

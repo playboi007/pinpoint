@@ -1,0 +1,171 @@
+{
+  "schema": 1,
+  "intent": "improve",
+  "comment": "Label truncates at narrow widths",
+  "app": {
+    "buildMode": "debug",
+    "platform": "android",
+    "projectRoot": "<root>"
+  },
+  "page": {
+    "url": null,
+    "route": "/",
+    "viewport": {
+      "width": 800,
+      "height": 600
+    },
+    "devicePixelRatio": 3,
+    "textScale": 1,
+    "brightness": "light",
+    "locale": "en_US"
+  },
+  "target": {
+    "widget": "Text",
+    "description": "Text(\"Save changes\")",
+    "key": null,
+    "source": {
+      "file": "test/fixtures/annotation_fixture.dart",
+      "line": "PIN:bar_text"
+    },
+    "sourceUnavailable": false,
+    "rect": {
+      "x": 323.4,
+      "y": 290,
+      "w": 169.2,
+      "h": 20
+    },
+    "renderObject": "RenderParagraph",
+    "constraints": "BoxConstraints(unconstrained)",
+    "parentData": "offset=Offset(0.0, 10.0)",
+    "text": "Save changes",
+    "properties": {
+      "overflow": "ellipsis",
+      "maxLines": "1"
+    },
+    "sections": {
+      "Text": {
+        "text": "Save changes",
+        "fontSize": "14.0",
+        "fontWeight": "w500 (Medium)",
+        "color": "#6750A4"
+      }
+    }
+  },
+  "ancestors": [
+    {
+      "widget": "ElevatedButton",
+      "source": {
+        "file": "test/fixtures/annotation_fixture.dart",
+        "line": "PIN:bar_button"
+      }
+    },
+    {
+      "widget": "Row",
+      "source": {
+        "file": "test/fixtures/annotation_fixture.dart",
+        "line": "PIN:bar_row"
+      }
+    },
+    {
+      "widget": "Padding",
+      "source": {
+        "file": "test/fixtures/annotation_fixture.dart",
+        "line": "PIN:bar_padding"
+      }
+    },
+    {
+      "widget": "SaveChangesBar",
+      "source": {
+        "file": "test/fixtures/annotation_fixture.dart",
+        "line": "PIN:order_save_bar"
+      }
+    },
+    {
+      "widget": "Column",
+      "source": {
+        "file": "test/fixtures/annotation_fixture.dart",
+        "line": "PIN:order_column"
+      }
+    },
+    {
+      "widget": "Center",
+      "source": {
+        "file": "test/fixtures/annotation_fixture.dart",
+        "line": "PIN:order_center"
+      }
+    },
+    {
+      "widget": "Scaffold",
+      "source": {
+        "file": "test/fixtures/annotation_fixture.dart",
+        "line": "PIN:order_scaffold"
+      }
+    },
+    {
+      "widget": "OrderPage",
+      "source": {
+        "file": "test/fixtures/annotation_fixture.dart",
+        "line": "PIN:order_page"
+      }
+    }
+  ],
+  "frameworkChain": [
+    "RichText",
+    "Text",
+    "Align",
+    "Padding",
+    "Listener",
+    "RawGestureDetector",
+    "GestureDetector",
+    "Semantics",
+    "DefaultSelectionStyle",
+    "Builder",
+    "MouseRegion",
+    "Semantics",
+    "_FocusInheritedScope",
+    "Focus",
+    "_ActionsScope",
+    "Actions",
+    "_ParentInkResponseProvider",
+    "_InkResponseStateWidget",
+    "InkWell",
+    "DefaultSelectionStyle",
+    "IconTheme",
+    "IconTheme",
+    "InheritedCupertinoTheme",
+    "CupertinoTheme",
+    "_InheritedTheme",
+    "Theme",
+    "AnimatedTheme",
+    "DefaultTextStyle",
+    "AnimatedDefaultTextStyle",
+    "_InkFeatures",
+    "NotificationListener<LayoutChangedNotification>",
+    "CustomPaint",
+    "_ShapeBorderPaint",
+    "PhysicalShape",
+    "_MaterialInterior",
+    "Material",
+    "ConstrainedBox",
+    "_InputPadding",
+    "Semantics",
+    "ElevatedButton"
+  ],
+  "siblings": {
+    "parent": "Row",
+    "index": 1,
+    "count": 3,
+    "firstIndex": 0,
+    "children": [
+      "Icon",
+      "ElevatedButton",
+      "SizedBox"
+    ]
+  },
+  "subtree": "Text  test/fixtures/annotation_fixture.dart:PIN:bar_text\n  RichText",
+  "inherited": {
+    "themeBrightness": "light",
+    "useMaterial3": true,
+    "textDirection": "ltr"
+  }
+}

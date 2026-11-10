@@ -33,3 +33,14 @@ int markerColumn(String file, String marker, String code) {
 }
 
 const String annotationFixture = 'test/fixtures/annotation_fixture.dart';
+
+/// Every `// PIN:<marker>` in [file], by the line it names.
+Map<int, String> markersOf(String file) {
+  final pattern = RegExp(r'// PIN:(\w+)');
+  final lines = File(file).readAsLinesSync();
+  return {
+    for (var i = 0; i < lines.length; i++)
+      if (pattern.firstMatch(lines[i]) case final match?)
+        (lines[i].trimLeft().startsWith('//') ? i + 2 : i + 1): match[1]!,
+  };
+}
