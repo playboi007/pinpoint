@@ -28,6 +28,7 @@ Result of the "Verify first" lists in `PLAN.md`. Where this file differs from th
 | 15 | MCP transports and `package:dart_mcp` | Claude Code: stdio, HTTP, SSE. `dart_mcp`: stdio only. |
 | 16 | Tool list of the official Dart and Flutter MCP server | 14 tools by default. See overlap list. |
 | 17 | Facts found in Session 1 | Freeze jumps on resume; `FocusNode.context` outlives detach; `Overlay.wrap` exists. |
+| 18 | Facts found in Session 2 | `RenderObject.constraints` is protected; transient callbacks see old layout; scroll passthrough rules. |
 
 ---
 
@@ -379,6 +380,14 @@ Extra tools exist behind `--enable` (`launch_app`, `list_devices`, `run_tests`, 
 - **[source]** `Material(type: MaterialType.transparency)` does not absorb hits (`material/material.dart:491`). A layer built on it lets pointer events through except where a child takes them.
 - **[source]** `MaterialApp.builder` output is wrapped in `ScaffoldMessenger`, `Theme` and the `WidgetsApp` `Shortcuts`, `FocusTraversalGroup` and `Localizations` (`material/app.dart:1042`, `widgets/app.dart:1725`). A Pinpoint focus node that returns `handled` stops keys before those `Shortcuts`.
 - **[run-vm]** `WidgetsBinding.reassembleApplication()` completes after the next frame. In a test, pump before awaiting it.
+
+## 18. Facts found in Session 2
+
+- **[source]** `RenderObject.constraints` is `@protected` (`rendering/object.dart:2593`). The `RenderBox` (`box.dart:2558`) and `RenderSliver` (`sliver.dart:1335`) overrides carry no annotation, so read it through a typed receiver (`WidgetInfo` does this in `constraintsOf`). The plan's `ro.constraints` on a plain `RenderObject` fails the strict analyzer.
+- **[run-vm]** A transient frame callback (`scheduleFrameCallback`, `scheduler/binding.dart:608`) runs before build and layout of its frame, so it sees the last frame's geometry. After `pointerScroll`, a pick there still finds the item that just scrolled away. Pick in a post-frame callback after anything that moves layout.
+- **[run-vm]** `Transform.scale` and `Transform.rotate` keep their own layout box; only the child is transformed. At the center of a scaled-up child, the `RenderTransform` (smaller area) is the smallest candidate. The scaled child wins only outside the original box.
+- **[source]** `ScrollPosition.pointerScroll(double)` is public (`widgets/scroll_position.dart:952`). `Scrollable` handles a wheel like this (`widgets/scrollable.dart:933-983`): flip the axis for a mouse wheel while Shift is held, negate the delta for a reversed axis direction, skip when `physics.shouldAcceptUserOffset` is false or the clamped target equals `pixels`, then `pointerScroll(delta)` and `event.respond(allowPlatformDefault: false)`. Pinpoint copies all of it except the Shift flip; it uses the larger delta, as the plan says.
+- **[run-vm]** Pick time, 500-item `ListTile` list, VM debug test: p50 0.27 ms, p95 0.87 ms over 200 picks, with `debugDescribeChildren` and transforms carried down. **[unverified]** on web debug (DDC).
 
 ---
 

@@ -4,7 +4,7 @@ A debug-only Flutter package. Click any widget in a running app, write a comment
 
 Web is the first target.
 
-> **Status: Milestone 1 (Session 1).** The wrapper, the inspect mode (Alt+Shift+C or the launcher button), Esc and freeze (P while picking) work. Picking a widget comes in Milestone 2. Empty files under `lib/src/` and `bin/` are for later milestones. See `PLAN.md` for the build order.
+> **Status: Milestone 2 (Session 2).** The wrapper, the inspect mode (Alt+Shift+C or the launcher button), Esc and freeze (P while picking) work. Hover outlines the widget under the pointer, a click selects it and opens a draggable info panel, rulers measure to the parent (hold Alt and hover another widget to measure the gap), and the mouse wheel still scrolls the app. Source locations come in Milestone 3. Empty files under `lib/src/` and `bin/` are for later milestones. See `PLAN.md` for the build order.
 
 ```dart
 MaterialApp(
@@ -28,10 +28,10 @@ Source locations come from Flutter's `--track-widget-creation`, which is on only
 ```text
 PLAN.md             # the implementation plan (read this first)
 docs/api-notes.md   # Flutter SDK API checks; overrides PLAN.md where they differ
-lib/                # package source (empty files, by design)
+lib/                # package source (empty files are later milestones)
 bin/                # bridge and setup entry points (empty)
 example/            # manual test bed: six screens
-test/               # package tests (one spike test so far)
+test/               # package tests
 ```
 
 ## Development
@@ -48,8 +48,14 @@ flutter test test/source/spike_location_test.dart
 # Milestone 1: wrapper, modes, keys, launcher, freeze
 flutter test test/core
 
+# Milestone 2: picking, highlight, info panel, rulers, scroll passthrough
+flutter test test/search test/info test/overlay
+
 # the example app
 cd example && flutter run -d chrome
+
+# the same, printing p50 and p95 pick time after every 200 hover picks
+cd example && flutter run -d chrome --dart-define=PINPOINT_PICK_TIMINGS=true
 ```
 
 ## Example screens
