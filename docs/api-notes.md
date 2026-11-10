@@ -35,6 +35,7 @@ Result of the "Verify first" lists in `PLAN.md`. Where this file differs from th
 | 22 | Facts found in Session 6 | `RenderObject.layer` is protected, so capture the whole boundary; `endOfFrame` forces a frame; images in tests need `runAsync`. |
 | 23 | Facts found in Session 7 | `dart run pinpoint:bridge` works from a Flutter host app; an early 413 is lost unless the body is read; widget tests fake `HttpClient`. |
 | 24 | Facts found in Session 8 | A lazy list re-uses tree order, so pins need the item index; visibility from offstage marks and clips; Flutter PNGs decode with `dart:io` zlib; MCP over HTTP by hand. |
+| 25 | Facts found in Session 9 | Apple platforms add a `Shortcuts` layer outside web, so a platform switch remounts the builder subtree; reassemble from inside a frame fails in tests; the platform setter throws outside debug. |
 
 ---
 
@@ -456,6 +457,18 @@ Extra tools exist behind `--enable` (`launch_app`, `list_devices`, `run_tests`, 
 - **[run-vm]** `Element.visitChildren` walks every mounted element, offstage routes included; a full walk of the example's long list screen is about 1.5 ms cold and 0.7 ms warm in the VM (resolution cached per widget instance, type filter first). **[unverified]** On web (DDC, about 20 times slower), expect about 30 ms cold and 15 ms warm against the plan's 300 ms and 20 ms budgets.
 - **[run-vm]** A post-frame callback that skips work (a throttle) must arrange its own retry: the app may draw no further frame. `PinTracker` uses a one-shot `Timer`, which draws only if a pin moves (rule 2).
 - **[run-vm]** `ui.Image.toByteData(format: png)` writes 8-bit RGBA, not interlaced, with per-row filters. `dart:io`'s `zlib` inflates it, so the bridge (plain Dart) can read, shrink and re-encode a screenshot without an image package (`lib/src/bridge/png_resize.dart`).
+
+## 25. Facts found in Session 9
+
+- **[source]** `DefaultTextEditingShortcuts.build` (`widgets/default_text_editing_shortcuts.dart:1003`) adds a second `Shortcuts` (the "disabling" shortcuts) when `_getDisablingShortcut()` (`:972`) is not null: on web for every platform, outside web only for iOS and macOS. `WidgetsApp` builds it above `MaterialApp.builder`. **[run-vm]** So outside web a switch of `debugDefaultTargetPlatformOverride` between an Apple and a non-Apple platform, followed by a reassemble, changes the tree above the builder: Flutter mounts everything from there down to the Navigator again, `PinPointWrapper`'s State included. The Navigator has a `GlobalObjectKey` and moves over, so the routes keep their state. Flutter's own platform override (DevTools) does the same. **[unverified]** on web, where the layer is always there.
+- **[run-vm]** When a wrapper State is mounted again, the new State's `initState` runs before the old State's `dispose`. A global restored on dispose would undo the new State's write: `HookRegistry.slot` hands a slot over to the newest holder, with the original value.
+- **[source]** `debugDefaultTargetPlatformOverride`'s setter throws a `FlutterError` outside debug builds (`foundation/platform.dart:106`). The panel disables the switch there.
+- **[source]** `BindingBase.reassembleApplication` (`foundation/binding.dart:719`) runs `performReassemble` inside `lockEvents`; `RendererBinding.performReassemble` (`rendering/binding.dart:705`) calls `scheduleWarmUpFrame()` after an `await`. The real one returns early outside the idle phase (`scheduler/binding.dart:1038`), but `flutter_test`'s version (`flutter_test/lib/src/binding.dart:2352`) draws a frame at once. **[run-vm]** Started from a pointer event or a post-frame callback, that frame lands inside another one: "Tried to build dirty widget in the wrong build scope", or the `schedulerPhase == idle` assertion in `handleBeginFrame`. Pinpoint reassembles from `Timer.run`. In a test, `tester.pump()` with no duration does not fire that timer; `pump(Duration.zero)` does.
+- **[source]** `flutter test` checks `timeDilation` at the end of each test (`flutter_test/lib/src/binding.dart:1994`, "The timeDilation was changed and not reset by the test"), like the platform override (`foundation/debug.dart:42`).
+- **[run-vm]** `Paint.color` comes back from 32-bit floats, so `paints..rect(color: c)` can fail for a color that was painted exactly. Compare `toARGB32()` in a `something` step.
+- **[run-vm]** `Scaffold` removes `viewInsets` from its body's `MediaQuery`. A probe inside the body reads 0 under the fake keyboard; read above the `Scaffold`.
+- **[run-vm]** A `RenderBox` that scales its child with `applyPaintTransform` (`RenderViewportFrame`) keeps every global rect right: `getTransformTo(null)` (picker, outlines, pins) and the screenshot's inverse transform both go through it. A pick walk that starts at the app's boundary does not see the frame's clip; `RenderSearch.isOnApp` refuses positions outside the boundary.
+- **[unverified]** In Chrome: the frame scaled down in a small window, the checker and label, the platform switch on web (no remount expected), and `View.of(context)` code next to the viewport override.
 
 ---
 

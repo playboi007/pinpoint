@@ -4,7 +4,7 @@ A debug-only Flutter package. Click any widget in a running app, write a comment
 
 Web is the first target.
 
-> **Status: Milestone 8 (Session 8).** The wrapper, the inspect mode (Alt+Shift+C or the launcher button), Esc and freeze (P while picking) work. Hover outlines the widget under the pointer, and a click selects the nearest widget written in your own project (a `Text`, not the `RichText` it builds), with `file:line` in the label. The click opens a panel next to the widget with a clickable breadcrumb and two tabs. Comment: choose Bug, Improve or Question, type the comment, then Send (or Ctrl/Cmd+Enter) to every sink in `PinPointConfig.sinks`, with a toast per sink, or Copy as Markdown. The comment is kept until a send succeeds. Info: the widget's layout data; there, Arrow Up or `[` moves to the next local ancestor, Arrow Down or `]` moves back, and Alt plus an arrow steps through framework widgets too. Rulers measure to the nearest local ancestor (hold Alt and hover another widget to measure the gap), and the mouse wheel still scrolls the app. The note is an `Annotation` (schema 2, under 8 KB as JSON). With "Include screenshot" ticked (the default), Send adds a PNG crop of the widget with a red outline, at most 1600 px wide (`PinPointConfig.maxScreenshotWidth`). `HttpSink` posts each note to the local bridge (`dart run pinpoint:bridge`), which writes it into `.pinpoint/open/` as Markdown, JSON and PNG; `ClipboardSink` copies the Markdown. When picking starts and the bridge does not answer, a "bridge offline" badge shows. Each note stays on screen as a numbered pin on its widget, through scroll, resize and hot reload; Save draft keeps a note as a draft pin that no agent sees until you send it. A click on a pin opens its note: Send, Send all, Delete, and Accept or Reopen once the agent is done. The agent reads and resolves notes through MCP tools on the bridge, and a resolved pin shows a tick and fades within 3 seconds. Empty files under `lib/src/` are for later milestones. See `PLAN.md` for the build order.
+> **Status: Milestone 9 (Session 9).** The wrapper, the inspect mode (Alt+Shift+C or the launcher button), Esc and freeze (P while picking) work. Hover outlines the widget under the pointer, and a click selects the nearest widget written in your own project (a `Text`, not the `RichText` it builds), with `file:line` in the label. The click opens a panel next to the widget with a clickable breadcrumb and two tabs. Comment: choose Bug, Improve or Question, type the comment, then Send (or Ctrl/Cmd+Enter) to every sink in `PinPointConfig.sinks`, with a toast per sink, or Copy as Markdown. The comment is kept until a send succeeds. Info: the widget's layout data; there, Arrow Up or `[` moves to the next local ancestor, Arrow Down or `]` moves back, and Alt plus an arrow steps through framework widgets too. Rulers measure to the nearest local ancestor (hold Alt and hover another widget to measure the gap), and the mouse wheel still scrolls the app. The note is an `Annotation` (schema 3, under 8 KB as JSON). With "Include screenshot" ticked (the default), Send adds a PNG crop of the widget with a red outline, at most 1600 px wide (`PinPointConfig.maxScreenshotWidth`). `HttpSink` posts each note to the local bridge (`dart run pinpoint:bridge`), which writes it into `.pinpoint/open/` as Markdown, JSON and PNG; `ClipboardSink` copies the Markdown. When picking starts and the bridge does not answer, a "bridge offline" badge shows. Each note stays on screen as a numbered pin on its widget, through scroll, resize and hot reload; Save draft keeps a note as a draft pin that no agent sees until you send it. A click on a pin opens its note: Send, Send all, Delete, and Accept or Reopen once the agent is done. The agent reads and resolves notes through MCP tools on the bridge, and a resolved pin shows a tick and fades within 3 seconds. The What-if button (bottom-left while picking) changes what the app inherits without touching app code: viewport size (presets, rotate, free width and height), text scale, bold text, safe areas, a fake keyboard, RTL, the app's light or dark theme (or `PinPointConfig.themeVariants`), a Material 3 seed color, the platform and slow motion. While any switch is on, the bar stays and names it, with a one-click reset, and every note records the overrides in `environment`. Empty files under `lib/src/` are for later milestones. See `PLAN.md` for the build order.
 
 ```dart
 MaterialApp(
@@ -63,7 +63,15 @@ updates. Leave .pinpoint/drafts/ alone: drafts are not sent yet.
 - Sinks: clipboard, and a local bridge that writes notes into `.pinpoint/`.
 - Agent hand-off: an instruction section, so the agent works the notes in `.pinpoint/open/`.
 - Pins and drafts, and MCP tools on the bridge, so a resolved note clears its pin in the running app.
-- Later: what-if environment switches, automatic problem detection, live tweak, and agent drive and verify.
+- What-if switches: viewport, text scale, safe areas, keyboard, direction, theme, platform and slow motion.
+- Later: automatic problem detection, live tweak, and agent drive and verify.
+
+What the what-if switches cannot do:
+
+- Code that reads `View.of(context).physicalSize` or `PlatformDispatcher` directly sees the real window, not the viewport. That is a finding about the app: read `MediaQuery` instead.
+- The device pixel ratio cannot be faked. A 390-wide viewport on a 1x screen renders at 1x.
+- The color scheme switch is Material 3 only. In a Material 2 theme, `copyWith(colorScheme:)` does not re-derive the component themes, so it is off there.
+- The platform switch rebuilds the whole app, like hot reload, and clears the selection. Outside web (desktop, `flutter test`), a switch between iOS or macOS and another platform also mounts the widgets above the Navigator again, because Flutter adds a `Shortcuts` layer only on Apple platforms. The routes keep their state; pass your own `PinPointController` to keep the switches too.
 
 Source locations come from Flutter's `--track-widget-creation`, which is on only in debug builds. The package defaults to `enabled: kDebugMode`.
 
@@ -120,6 +128,10 @@ flutter test test/search/source_index_test.dart test/overlay/pins_test.dart \
   test/overlay/note_sync_test.dart test/core/note_book_test.dart test/model/note_status_test.dart \
   test/bridge test/sink/bridge_client_test.dart
 
+# Milestone 9: viewport frame, environment host, globals, note environment, panel
+flutter test test/env test/core/hook_registry_test.dart
+(cd example && flutter test test/environment_probe_test.dart)
+
 # after a deliberate change to the note's shape: rewrite the golden, review the diff
 flutter test --update-goldens test/capture/target_test.dart
 flutter test --update-goldens test/sink/markdown_formatter_test.dart
@@ -150,7 +162,7 @@ cd example && flutter run -d chrome --wasm
 
 ## Example screens
 
-Counter and spinner, long list, dialog and bottom sheet, nested navigator, `CustomPaint`, form with text fields and a custom `SaveBar` widget, and `HtmlElementView` (web only).
+Counter and spinner, long list, dialog and bottom sheet, nested navigator, `CustomPaint`, form with text fields and a custom `SaveBar` widget, `HtmlElementView` (web only), and a What-if probe that prints what the app inherits.
 
 ## License
 
