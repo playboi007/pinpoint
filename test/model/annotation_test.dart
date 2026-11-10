@@ -123,9 +123,9 @@ void main() {
     expect(actual, expected);
   });
 
-  test('schema is version 2 and keys come in a fixed order', () {
+  test('schema is version 3 and keys come in a fixed order', () {
     final json = example().toJson();
-    expect(json['schema'], 2);
+    expect(json['schema'], 3);
     expect(json.keys.take(6), [
       'schema',
       'id',
@@ -134,6 +134,53 @@ void main() {
       'intent',
       'comment',
     ]);
+  });
+
+  group('environment (Milestone 9)', () {
+    Annotation note({Map<String, Object?>? environment}) => Annotation(
+      id: 'pp_1',
+      createdAt: DateTime.utc(2026),
+      intent: AnnotationIntent.bug,
+      comment: '',
+      app: const AppInfo(buildMode: 'debug', platform: 'web'),
+      page: const PageInfo(),
+      target: const TargetInfo(widget: 'Text', sourceUnavailable: true),
+      environment: environment,
+    );
+
+    test('is left out when nothing is overridden', () {
+      expect(note().toJson().containsKey('environment'), isFalse);
+      expect(
+        note(environment: const {}).toJson().containsKey('environment'),
+        isFalse,
+      );
+    });
+
+    test('follows the page and holds only the overridden fields', () {
+      final json = note(
+        environment: const {
+          'viewport': {'width': 360, 'height': 800},
+          'textScale': 1.5,
+        },
+      ).toJson();
+      final keys = json.keys.toList();
+      expect(keys.indexOf('environment'), keys.indexOf('page') + 1);
+      expect(json['environment'], {
+        'viewport': {'width': 360, 'height': 800},
+        'textScale': 1.5,
+      });
+    });
+
+    test('reads back from JSON', () {
+      final back = Annotation.fromJson(
+        jsonDecode(
+          jsonEncode(
+            note(environment: const {'textDirection': 'rtl'}).toJson(),
+          ),
+        ) as Map<String, Object?>,
+      )!;
+      expect(back.environment, {'textDirection': 'rtl'});
+    });
   });
 
   test('empty errors and truncated lists are left out', () {

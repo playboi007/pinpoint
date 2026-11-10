@@ -363,6 +363,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
         controller.draft.text.text,
         controller.draft.intent,
         context: context,
+        environment: controller.environment.toJson(),
       );
     } catch (error) {
       _toasts.show('Could not build the note: ${_short(error)}', error: true);

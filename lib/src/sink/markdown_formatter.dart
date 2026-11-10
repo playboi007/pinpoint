@@ -83,6 +83,7 @@ String markdownFromJson(Map<String, Object?> json) {
       'textScale ${textScale.contains('.') ? textScale : '$textScale.0'}',
   ];
   if (pageParts.isNotEmpty) out.writeln('Page: ${_line(pageParts.join('  '))}');
+  if (whatIfLine(json['environment']) case final whatIf?) out.writeln(whatIf);
 
   final rect = _map(target['rect']);
   final x = _number(rect['x']);
@@ -158,6 +159,34 @@ String markdownFromJson(Map<String, Object?> json) {
     }
   }
   return out.toString();
+}
+
+/// The what-if overrides of a note (its `environment` JSON) on one line,
+/// for example `What-if: viewport 360x800, textScale 1.5, rtl`, or null
+/// when there are none. A field of the wrong type is skipped.
+String? whatIfLine(Object? environment) {
+  final env = _map(environment);
+  final viewport = _map(env['viewport']);
+  final width = _number(viewport['width']);
+  final height = _number(viewport['height']);
+  final safe = _map(env['safeArea']);
+  final insets = [
+    for (final side in ['left', 'top', 'right', 'bottom']) _number(safe[side]),
+  ];
+  final parts = [
+    if (width != null && height != null) 'viewport ${width}x$height',
+    if (_number(env['textScale']) case final t?) 'textScale $t',
+    if (env['boldText'] == true) 'boldText',
+    if (insets.every((i) => i != null)) 'safeArea ${insets.join(',')}',
+    if (_number(env['keyboardHeight']) case final k?) 'keyboard $k',
+    ?_string(env['textDirection']),
+    ?_string(env['brightness']),
+    if (_string(env['themeVariant']) case final t?) 'theme $t',
+    if (_string(env['seedColor']) case final c?) 'seed $c',
+    if (_string(env['platform']) case final p?) 'platform $p',
+    if (_number(env['timeDilation']) case final d?) 'slow motion ${d}x',
+  ];
+  return parts.isEmpty ? null : 'What-if: ${_line(parts.join(', '))}';
 }
 
 /// [constraints] (a `toString()` of the target's constraints) without the

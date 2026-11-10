@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pinpoint/src/bridge/bridge_server.dart';
 import 'package:pinpoint/src/bridge/mcp_server.dart';
 import 'package:pinpoint/src/bridge/png_resize.dart';
+import 'package:pinpoint/src/model/annotation.dart' show annotationSchema;
 
 /// Milestone 8, build step 4: the MCP tools, tested with a scripted JSON-RPC
 /// client over HTTP before any real agent connects (PLAN.md, how to
@@ -260,7 +261,7 @@ Map<String, Object?> note(
   String status = 'submitted',
   Uint8List? png,
 }) => {
-  'schema': 2,
+  'schema': annotationSchema,
   'id': id,
   'createdAt': '2026-11-10T14:00:00Z',
   'status': status,

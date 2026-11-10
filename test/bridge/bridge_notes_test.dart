@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pinpoint/src/bridge/bridge_server.dart';
+import 'package:pinpoint/src/model/annotation.dart' show annotationSchema;
 
 /// Milestone 8, build step 3: the bridge keeps one JSON file per note and
 /// tells the app what changed.
@@ -332,7 +333,7 @@ void main() {
   });
 }
 
-/// A schema 2 note as the app sends it.
+/// A note of the current schema as the app sends it.
 Map<String, Object?> note(
   String id, {
   String status = 'submitted',
@@ -340,7 +341,7 @@ Map<String, Object?> note(
   String? origin = 'http://localhost:5000',
   bool png = false,
 }) => {
-  'schema': 2,
+  'schema': annotationSchema,
   'id': id,
   'createdAt': '2026-11-10T14:${minute.toString().padLeft(2, '0')}:00Z',
   'status': status,

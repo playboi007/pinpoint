@@ -109,6 +109,9 @@ String _standard(Map<String, Object?> note) {
     ?_string(page['brightness']),
   ];
   if (pageParts.isNotEmpty) lines.add('Page: ${_line(pageParts.join('  '))}');
+  // From standard up, not only at full as the plan says: a note filed at
+  // 360 wide means nothing to an agent that thinks it was 1280.
+  if (whatIfLine(note['environment']) case final whatIf?) lines.add(whatIf);
   if (_string(shot['file']) case final file?) {
     lines.add('Screenshot: $file (attached, at most 800 px wide)');
   }

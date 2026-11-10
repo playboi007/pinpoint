@@ -59,6 +59,20 @@ void main() {
     );
   });
 
+  test('the what-if overrides show from standard up (Milestone 9)', () {
+    final note = fixture()
+      ..['environment'] = {
+        'viewport': {'width': 360, 'height': 800},
+        'textScale': 1.5,
+        'textDirection': 'rtl',
+      };
+    const line = 'What-if: viewport 360x800, textScale 1.5, rtl';
+    expect(noteText(note, NoteDetail.compact), isNot(contains('What-if')));
+    expect(noteText(note, NoteDetail.standard), contains(line));
+    expect(noteText(note, NoteDetail.full), contains(line));
+    expect(noteText(fixture(), NoteDetail.full), isNot(contains('What-if')));
+  });
+
   test('replies show from standard up', () {
     final note = fixture()
       ..['messages'] = [

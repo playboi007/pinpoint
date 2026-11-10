@@ -249,4 +249,50 @@ void main() {
   test('Annotation.toMarkdown is the formatter', () {
     expect(full.toMarkdown(), markdownFor(full));
   });
+
+  group('what-if line (Milestone 9)', () {
+    test('names each override, after the page line', () {
+      final md = markdownFromJson({
+        ...full.toJson(),
+        'environment': {
+          'viewport': {'width': 360, 'height': 800},
+          'textScale': 1.5,
+          'boldText': true,
+          'safeArea': {'left': 0, 'top': 59, 'right': 0, 'bottom': 34},
+          'keyboardHeight': 300,
+          'textDirection': 'rtl',
+          'brightness': 'dark',
+          'themeVariant': 'Brand\ndark',
+          'seedColor': '#E65100',
+          'platform': 'iOS',
+          'timeDilation': 5,
+        },
+      });
+      const line =
+          'What-if: viewport 360x800, textScale 1.5, boldText, '
+          'safeArea 0,59,0,34, keyboard 300, rtl, dark, theme Brand dark, '
+          'seed #E65100, platform iOS, slow motion 5x';
+      expect(md, contains('\n$line\n'));
+      final lines = md.split('\n');
+      expect(
+        lines.indexWhere((l) => l.startsWith('What-if:')),
+        lines.indexWhere((l) => l.startsWith('Page:')) + 1,
+      );
+    });
+
+    test('is left out with no overrides, and a malformed one is skipped', () {
+      expect(markdownFor(full), isNot(contains('What-if')));
+      expect(
+        markdownFromJson({
+          ...full.toJson(),
+          'environment': {
+            'viewport': 'wide',
+            'textScale': 'big',
+            'boldText': 1,
+          },
+        }),
+        isNot(contains('What-if')),
+      );
+    });
+  });
 }

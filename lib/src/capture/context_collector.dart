@@ -69,12 +69,14 @@ class ContextCollector {
   /// The note for [selection], with [comment] and [intent].
   ///
   /// [context] is Pinpoint's own: the page is described from there, so the
-  /// app's elements are not touched for it.
+  /// app's elements are not touched for it. [environment] is the active
+  /// what-if overrides (`EnvironmentController.toJson`).
   Annotation collect(
     PickResult selection,
     String comment,
     AnnotationIntent intent, {
     required BuildContext context,
+    Map<String, Object?>? environment,
   }) {
     final watch = Stopwatch()..start();
     final fields = _Fields();
@@ -92,6 +94,9 @@ class ContextCollector {
           field('app.origin', () => _app(paths, origin: _origin())) ??
           _app(paths),
       page: page,
+      environment: environment == null || environment.isEmpty
+          ? null
+          : environment,
       target:
           field('target', () => _target(selection, paths, fields)) ??
           TargetInfo(
@@ -165,9 +170,9 @@ class ContextCollector {
   );
 
   PageInfo _page(BuildContext context, PickResult selection) {
-    // The real view, read above the app. Milestone 9: with a what-if
-    // environment active, the app sees an overridden MediaQuery; record
-    // that one too (from inside the EnvironmentHost) beside this one.
+    // The real view, read above the app. With a what-if environment active
+    // the app sees an overridden MediaQuery; the note's `environment`
+    // records the overrides beside this.
     final media = context.getInheritedWidgetOfExactType<MediaQuery>()?.data;
     final locale = context.findAncestorWidgetOfExactType<Localizations>();
     final url = _pageUrl();

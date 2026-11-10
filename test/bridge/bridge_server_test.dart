@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pinpoint/src/bridge/bridge_protocol.dart';
 import 'package:pinpoint/src/bridge/bridge_server.dart';
+import 'package:pinpoint/src/model/annotation.dart' show annotationSchema;
 import 'package:pinpoint/src/sink/markdown_formatter.dart';
 
 /// Milestone 7, build step 2: the bridge as a plain Dart program, tested
@@ -177,7 +178,7 @@ void main() {
           reason: '$method $path',
         );
       }
-      final (status, _, headers) = await post({'schema': 3});
+      final (status, _, headers) = await post({'schema': 99});
       expect(status, 400);
       expect(headers.value('access-control-allow-origin'), '*');
     });
@@ -189,7 +190,7 @@ void main() {
       expect(response.statusCode, 200);
       expect(jsonDecode(await utf8.decodeStream(response)), {
         'ok': true,
-        'schema': 2,
+        'schema': annotationSchema,
       });
     });
 
@@ -304,7 +305,7 @@ void main() {
   });
 
   group('rejects', () {
-    test('any schema but 2', () async {
+    test('any schema but the current one', () async {
       final (status, body, _) = await post({...sampleNote(), 'schema': 1});
       expect(status, 400);
       expect(body, contains('schema'));
@@ -401,10 +402,9 @@ void main() {
 
     test('the same note again, replacing its files', () async {
       await post(sampleNote(png: tinyPng));
-      final (status, _, _) = await post({
-        ...sampleNote(),
-        'comment': 'Second try',
-      }..remove('screenshot'));
+      final (status, _, _) = await post(
+        {...sampleNote(), 'comment': 'Second try'}..remove('screenshot'),
+      );
       expect(status, 201);
       expect(names(open()), [
         '$sampleId.json',
@@ -442,9 +442,9 @@ final Uint8List tinyPng = base64Decode(
   'Jq+GwfDQAAAABJRU5ErkJggg==',
 );
 
-/// A schema 2 note as JSON, as the HTTP sink sends it.
+/// A note of the current schema as JSON, as the HTTP sink sends it.
 Map<String, Object?> sampleNote({Object? id = sampleId, Uint8List? png}) => {
-  'schema': 2,
+  'schema': annotationSchema,
   'id': id,
   'createdAt': '2026-11-10T14:32:05Z',
   'status': 'submitted',
