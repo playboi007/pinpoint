@@ -4,7 +4,7 @@ A debug-only Flutter package. Click any widget in a running app, write a comment
 
 Web is the first target.
 
-> **Status: Milestone 2 (Session 2).** The wrapper, the inspect mode (Alt+Shift+C or the launcher button), Esc and freeze (P while picking) work. Hover outlines the widget under the pointer, a click selects it and opens a draggable info panel, rulers measure to the parent (hold Alt and hover another widget to measure the gap), and the mouse wheel still scrolls the app. Source locations come in Milestone 3. Empty files under `lib/src/` and `bin/` are for later milestones. See `PLAN.md` for the build order.
+> **Status: Milestone 3 (Session 3).** The wrapper, the inspect mode (Alt+Shift+C or the launcher button), Esc and freeze (P while picking) work. Hover outlines the widget under the pointer, and a click selects the nearest widget written in your own project (a `Text`, not the `RichText` it builds), with a breadcrumb and `file:line` in the label and the draggable info panel. Arrow Up or `[` moves to the next local ancestor, Arrow Down or `]` moves back, and Alt plus an arrow steps through framework widgets too. Rulers measure to the nearest local ancestor (hold Alt and hover another widget to measure the gap), and the mouse wheel still scrolls the app. Comments come in Milestone 5. Empty files under `lib/src/` and `bin/` are for later milestones. See `PLAN.md` for the build order.
 
 ```dart
 MaterialApp(
@@ -51,8 +51,12 @@ flutter test test/core
 # Milestone 2: picking, highlight, info panel, rulers, scroll passthrough
 flutter test test/search test/info test/overlay
 
-# the example app
-cd example && flutter run -d chrome
+# Milestone 3: source locations, local-project selection, chain navigation
+flutter test test/source
+cd example && flutter test test/source_selection_test.dart
+
+# the example app; PINPOINT_ROOT makes paths project-relative
+cd example && flutter run -d chrome --dart-define=PINPOINT_ROOT=$(pwd)
 
 # the same, printing p50 and p95 pick time after every 200 hover picks
 cd example && flutter run -d chrome --dart-define=PINPOINT_PICK_TIMINGS=true
@@ -60,7 +64,7 @@ cd example && flutter run -d chrome --dart-define=PINPOINT_PICK_TIMINGS=true
 
 ## Example screens
 
-Counter and spinner, long list, dialog and bottom sheet, nested navigator, `CustomPaint`, form with text fields, and `HtmlElementView` (web only).
+Counter and spinner, long list, dialog and bottom sheet, nested navigator, `CustomPaint`, form with text fields and a custom `SaveBar` widget, and `HtmlElementView` (web only).
 
 ## License
 

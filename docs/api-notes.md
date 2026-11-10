@@ -29,6 +29,7 @@ Result of the "Verify first" lists in `PLAN.md`. Where this file differs from th
 | 16 | Tool list of the official Dart and Flutter MCP server | 14 tools by default. See overlap list. |
 | 17 | Facts found in Session 1 | Freeze jumps on resume; `FocusNode.context` outlives detach; `Overlay.wrap` exists. |
 | 18 | Facts found in Session 2 | `RenderObject.constraints` is protected; transient callbacks see old layout; scroll passthrough rules. |
+| 19 | Facts found in Session 3 | Read locations from the widget's node; a custom widget shares its build root's render object; refinement cost. |
 
 ---
 
@@ -389,6 +390,15 @@ Extra tools exist behind `--enable` (`launch_app`, `list_devices`, `run_tests`, 
 - **[source]** `ScrollPosition.pointerScroll(double)` is public (`widgets/scroll_position.dart:952`). `Scrollable` handles a wheel like this (`widgets/scrollable.dart:933-983`): flip the axis for a mouse wheel while Shift is held, negate the delta for a reversed axis direction, skip when `physics.shouldAcceptUserOffset` is false or the clamped target equals `pixels`, then `pointerScroll(delta)` and `event.respond(allowPlatformDefault: false)`. Pinpoint copies all of it except the Shift flip; it uses the larger delta, as the plan says.
 - **[run-vm]** Pick time, 500-item `ListTile` list, VM debug test: p50 0.27 ms, p95 0.87 ms over 200 picks, with `debugDescribeChildren` and transforms carried down.
 - **[run-web]** Pick time, example "Long list" screen (1000 items), `flutter run -d chrome` (DDC, debug), 200 hover picks: **p50 5.4 ms, p95 6.6 ms**. Under the 8 ms budget, but DDC is about 20 times slower than the VM test, and the margin at p95 is 1.4 ms. A deeper tree or a larger window can go over. If it does, replace `debugDescribeChildren` first (it allocates a node per child). One pick runs per frame while the pointer moves, so in debug, hover uses about a third of a 16 ms frame.
+
+## 19. Facts found in Session 3
+
+- **[source]** `_getCreationLocation` (`widgets/widget_inspector.dart:4412`) reads `element.widget` for an element, so `widget.toDiagnosticsNode().toJsonMap(...)` gives the same `creationLocation` as the element's node. The widget's node is cheaper: `toJsonMap` calls `getChildren()` (`foundation/diagnostics.dart:1646`), and an element's node describes every child. `SourceResolver` reads the widget's node.
+- **[source]** `toJsonMap` registers each new location in a global map (`_locationToId`, `widget_inspector.dart:4420`). It grows with the number of distinct source locations, not with picks. It does not touch `WidgetInspectorService.selection`. **[run-vm]** A test asserts the selection is unchanged.
+- **[run-vm]** A custom widget's element has no render object of its own: `Element.renderObject` is the nearest one beneath, the render object of the root of its `build`. So `SaveBar` and the `Padding` it returns share one rect. PLAN Milestone 3 acceptance "the outline grows each time" cannot hold for that step. Navigation still stops on both: they are different lines in source.
+- **[run-vm]** Every widget whose constructor call is in a project file is local, framework widgets included (`Row`, `Padding`, `Scaffold`). The local chain for a button label is `Text`, `ElevatedButton`, `Row`, `Padding`, `SaveBar`, `Column`, ... ; the button's own internals are not local.
+- **[run-vm]** Refinement cost (chain, then entries up to the first local one), 500-item `ListTile` list, VM debug test, 200 picks: cold cache p50 0.12 ms, p95 0.32 ms; warm p50 0.07 ms, p95 0.12 ms. In addition to the walk. **[unverified]** On web (DDC, about 20 times slower) the cold p95 can add about 6 ms to the 6.6 ms walk; check with `PINPOINT_PICK_TIMINGS`, which from Session 3 times the walk plus the refinement.
+- **[run-vm]** Dart 3.13 accepts private named initializing formals (`required this._root`). The call site uses `root:`.
 
 ---
 
