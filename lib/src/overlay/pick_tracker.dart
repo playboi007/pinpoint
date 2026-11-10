@@ -8,7 +8,8 @@ import '../search/render_search.dart';
 import '../search/scroll_passthrough.dart';
 import '../search/source_resolver.dart';
 
-/// Prints p50 and p95 pick time after every 200 hover picks, in debug.
+/// Prints p50 and p95 pick time (the walk plus the source refinement) after
+/// every 200 hover picks, in debug.
 ///
 /// For the manual timing check: `flutter run -d chrome
 /// --dart-define=PINPOINT_PICK_TIMINGS=true`.
@@ -125,10 +126,10 @@ class PickTracker {
     final root = context?.findRenderObject();
     if (context is! Element || root == null) return null;
     debugPickCount++;
+    final stopwatch = Stopwatch()..start();
     final search = RenderSearch.find(root, position);
-    if (timed) _recordTiming(search.elapsed);
     final boundary = contentKey.currentContext;
-    return PickResult.fromSearch(
+    final pick = PickResult.fromSearch(
       search,
       position: position,
       rootElement: context,
@@ -136,6 +137,9 @@ class PickTracker {
       resolver: resolver,
       previous: previous,
     );
+    // The walk plus the source refinement: both run once per hover frame.
+    if (timed) _recordTiming(stopwatch.elapsed);
+    return pick;
   }
 
   void _recordTiming(Duration elapsed) {
