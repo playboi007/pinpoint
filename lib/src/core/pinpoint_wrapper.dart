@@ -107,7 +107,7 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
   @override
   void reassemble() {
     super.reassemble();
-    // Held selections (Elements from Milestone 2 on) can go stale across hot
+    // Held elements in the hover and selection can go stale across hot
     // reload.
     _controller.clearSelection();
   }

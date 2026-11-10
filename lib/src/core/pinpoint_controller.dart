@@ -1,6 +1,6 @@
-import 'dart:ui' show Offset;
-
 import 'package:flutter/foundation.dart';
+
+import '../search/pick_result.dart';
 
 /// What Pinpoint is doing right now.
 enum PinPointMode {
@@ -10,7 +10,8 @@ enum PinPointMode {
   /// The pointer trap covers the app. Hover outlines, a click selects.
   picking,
 
-  /// A widget is selected and the comment form is open.
+  /// A widget is selected and the comment form is open. Hover still
+  /// outlines, and a click selects again.
   commenting,
 
   /// The note is on its way to the sinks.
@@ -26,6 +27,7 @@ enum PinPointMode {
 ///   ^                                                                  |
 ///   +------------------------- sendSucceeded --------------------------+
 /// sending --sendFailed--> commenting
+/// commenting --select--> commenting (a new selection)
 /// back (Esc): sending -> commenting -> picking -> idle
 /// stop: any -> idle
 /// ```
@@ -34,14 +36,16 @@ enum PinPointMode {
 /// `false` (with no change and no notification) when the current mode does
 /// not allow it.
 ///
-/// Listeners are notified on mode, selection and freeze changes. Hover is a
-/// separate [ValueListenable], so pointer moves do not rebuild everything
-/// that watches the mode.
+/// Listeners are notified on mode and freeze changes. Hover and selection
+/// are separate [ValueListenable]s, so pointer moves and an outline that
+/// follows its widget do not rebuild everything that watches the mode.
 class PinPointController extends ChangeNotifier {
   PinPointMode _mode = PinPointMode.idle;
   bool _frozen = false;
-  Offset? _selectedPosition;
-  final ValueNotifier<Offset?> _hovered = ValueNotifier<Offset?>(null);
+  final ValueNotifier<PickResult?> _hovered = ValueNotifier<PickResult?>(null);
+  final ValueNotifier<PickResult?> _selection = ValueNotifier<PickResult?>(
+    null,
+  );
 
   /// The current mode.
   PinPointMode get mode => _mode;
@@ -54,21 +58,30 @@ class PinPointController extends ChangeNotifier {
   /// Freeze is independent of [mode]: stopping does not unfreeze.
   bool get frozen => _frozen;
 
-  /// The latest pointer position while picking, in global logical pixels.
-  ValueListenable<Offset?> get hovered => _hovered;
+  /// What is under the pointer while picking or commenting.
+  ValueListenable<PickResult?> get hovered => _hovered;
 
-  /// Where the user clicked to select, in global logical pixels.
-  ///
-  /// Milestone 2 replaces this with a pick result that holds the element.
-  Offset? get selectedPosition => _selectedPosition;
+  /// The selected widget. Set from commenting on; kept when Esc goes back to
+  /// picking.
+  ValueListenable<PickResult?> get selection => _selection;
+
+  /// Whether hover is recorded in the current mode.
+  bool get canHover =>
+      _mode == PinPointMode.picking || _mode == PinPointMode.commenting;
 
   /// idle -> picking.
-  bool startPicking() => _move(from: PinPointMode.idle, to: PinPointMode.picking);
+  bool startPicking() =>
+      _move(from: PinPointMode.idle, to: PinPointMode.picking);
 
-  /// picking -> commenting, selecting what is at [position].
-  bool select(Offset position) {
+  /// picking -> commenting, selecting [pick]. In commenting, replaces the
+  /// selection and stays in commenting.
+  bool select(PickResult pick) {
+    if (_mode == PinPointMode.commenting) {
+      _selection.value = pick;
+      return true;
+    }
     if (_mode != PinPointMode.picking) return false;
-    _selectedPosition = position;
+    _selection.value = pick;
     return _move(from: PinPointMode.picking, to: PinPointMode.commenting);
   }
 
@@ -79,7 +92,7 @@ class PinPointController extends ChangeNotifier {
   /// sending -> idle, after every sink accepted the note.
   bool sendSucceeded() {
     if (_mode != PinPointMode.sending) return false;
-    _selectedPosition = null;
+    _selection.value = null;
     return _move(from: PinPointMode.sending, to: PinPointMode.idle);
   }
 
@@ -105,7 +118,7 @@ class PinPointController extends ChangeNotifier {
   /// Any mode -> idle. Drops hover and selection.
   void stop() {
     if (_mode == PinPointMode.idle) return;
-    _selectedPosition = null;
+    _selection.value = null;
     _move(from: _mode, to: PinPointMode.idle);
   }
 
@@ -118,10 +131,22 @@ class PinPointController extends ChangeNotifier {
     }
   }
 
-  /// Records the pointer position. Ignored unless picking.
-  void hover(Offset? position) {
-    if (_mode != PinPointMode.picking) return;
-    _hovered.value = position;
+  /// Records what is under the pointer. Ignored unless [canHover].
+  void hover(PickResult? pick) {
+    if (!canHover) return;
+    _hovered.value = pick;
+  }
+
+  /// Puts a re-read [pick] in place of the selection, for an outline that
+  /// follows its widget. Null means the widget is gone, which clears the
+  /// selection as [clearSelection] does. Does nothing without a selection.
+  void updateSelection(PickResult? pick) {
+    if (_selection.value == null) return;
+    if (pick == null) {
+      clearSelection();
+    } else {
+      _selection.value = pick;
+    }
   }
 
   /// Pauses or resumes the app's tickers.
@@ -130,12 +155,13 @@ class PinPointController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Drops the selection, for example on hot reload, when held references
-  /// may be stale. Commenting falls back to picking, since there is nothing
-  /// left to comment on.
+  /// Drops hover and selection, for example on hot reload, when held
+  /// elements may be stale. Commenting falls back to picking, since there is
+  /// nothing left to comment on.
   void clearSelection() {
-    if (_selectedPosition == null) return;
-    _selectedPosition = null;
+    _hovered.value = null;
+    if (_selection.value == null) return;
+    _selection.value = null;
     if (_mode == PinPointMode.commenting) _mode = PinPointMode.picking;
     notifyListeners();
   }
@@ -143,7 +169,7 @@ class PinPointController extends ChangeNotifier {
   bool _move({required PinPointMode from, required PinPointMode to}) {
     if (_mode != from) return false;
     _mode = to;
-    if (to != PinPointMode.picking) _hovered.value = null;
+    if (!canHover) _hovered.value = null;
     notifyListeners();
     return true;
   }
@@ -151,6 +177,7 @@ class PinPointController extends ChangeNotifier {
   @override
   void dispose() {
     _hovered.dispose();
+    _selection.dispose();
     super.dispose();
   }
 }

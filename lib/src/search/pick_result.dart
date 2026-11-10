@@ -19,6 +19,16 @@ class PickResult {
     required this.globalRect,
   });
 
+  /// A result built by hand, for tests that need no render tree.
+  @visibleForTesting
+  const PickResult.debug({
+    required this.position,
+    required this.candidates,
+    required this.index,
+    required this.element,
+    required this.globalRect,
+  });
+
   /// Builds a result from [search] at [position].
   ///
   /// When [previous] has the same candidates (the same spot clicked again),

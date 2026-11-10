@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 
 import '../core/pinpoint_config.dart';
 import '../core/pinpoint_controller.dart';
+import 'highlight_painter.dart';
+import 'pick_tracker.dart';
 import 'toolbar.dart';
 
 /// Pinpoint's own UI layer, painted above the app.
@@ -19,6 +21,9 @@ class InspectorOverlay extends StatefulWidget {
 
   /// Key of the pointer trap that covers the app while a mode is active.
   static const Key trapKey = ValueKey<String>('pinpoint.trap');
+
+  /// Key of the `CustomPaint` that draws the hover and selection outlines.
+  static const Key highlightKey = ValueKey<String>('pinpoint.highlight');
 
   final PinPointController controller;
 
@@ -48,6 +53,11 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
   FocusNode? _appFocus;
   bool _wasActive = false;
 
+  late PickTracker _tracker = _newTracker();
+
+  PickTracker _newTracker() =>
+      PickTracker(controller: widget.controller, appKey: widget.appKey);
+
   @override
   void initState() {
     super.initState();
@@ -57,6 +67,11 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
   @override
   void didUpdateWidget(InspectorOverlay oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller ||
+        oldWidget.appKey != widget.appKey) {
+      _tracker.dispose();
+      _tracker = _newTracker();
+    }
     if (oldWidget.controller != widget.controller) {
       oldWidget.controller.removeListener(_onControllerChanged);
       widget.controller.addListener(_onControllerChanged);
@@ -67,6 +82,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
   @override
   void dispose() {
     widget.controller.removeListener(_onControllerChanged);
+    _tracker.dispose();
     _holder.dispose();
     super.dispose();
   }
@@ -134,7 +150,19 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
                   // The trap stays while commenting and sending, so a stray
                   // click never reaches the app behind the panel.
                   if (widget.controller.isActive)
-                    _PointerTrap(controller: widget.controller),
+                    _PointerTrap(tracker: _tracker),
+                  IgnorePointer(
+                    child: Builder(
+                      builder: (paintContext) => CustomPaint(
+                        key: InspectorOverlay.highlightKey,
+                        painter: HighlightPainter(
+                          hovered: widget.controller.hovered,
+                          selected: widget.controller.selection,
+                          origin: () => _originOf(paintContext),
+                        ),
+                      ),
+                    ),
+                  ),
                   // Above the trap, so it can always stop picking. Always
                   // offered by default: some shortcuts never reach Flutter.
                   if (widget.config.showLauncher)
@@ -152,30 +180,39 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
   }
 }
 
+/// Global position of the render object built at [context].
+Offset _originOf(BuildContext context) {
+  final box = context.findRenderObject();
+  return box is RenderBox && box.attached
+      ? box.localToGlobal(Offset.zero)
+      : Offset.zero;
+}
+
 /// Covers the app and takes every pointer event, so none reaches the app,
 /// its dialogs or its routes. The wrapper sits above the Navigator, which is
 /// what puts this trap above dialogs.
 class _PointerTrap extends StatelessWidget {
-  const _PointerTrap({required this.controller});
+  const _PointerTrap({required this.tracker});
 
-  final PinPointController controller;
+  final PickTracker tracker;
 
   @override
   Widget build(BuildContext context) {
     return Listener(
       key: InspectorOverlay.trapKey,
       behavior: HitTestBehavior.opaque,
-      onPointerHover: (event) => controller.hover(event.position),
+      onPointerHover: (event) => tracker.hoverAt(event.position),
       // Select on pointer down, not on hover: touch devices have no hover,
       // so a tap alone must select.
       onPointerDown: (event) {
         if (event.buttons & kPrimaryButton == 0) return;
-        controller.select(event.position);
+        tracker.selectAt(event.position);
       },
       child: MouseRegion(
         cursor: SystemMouseCursors.precise,
-        // A stale outline must not stay on screen after the pointer leaves.
-        onExit: (_) => controller.hover(null),
+        // A stale outline must not stay on screen after the pointer leaves
+        // the window (or moves onto Pinpoint's own panel).
+        onExit: (_) => tracker.hoverAt(null),
         child: const SizedBox.expand(),
       ),
     );

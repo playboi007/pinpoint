@@ -22,11 +22,8 @@ void main() {
     bool withHome = true,
   }) {
     return MaterialApp(
-      builder: (context, child) => PinPointWrapper(
-        config: config,
-        controller: controller,
-        child: child,
-      ),
+      builder: (context, child) =>
+          PinPointWrapper(config: config, controller: controller, child: child),
       home: withHome ? home : null,
     );
   }
@@ -66,9 +63,7 @@ void main() {
       );
     });
 
-    testWidgets('with enabled: false the wrapper adds nothing', (
-      tester,
-    ) async {
+    testWidgets('with enabled: false the wrapper adds nothing', (tester) async {
       const app = _CounterPage();
       await tester.pumpWidget(
         MaterialApp(
@@ -182,7 +177,7 @@ void main() {
       await tester.pump();
 
       expect(controller.mode, PinPointMode.commenting);
-      expect(controller.selectedPosition, at);
+      expect(controller.selection.value?.position, at);
     });
 
     testWidgets('mouse hover is reported while picking', (tester) async {
@@ -195,7 +190,7 @@ void main() {
       await mouse.addPointer(location: const Offset(40, 50));
       await mouse.moveTo(const Offset(60, 70));
       await tester.pump();
-      expect(controller.hovered.value, const Offset(60, 70));
+      expect(controller.hovered.value?.position, const Offset(60, 70));
     });
 
     testWidgets('a secondary click does not select', (tester) async {
@@ -214,10 +209,11 @@ void main() {
 
     testWidgets('the trap stays while commenting', (tester) async {
       await tester.pumpWidget(host());
-      controller
-        ..startPicking()
-        ..select(Offset.zero);
+      controller.startPicking();
       await tester.pump();
+      await tester.tapAt(const Offset(10, 10));
+      await tester.pump();
+      expect(controller.mode, PinPointMode.commenting);
 
       await tester.tap(find.text('increment'), warnIfMissed: false);
       await tester.pump();
@@ -341,10 +337,11 @@ void main() {
 
     testWidgets('Esc steps back from commenting to picking', (tester) async {
       await tester.pumpWidget(keyHost());
-      controller
-        ..startPicking()
-        ..select(Offset.zero);
+      controller.startPicking();
       await tester.pump();
+      await tester.tapAt(const Offset(10, 10));
+      await tester.pump();
+      expect(controller.mode, PinPointMode.commenting);
 
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pump();
@@ -419,9 +416,7 @@ void main() {
   });
 
   group('launcher', () {
-    testWidgets('shows bottom-right, outside the app boundary', (
-      tester,
-    ) async {
+    testWidgets('shows bottom-right, outside the app boundary', (tester) async {
       await tester.pumpWidget(host());
       final rect = tester.getRect(find.byType(PinPointLauncher));
       final screen = tester.view.physicalSize / tester.view.devicePixelRatio;
@@ -532,9 +527,8 @@ void main() {
         isFalse,
       );
       expect(
-        TickerMode.valuesOf(
-          tester.element(find.byType(PinPointLauncher)),
-        ).enabled,
+        TickerMode.valuesOf(tester.element(find.byType(PinPointLauncher)))
+            .enabled,
         isTrue,
       );
     });
@@ -554,12 +548,19 @@ void main() {
     });
   });
 
-  testWidgets('hot reload clears the selection', (tester) async {
+  testWidgets('hot reload clears hover and selection', (tester) async {
     await tester.pumpWidget(host());
-    controller
-      ..startPicking()
-      ..select(const Offset(10, 10));
+    controller.startPicking();
     await tester.pump();
+    await tester.tapAt(const Offset(10, 10));
+    await tester.pump();
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    addTearDown(mouse.removePointer);
+    await mouse.addPointer(location: const Offset(40, 50));
+    await mouse.moveTo(const Offset(60, 70));
+    await tester.pump();
+    expect(controller.selection.value, isNotNull);
+    expect(controller.hovered.value, isNotNull);
 
     // reassembleApplication() completes at the end of the next frame, so
     // pump that frame before awaiting it, or the test hangs.
@@ -567,7 +568,8 @@ void main() {
     await tester.pump();
     await reassembled;
 
-    expect(controller.selectedPosition, isNull);
+    expect(controller.selection.value, isNull);
+    expect(controller.hovered.value, isNull);
     expect(controller.mode, PinPointMode.picking);
   });
 }
