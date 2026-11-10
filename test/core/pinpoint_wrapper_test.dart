@@ -1,5 +1,7 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pinpoint/pinpoint.dart';
 import 'package:pinpoint/src/overlay/inspector_overlay.dart';
@@ -264,6 +266,157 @@ void main() {
     );
   });
 
+  group('keyboard', () {
+    late List<LogicalKeyboardKey> appKeys;
+    late FocusNode field;
+    late ValueNotifier<bool> showField;
+
+    setUp(() {
+      appKeys = [];
+      field = FocusNode(debugLabel: 'app field');
+      showField = ValueNotifier<bool>(true);
+    });
+    tearDown(() {
+      field.dispose();
+      showField.dispose();
+    });
+
+    Widget keyHost({PinPointConfig config = const PinPointConfig()}) => host(
+      config: config,
+      home: _KeyPage(field: field, showField: showField, seen: appKeys),
+    );
+
+    Future<void> pressShortcut(WidgetTester tester) async {
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+      await tester.pump();
+    }
+
+    testWidgets(
+      'acceptance: the shortcut works while an app TextField has focus, '
+      'and Esc returns to idle',
+      (tester) async {
+        await tester.pumpWidget(keyHost());
+        await tester.tap(find.byType(TextField));
+        await tester.pump();
+        expect(field.hasPrimaryFocus, isTrue);
+
+        await pressShortcut(tester);
+        expect(controller.mode, PinPointMode.picking);
+        expect(field.hasFocus, isFalse, reason: 'the field stops getting keys');
+
+        // Keys typed while picking never reach the app, and Tab does not
+        // move focus back into it.
+        appKeys.clear();
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await tester.pump();
+        expect(appKeys, isEmpty);
+        expect(field.hasFocus, isFalse);
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pump();
+        expect(controller.mode, PinPointMode.idle);
+        expect(field.hasPrimaryFocus, isTrue, reason: 'focus is restored');
+        expect(appKeys, isEmpty, reason: 'Pinpoint used that Esc');
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+        expect(appKeys, [LogicalKeyboardKey.keyA]);
+      },
+    );
+
+    testWidgets('Esc in idle is left to the app', (tester) async {
+      await tester.pumpWidget(keyHost());
+      await tester.tap(find.byType(TextField));
+      await tester.pump();
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      expect(appKeys, [LogicalKeyboardKey.escape]);
+      expect(controller.mode, PinPointMode.idle);
+    });
+
+    testWidgets('Esc steps back from commenting to picking', (tester) async {
+      await tester.pumpWidget(keyHost());
+      controller
+        ..startPicking()
+        ..select(Offset.zero);
+      await tester.pump();
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
+      expect(controller.mode, PinPointMode.picking);
+    });
+
+    testWidgets('the shortcut toggles back to idle', (tester) async {
+      await tester.pumpWidget(keyHost());
+      await pressShortcut(tester);
+      expect(controller.mode, PinPointMode.picking);
+      await pressShortcut(tester);
+      expect(controller.mode, PinPointMode.idle);
+    });
+
+    testWidgets('the shortcut is configurable', (tester) async {
+      await tester.pumpWidget(
+        keyHost(
+          config: const PinPointConfig(
+            shortcut: PinPointShortcut(
+              LogicalKeyboardKey.keyK,
+              physicalKey: PhysicalKeyboardKey.keyK,
+              control: true,
+            ),
+          ),
+        ),
+      );
+
+      await pressShortcut(tester);
+      expect(controller.mode, PinPointMode.idle);
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyK);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      expect(controller.mode, PinPointMode.picking);
+    });
+
+    testWidgets('focus is not restored to a field that was removed', (
+      tester,
+    ) async {
+      await tester.pumpWidget(keyHost());
+      await tester.tap(find.byType(TextField));
+      await tester.pump();
+      await pressShortcut(tester);
+
+      showField.value = false;
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
+
+      expect(tester.takeException(), isNull);
+      expect(controller.mode, PinPointMode.idle);
+      expect(field.hasFocus, isFalse);
+    });
+
+    testWidgets('disposing the wrapper removes the key handler', (
+      tester,
+    ) async {
+      await tester.pumpWidget(keyHost());
+      await tester.pumpWidget(const SizedBox());
+
+      await pressShortcut(tester);
+      expect(controller.mode, PinPointMode.idle);
+    });
+
+    testWidgets('a disabled wrapper installs no key handler', (tester) async {
+      await tester.pumpWidget(
+        keyHost(config: const PinPointConfig(enabled: false)),
+      );
+      await pressShortcut(tester);
+      expect(controller.mode, PinPointMode.idle);
+    });
+  });
+
   testWidgets('hot reload clears the selection', (tester) async {
     await tester.pumpWidget(host());
     controller
@@ -280,6 +433,40 @@ void main() {
     expect(controller.selectedPosition, isNull);
     expect(controller.mode, PinPointMode.picking);
   });
+}
+
+/// An app page that records every key down event that reaches it.
+class _KeyPage extends StatelessWidget {
+  const _KeyPage({
+    required this.field,
+    required this.showField,
+    required this.seen,
+  });
+
+  final FocusNode field;
+  final ValueListenable<bool> showField;
+  final List<LogicalKeyboardKey> seen;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Focus(
+        onKeyEvent: (node, event) {
+          if (event is KeyDownEvent) seen.add(event.logicalKey);
+          return KeyEventResult.ignored;
+        },
+        child: ValueListenableBuilder<bool>(
+          valueListenable: showField,
+          builder: (context, show, _) => Column(
+            children: [
+              if (show) TextField(focusNode: field),
+              const Text('below the field'),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _DialogPage extends StatefulWidget {

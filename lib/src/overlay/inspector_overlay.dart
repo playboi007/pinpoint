@@ -37,6 +37,73 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     brightness: Brightness.light,
   );
 
+  /// Holds primary focus while a mode is active, so no app widget gets keys.
+  final FocusNode _holder = FocusNode(
+    debugLabel: 'pinpoint focus holder',
+    skipTraversal: true,
+  );
+
+  /// The app's focus when the mode became active, restored on return to idle.
+  FocusNode? _appFocus;
+  bool _wasActive = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_onControllerChanged);
+  }
+
+  @override
+  void didUpdateWidget(InspectorOverlay oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.removeListener(_onControllerChanged);
+      widget.controller.addListener(_onControllerChanged);
+      _onControllerChanged();
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_onControllerChanged);
+    _holder.dispose();
+    super.dispose();
+  }
+
+  void _onControllerChanged() {
+    final active = widget.controller.isActive;
+    if (active == _wasActive) return;
+    _wasActive = active;
+    if (active) {
+      _takeFocus();
+    } else {
+      _restoreFocus();
+    }
+  }
+
+  // A HardwareKeyboard handler sees every key but cannot stop the focused
+  // field from getting it (docs/api-notes.md, item 6). Moving primary focus
+  // to the holder can. Plain unfocus() is not enough: focus would move to the
+  // enclosing scope and the app's Shortcuts (Tab, arrows) would still fire.
+  void _takeFocus() {
+    final current = FocusManager.instance.primaryFocus;
+    _appFocus = identical(current, _holder) ? null : current;
+    _holder.requestFocus();
+  }
+
+  void _restoreFocus() {
+    final app = _appFocus;
+    _appFocus = null;
+    if (!_holder.hasFocus) return; // someone else moved focus; leave it
+    // Restore only if the app's field is still in the tree. FocusNode.context
+    // stays set after the node detaches, so check that it is still mounted.
+    if (app != null && (app.context?.mounted ?? false) && app.canRequestFocus) {
+      app.requestFocus();
+    } else {
+      _holder.unfocus();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     // `MaterialApp.builder` sits above the Navigator, so there is no Overlay
@@ -48,16 +115,27 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
           // Transparency does not absorb hits, so in idle mode every pointer
           // event outside Pinpoint's own controls falls through to the app.
           type: MaterialType.transparency,
-          child: ListenableBuilder(
-            listenable: widget.controller,
-            builder: (context, _) => Stack(
-              fit: StackFit.expand,
-              children: [
-                // The trap stays while commenting and sending, so a stray
-                // click never reaches the app behind the panel.
-                if (widget.controller.isActive)
-                  _PointerTrap(controller: widget.controller),
-              ],
+          child: Focus(
+            focusNode: _holder,
+            // Every key that reaches the holder stops here while a mode is
+            // active, so it never bubbles up to the app's Shortcuts. Pinpoint's
+            // own keys arrive through the HardwareKeyboard handler instead.
+            // Milestone 5: the comment form needs its own traversal shortcuts,
+            // because Tab stops here too.
+            onKeyEvent: (node, event) => widget.controller.isActive
+                ? KeyEventResult.handled
+                : KeyEventResult.ignored,
+            child: ListenableBuilder(
+              listenable: widget.controller,
+              builder: (context, _) => Stack(
+                fit: StackFit.expand,
+                children: [
+                  // The trap stays while commenting and sending, so a stray
+                  // click never reaches the app behind the panel.
+                  if (widget.controller.isActive)
+                    _PointerTrap(controller: widget.controller),
+                ],
+              ),
             ),
           ),
         ),

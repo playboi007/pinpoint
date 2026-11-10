@@ -1,6 +1,9 @@
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 import '../overlay/inspector_overlay.dart';
+import 'hook_registry.dart';
+import 'keymap.dart';
 import 'pinpoint_config.dart';
 import 'pinpoint_controller.dart';
 
@@ -41,9 +44,16 @@ class PinPointWrapper extends StatefulWidget {
 class _PinPointWrapperState extends State<PinPointWrapper> {
   final GlobalKey _appKey = GlobalKey(debugLabel: 'pinpoint app');
   PinPointController? _ownController;
+  HookRegistry? _hooks;
 
   PinPointController get _controller =>
       widget.controller ?? (_ownController ??= PinPointController());
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.config.enabled) _installHooks();
+  }
 
   @override
   void didUpdateWidget(PinPointWrapper oldWidget) {
@@ -52,6 +62,45 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
       _ownController!.dispose();
       _ownController = null;
     }
+    if (widget.config.enabled != oldWidget.config.enabled) {
+      _hooks?.dispose();
+      _hooks = null;
+      if (widget.config.enabled) {
+        _installHooks();
+      } else {
+        _controller.stop();
+      }
+    }
+  }
+
+  void _installHooks() {
+    _hooks = HookRegistry()..addKeyHandler(_handleKey);
+  }
+
+  bool _handleKey(KeyEvent event) {
+    final action = keyActionFor(
+      event,
+      mode: _controller.mode,
+      shortcut: widget.config.shortcut,
+      modifiers: modifiersOf(HardwareKeyboard.instance),
+    );
+    if (action == null) return false;
+    // Act once per press; repeats are still claimed below.
+    if (event is KeyDownEvent) {
+      switch (action) {
+        case KeyAction.toggle:
+          _controller.toggle();
+        case KeyAction.back:
+          _controller.back();
+        case KeyAction.freeze:
+          _controller.toggleFreeze();
+      }
+    }
+    // True only for Pinpoint's own keys. It does not stop the app's focused
+    // widget from getting the key (the focus holder in InspectorOverlay does
+    // that). It tells the embedder the key was handled, which on web can
+    // stop the browser's default action for it.
+    return true;
   }
 
   @override
@@ -64,6 +113,7 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
 
   @override
   void dispose() {
+    _hooks?.dispose();
     _ownController?.dispose();
     super.dispose();
   }
