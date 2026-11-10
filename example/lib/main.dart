@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:pinpoint/pinpoint.dart';
 
-import 'debug_print_sink.dart';
 import 'screens/counter_screen.dart';
 import 'screens/custom_paint_screen.dart';
 import 'screens/dialog_sheet_screen.dart';
@@ -25,8 +24,13 @@ class ExampleApp extends StatelessWidget {
         brightness: Brightness.dark,
       ),
       // Above the Navigator, so dialogs and routes render beneath Pinpoint.
+      // Run `dart run pinpoint:bridge` in this folder first: each Send
+      // writes the note into .pinpoint/open/. The clipboard sink needs no
+      // bridge, so a note is never lost when the bridge is stopped.
       builder: (context, child) => PinPointWrapper(
-        config: const PinPointConfig(sinks: [DebugPrintSink()]),
+        config: PinPointConfig(
+          sinks: [HttpSink.bridge(), const ClipboardSink()],
+        ),
         child: child,
       ),
       home: const HomeScreen(),
