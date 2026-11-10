@@ -26,6 +26,7 @@ import '../sink/bridge_client.dart';
 import '../sink/http_sink.dart';
 import '../sink/markdown_formatter.dart';
 import '../sink/pinpoint_sink.dart';
+import '../tweak/tweak_scope.dart';
 import 'environment_panel.dart';
 import 'findings_panel.dart';
 import 'highlight_painter.dart';
@@ -587,6 +588,18 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     });
   }
 
+  /// Sets a value from the Tweak tab, with a toast when it did not take.
+  bool _applyTweak(TweakTarget target, String property, Object? value) {
+    final ok = widget.controller.tweaks.apply(target, property, value);
+    if (!ok) {
+      _toasts.show(
+        'Could not set $property here; change it in source.',
+        error: true,
+      );
+    }
+    return ok;
+  }
+
   /// Runs the scan-type detectors over the app as it is on screen now.
   void _scanFindings() {
     final root = widget.appKey.currentContext?.findRenderObject();
@@ -882,6 +895,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
                       onSaveDraft: _saveDraft,
                       onCopy: _copy,
                       noteActions: _noteActions,
+                      onTweak: _applyTweak,
                     ),
                     // Above the trap, so clicks on it never pick.
                     EnvironmentPanelLayer(

@@ -49,7 +49,12 @@
         "text": "Save changes",
         "fontSize": "14.0",
         "fontWeight": "w500 (Medium)",
-        "color": "#6750A4"
+        "color": "#6750A4",
+        "height": "1.43",
+        "letterSpacing": "0.1",
+        "textAlign": "start",
+        "maxLines": "1",
+        "overflow": "ellipsis"
       }
     }
   },

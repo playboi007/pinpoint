@@ -10,6 +10,7 @@ import 'comment_form.dart';
 import 'highlight_painter.dart';
 import 'note_view.dart';
 import 'panel_keys.dart';
+import 'tweak_panel.dart';
 
 /// Space kept between the panel and the viewport's edges.
 const double panelMargin = 12;
@@ -112,7 +113,7 @@ class _SendAction extends Action<_SendIntent> {
 }
 
 /// Which tab of the [InfoPanel] shows.
-enum PanelTab { info, comment }
+enum PanelTab { info, tweak, comment }
 
 /// The crumbs to show for [pick]: the selected entry of its chain with up
 /// to [around] local entries above and below it, outermost first, and
@@ -158,6 +159,7 @@ class InfoPanelLayer extends StatelessWidget {
     required this.onSaveDraft,
     required this.onCopy,
     required this.noteActions,
+    required this.onTweak,
   });
 
   final PinPointController controller;
@@ -167,6 +169,7 @@ class InfoPanelLayer extends StatelessWidget {
   final VoidCallback onSaveDraft;
   final VoidCallback onCopy;
   final NoteActions noteActions;
+  final TweakApply onTweak;
 
   @override
   Widget build(BuildContext context) {
@@ -185,7 +188,7 @@ class InfoPanelLayer extends StatelessWidget {
         return _PanelPlacement(
           controller: controller,
           selection: selection,
-          panel: (onDrag) => InfoPanel(
+          panel: (onDrag, keepPlace) => InfoPanel(
             selection: selection,
             controller: controller,
             tab: tab.value,
@@ -202,6 +205,11 @@ class InfoPanelLayer extends StatelessWidget {
                 : controller.notes.numberOf(note.id),
             drafts: controller.notes.drafts.length,
             noteActions: noteActions,
+            // A tweak can move the widget; the panel stays where it is.
+            onTweak: (target, property, value) {
+              keepPlace();
+              return onTweak(target, property, value);
+            },
           ),
         );
       },
@@ -219,8 +227,10 @@ class _PanelPlacement extends StatefulWidget {
   final PinPointController controller;
   final PickResult selection;
 
-  /// Builds the panel, given what a drag on its header does.
-  final InfoPanel Function(ValueChanged<Offset> onDrag) panel;
+  /// Builds the panel, given what a drag on its header does and what keeps
+  /// it where it is now.
+  final InfoPanel Function(ValueChanged<Offset> onDrag, VoidCallback keepPlace)
+  panel;
 
   @override
   State<_PanelPlacement> createState() => _PanelPlacementState();
@@ -249,6 +259,22 @@ class _PanelPlacementState extends State<_PanelPlacement> {
     });
   }
 
+  /// Pins the panel where it is now, as a drag of zero would: a tweak that
+  /// changes layout can move the selected widget, and the panel placed next
+  /// to it would jump. The highlight follows the widget; the panel stays
+  /// where the user had it.
+  void _keepPlace() {
+    if (widget.controller.panelPosition != null) return;
+    final box = _box.currentContext?.findRenderObject();
+    final area = context.findRenderObject();
+    if (box is! RenderBox || area is! RenderBox) return;
+    if (!box.hasSize || !area.hasSize) return;
+    widget.controller.panelPosition = box.localToGlobal(
+      Offset.zero,
+      ancestor: area,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
@@ -261,7 +287,7 @@ class _PanelPlacementState extends State<_PanelPlacement> {
           dragged: widget.controller.panelPosition,
           width: panelWidthFor(constraints.maxWidth),
         ),
-        child: KeyedSubtree(key: _box, child: widget.panel(_drag)),
+        child: KeyedSubtree(key: _box, child: widget.panel(_drag, _keepPlace)),
       ),
     );
   }
@@ -307,9 +333,8 @@ class _PanelLayout extends SingleChildLayoutDelegate {
 }
 
 /// A card for the selected widget: header, breadcrumb, then the Info tab
-/// (its [WidgetInfo]) or the Comment tab ([CommentForm]).
-///
-/// Milestone 11 adds a Tweak tab.
+/// (its [WidgetInfo]), the Tweak tab ([TweakTab]) or the Comment tab
+/// ([CommentForm]).
 class InfoPanel extends StatelessWidget {
   const InfoPanel({
     super.key = panelKey,
@@ -327,6 +352,7 @@ class InfoPanel extends StatelessWidget {
     this.noteNumber,
     this.drafts = 0,
     this.noteActions,
+    this.onTweak,
   });
 
   static const Key panelKey = ValueKey<String>('pinpoint.infoPanel');
@@ -336,6 +362,7 @@ class InfoPanel extends StatelessWidget {
   static const Key commentTabKey = ValueKey<String>(
     'pinpoint.infoPanel.comment',
   );
+  static const Key tweakTabKey = ValueKey<String>('pinpoint.infoPanel.tweak');
 
   /// The widest the panel gets; narrower in a small viewport
   /// ([panelWidthFor]).
@@ -365,6 +392,10 @@ class InfoPanel extends StatelessWidget {
 
   /// What [note]'s buttons do. Required with [note].
   final NoteActions? noteActions;
+
+  /// Applies a tweak. Without it the Tweak tab edits through the
+  /// controller's session directly.
+  final TweakApply? onTweak;
 
   @override
   Widget build(BuildContext context) {
@@ -421,6 +452,11 @@ class InfoPanel extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
               child: switch (tab) {
                 PanelTab.info => _info(theme),
+                PanelTab.tweak => TweakTab(
+                  selection: selection,
+                  session: controller.tweaks,
+                  onApply: onTweak ?? controller.tweaks.apply,
+                ),
                 PanelTab.comment when note != null && noteActions != null =>
                   NoteView(
                     note: note!,
@@ -599,6 +635,12 @@ class _Tabs extends StatelessWidget {
           label: 'Info',
           selected: tab == PanelTab.info,
           onTap: () => onTab(PanelTab.info),
+        ),
+        _TabButton(
+          key: InfoPanel.tweakTabKey,
+          label: 'Tweak',
+          selected: tab == PanelTab.tweak,
+          onTap: () => onTab(PanelTab.tweak),
         ),
         _TabButton(
           key: InfoPanel.commentTabKey,

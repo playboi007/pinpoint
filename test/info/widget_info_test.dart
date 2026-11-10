@@ -109,6 +109,12 @@ void main() {
         'fontSize': '16.0',
         'fontWeight': 'w700 (Bold)',
         'color': '#FF3B30',
+        // Milestone 11: the rest of what the Tweak tab edits.
+        'height': 'normal',
+        'letterSpacing': 'normal',
+        'textAlign': 'start',
+        'maxLines': 'none',
+        'overflow': 'clip',
       });
     });
 

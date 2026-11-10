@@ -5,6 +5,7 @@ import '../detect/findings_controller.dart';
 import '../env/environment_controller.dart';
 import '../model/annotation.dart';
 import '../search/pick_result.dart';
+import '../tweak/tweak_session.dart';
 import 'note_book.dart';
 
 /// What Pinpoint is doing right now.
@@ -114,6 +115,10 @@ class PinPointController extends ChangeNotifier {
 
   /// What the detectors found on the current screen, and which are on.
   final FindingsController findings = FindingsController();
+
+  /// The live edits of the Tweak tab. Independent of [mode]: they stay,
+  /// outlined, until reset.
+  final TweakSession tweaks = TweakSession();
 
   final ValueNotifier<String?> _openNote = ValueNotifier<String?>(null);
 
@@ -340,6 +345,7 @@ class PinPointController extends ChangeNotifier {
     draft.dispose();
     environment.dispose();
     findings.dispose();
+    tweaks.dispose();
     super.dispose();
   }
 }

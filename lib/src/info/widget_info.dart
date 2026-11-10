@@ -9,6 +9,78 @@ import 'extractors/paragraph_extractor.dart';
 /// when the render object is not of its type.
 typedef InfoExtractor = InfoSection? Function(RenderObject renderObject);
 
+/// How the Tweak tab edits a property (Milestone 11).
+sealed class PropertyEditor {
+  const PropertyEditor();
+}
+
+/// A number field with a stepper. Arrow keys nudge the focused field.
+class NumberEditor extends PropertyEditor {
+  const NumberEditor({
+    this.min,
+    this.max,
+    this.step = 1,
+    this.integer = false,
+    this.nullable = false,
+    this.spacing = false,
+  });
+
+  final double? min;
+  final double? max;
+
+  /// What one stepper click adds. [spacing] editors use the tab's step
+  /// (1, 4 or 8) instead.
+  final double step;
+
+  /// Whole numbers only; the value is an `int`.
+  final bool integer;
+
+  /// An empty field means null, for example `maxLines` with no limit.
+  final bool nullable;
+
+  /// A length in logical pixels, stepped by the tab's 1, 4 or 8.
+  final bool spacing;
+}
+
+/// A list of named values, for enums and named alignments.
+class ChoiceEditor<T> extends PropertyEditor {
+  const ChoiceEditor(this.choices, this._labelOf);
+
+  final List<T> choices;
+  final String Function(T value) _labelOf;
+
+  /// [value]'s name in the list. Through a method, not the field: read as
+  /// `ChoiceEditor<Object?>`, the field's function type would fail its
+  /// runtime check.
+  String labelOf(Object? value) => _labelOf(value as T);
+}
+
+/// A hex field with a swatch. The value is a `Color`.
+class ColorEditor extends PropertyEditor {
+  const ColorEditor();
+}
+
+/// Four linked fields. The value is an `EdgeInsets`.
+class InsetsEditor extends PropertyEditor {
+  const InsetsEditor();
+}
+
+/// Minimum and maximum width and height. The value is a `BoxConstraints`.
+class ConstraintsEditor extends PropertyEditor {
+  const ConstraintsEditor();
+}
+
+/// One radius for every corner. The value is a `BorderRadius`.
+class RadiusEditor extends PropertyEditor {
+  const RadiusEditor();
+}
+
+/// Width and color of a border that is the same on every side. The value is
+/// a `Border`.
+class BorderEditor extends PropertyEditor {
+  const BorderEditor();
+}
+
 /// One named value of a picked widget.
 ///
 /// [apply] closes over the render object, so a property is never
@@ -20,6 +92,8 @@ class InfoProperty<T> {
     required this.value,
     required this.label,
     this.apply,
+    this.editor,
+    this.note,
   });
 
   /// For example `fontSize`.
@@ -30,8 +104,26 @@ class InfoProperty<T> {
   /// For example `16.0`, `#FF3B30`, `w700 (Bold)`.
   final String label;
 
-  /// Null means read-only. Milestone 11 sets it for editable properties.
+  /// Null means read-only. Set for the properties the Tweak tab edits; it
+  /// writes the render object's own setter, which relayouts or repaints.
+  ///
+  /// Call it from an input handler or a post-frame callback only: a render
+  /// object asserts when it is changed during layout or paint.
   final void Function(T value)? apply;
+
+  /// How the Tweak tab edits [value]. Null with [apply] null.
+  final PropertyEditor? editor;
+
+  /// Why the property is read-only, or what to know before editing it.
+  final String? note;
+
+  /// Whether the Tweak tab can edit this property.
+  bool get editable => apply != null && editor != null;
+
+  /// Calls [apply] with [newValue]. Through a method, not the field: read
+  /// as `InfoProperty<Object?>`, the field's function type would fail its
+  /// runtime check.
+  void applyValue(Object? newValue) => apply!(newValue as T);
 
   Map<String, Object?> toJson() => {'name': name, 'label': label};
 }
@@ -92,9 +184,18 @@ class WidgetInfo {
   }
 
   /// One extractor per render type.
-  static const List<InfoExtractor> defaultExtractors = [
+  static const List<InfoExtractor> renderExtractors = [
     paragraphSection,
     decorationSection,
+  ];
+
+  /// Values a parent keeps on its child, read from the child.
+  static const List<InfoExtractor> parentDataExtractors = [];
+
+  /// Every extractor: [renderExtractors], then [parentDataExtractors].
+  static const List<InfoExtractor> defaultExtractors = [
+    ...renderExtractors,
+    ...parentDataExtractors,
   ];
 
   /// Longest text shown in a label. Longer text is cut and ends in "…".
@@ -130,19 +231,23 @@ class WidgetInfo {
 
   /// For example `tight 320 x 48`, `w 0-320, h 48`, or
   /// `sliver down, offset 120, remaining 600, cross 400`.
-  String get constraintsLabel => switch (constraints) {
-    final BoxConstraints c when c.isTight =>
-      'tight ${_n(c.maxWidth)} x ${_n(c.maxHeight)}',
-    final BoxConstraints c =>
-      'w ${_range(c.minWidth, c.maxWidth)}, '
-          'h ${_range(c.minHeight, c.maxHeight)}',
-    final SliverConstraints c =>
-      'sliver ${c.axisDirection.name}, offset ${_n(c.scrollOffset)}, '
-          'remaining ${_n(c.remainingPaintExtent)}, '
-          'cross ${_n(c.crossAxisExtent)}',
-    null => 'unknown',
-    final other => other.toString(),
-  };
+  String get constraintsLabel => describeConstraints(constraints);
+
+  /// [constraints] as [constraintsLabel] writes them.
+  static String describeConstraints(Constraints? constraints) =>
+      switch (constraints) {
+        final BoxConstraints c when c.isTight =>
+          'tight ${_n(c.maxWidth)} x ${_n(c.maxHeight)}',
+        final BoxConstraints c =>
+          'w ${_range(c.minWidth, c.maxWidth)}, '
+              'h ${_range(c.minHeight, c.maxHeight)}',
+        final SliverConstraints c =>
+          'sliver ${c.axisDirection.name}, offset ${_n(c.scrollOffset)}, '
+              'remaining ${_n(c.remainingPaintExtent)}, '
+              'cross ${_n(c.crossAxisExtent)}',
+        null => 'unknown',
+        final other => other.toString(),
+      };
 
   /// Names and labels only. Nothing that holds a render object.
   Map<String, Object?> toJson() => {
@@ -183,6 +288,17 @@ Constraints? constraintsOf(RenderObject renderObject) => switch (renderObject) {
 String formatNumber(double v) {
   if (v.isInfinite) return v.isNegative ? '-∞' : '∞';
   return v == v.roundToDouble() ? v.toInt().toString() : v.toStringAsFixed(1);
+}
+
+/// Up to three decimals, without trailing zeros: `1.43`, `16`, `0.1`.
+/// For values where one decimal would hide a difference (line height).
+String formatPrecise(double v) {
+  if (!v.isFinite) return formatNumber(v);
+  if (v == v.roundToDouble()) return v.toInt().toString();
+  return v
+      .toStringAsFixed(3)
+      .replaceFirst(RegExp(r'0+$'), '')
+      .replaceFirst(RegExp(r'\.$'), '');
 }
 
 /// For example `320.0 x 48.0`.
