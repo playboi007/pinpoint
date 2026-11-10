@@ -30,6 +30,7 @@ Result of the "Verify first" lists in `PLAN.md`. Where this file differs from th
 | 17 | Facts found in Session 1 | Freeze jumps on resume; `FocusNode.context` outlives detach; `Overlay.wrap` exists. |
 | 18 | Facts found in Session 2 | `RenderObject.constraints` is protected; transient callbacks see old layout; scroll passthrough rules. |
 | 19 | Facts found in Session 3 | Read locations from the widget's node; a custom widget shares its build root's render object; refinement cost. |
+| 20 | Facts found in Session 4 | `ModalRoute.settingsOf` on an inherited element can self-depend; diagnostics formats; collection cost. |
 
 ---
 
@@ -399,6 +400,17 @@ Extra tools exist behind `--enable` (`launch_app`, `list_devices`, `run_tests`, 
 - **[run-vm]** Every widget whose constructor call is in a project file is local, framework widgets included (`Row`, `Padding`, `Scaffold`). The local chain for a button label is `Text`, `ElevatedButton`, `Row`, `Padding`, `SaveBar`, `Column`, ... ; the button's own internals are not local.
 - **[run-vm]** Refinement cost (chain, then entries up to the first local one), 500-item `ListTile` list, VM debug test, 200 picks: cold cache p50 0.12 ms, p95 0.32 ms; warm p50 0.07 ms, p95 0.12 ms. In addition to the walk. **[unverified]** On web (DDC, about 20 times slower) the cold p95 can add about 6 ms to the 6.6 ms walk; check with `PINPOINT_PICK_TIMINGS`, which from Session 3 times the walk plus the refinement.
 - **[run-vm]** Dart 3.13 accepts private named initializing formals (`required this._root`). The call site uses `root:`.
+
+## 20. Facts found in Session 4
+
+- **[run-vm]** `ModalRoute.settingsOf(context)` (`widgets/routes.dart:1348`) goes through `InheritedModel.inheritFrom` and `dependOnInheritedElement`. Called with the route's own `_ModalScopeStatus` element, that element finds itself (an `InheritedElement` is in its own inherited map) and depends on itself. The next status change (for example a pushed route) fails the assertion in `InheritedElement.notifyClients` (`widgets/framework.dart:6430`, "check that it really is our descendant"). The collector reads the route on the element that owns the picked render object: a `RenderObjectElement` is never an `InheritedElement`.
+- **[run-vm]** There is no public route lookup that does not depend: `ModalRoute.of`, `settingsOf`, `isCurrentOf` all subscribe, and `_ModalScopeStatus` is private. `settingsOf` is the narrowest: it rebuilds only when the route's settings change.
+- **[run-vm]** `Text.toStringShort()` is just `Text`. The plan's `Text("Save changes")` comes from the `data` property, which has `showName: false`. The collector builds `description` from `toStringShort()` plus the unnamed properties at info level.
+- **[run-vm]** `Color` diagnostics are long in this SDK: `MaterialColor(primary value: Color(alpha: 1.0000, red: 0.9569, ...))`. Convert with `toARGB32()` (`formatColor`).
+- **[run-vm]** A `TextField`'s `controller` property is at info level and its description holds the text: `TextEditingController#…(TextEditingValue(text: ┤hunter2├, ...))`, with `obscureText: true` too. The collector masks any value that holds an obscured field's text.
+- **[run-vm]** `jsonEncode` throws `JsonUnsupportedObjectError` on `double.infinity` and `NaN`. `BoxConstraints.toString()` prints `Infinity` inside a string, which is fine.
+- **[run-vm]** A Material button's own widgets are about 38 elements deep. With the plan's cap of 40, `frameworkChain` for a button label ends at the `ElevatedButton`.
+- **[run-vm]** Collection cost: sweep of every element on every example screen, VM debug test: 6604 notes, largest 3614 bytes, slowest 13.3 ms (a `Theme` near the top of a screen: its text scan and subtree are the largest). **[unverified]** On web (DDC, about 20 times slower) the slowest can be about 250 ms; it runs once per Send, not per frame.
 
 ---
 
