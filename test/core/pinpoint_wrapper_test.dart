@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pinpoint/pinpoint.dart';
 import 'package:pinpoint/src/overlay/inspector_overlay.dart';
+import 'package:pinpoint/src/overlay/toolbar.dart';
 
 /// Milestone 1 acceptance tests for the wrapper.
 void main() {
@@ -414,6 +415,73 @@ void main() {
       );
       await pressShortcut(tester);
       expect(controller.mode, PinPointMode.idle);
+    });
+  });
+
+  group('launcher', () {
+    testWidgets('shows bottom-right, outside the app boundary', (
+      tester,
+    ) async {
+      await tester.pumpWidget(host());
+      final rect = tester.getRect(find.byType(PinPointLauncher));
+      final screen = tester.view.physicalSize / tester.view.devicePixelRatio;
+      expect(rect.right, lessThan(screen.width));
+      expect(rect.right, greaterThan(screen.width - 40 - rect.width));
+      expect(rect.bottom, greaterThan(screen.height - 40 - rect.height));
+      expect(
+        find.descendant(
+          of: appBoundary(),
+          matching: find.byType(PinPointLauncher),
+        ),
+        findsNothing,
+      );
+    });
+
+    testWidgets('a tap starts picking, a second tap stops', (tester) async {
+      await tester.pumpWidget(host());
+      await tester.tap(find.byType(PinPointLauncher));
+      await tester.pump();
+      expect(controller.mode, PinPointMode.picking);
+
+      // The launcher sits above the trap, so it still takes the tap.
+      await tester.tap(find.byType(PinPointLauncher));
+      await tester.pump();
+      expect(controller.mode, PinPointMode.idle);
+    });
+
+    testWidgets('names the shortcut in its tooltip', (tester) async {
+      await tester.pumpWidget(host());
+      expect(find.byTooltip('Pinpoint (Alt+Shift+C)'), findsOneWidget);
+    });
+
+    testWidgets('drags, and stays inside the viewport', (tester) async {
+      await tester.pumpWidget(host());
+      final start = tester.getRect(find.byType(PinPointLauncher));
+
+      await tester.drag(
+        find.byType(PinPointLauncher),
+        const Offset(-200, -100),
+      );
+      await tester.pump();
+      final moved = tester.getRect(find.byType(PinPointLauncher));
+      expect(moved.topLeft, start.topLeft + const Offset(-200, -100));
+      expect(controller.mode, PinPointMode.idle, reason: 'a drag is no tap');
+
+      await tester.drag(
+        find.byType(PinPointLauncher),
+        const Offset(-5000, -5000),
+      );
+      await tester.pump();
+      final clamped = tester.getRect(find.byType(PinPointLauncher));
+      expect(clamped.left, greaterThanOrEqualTo(0));
+      expect(clamped.top, greaterThanOrEqualTo(0));
+    });
+
+    testWidgets('is hidden with showLauncher: false', (tester) async {
+      await tester.pumpWidget(
+        host(config: const PinPointConfig(showLauncher: false)),
+      );
+      expect(find.byType(PinPointLauncher), findsNothing);
     });
   });
 

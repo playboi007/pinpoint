@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../core/pinpoint_config.dart';
 import '../core/pinpoint_controller.dart';
+import 'toolbar.dart';
 
 /// Pinpoint's own UI layer, painted above the app.
 ///
@@ -134,6 +135,13 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
                   // click never reaches the app behind the panel.
                   if (widget.controller.isActive)
                     _PointerTrap(controller: widget.controller),
+                  // Above the trap, so it can always stop picking. Always
+                  // offered by default: some shortcuts never reach Flutter.
+                  if (widget.config.showLauncher)
+                    LauncherLayer(
+                      controller: widget.controller,
+                      shortcutLabel: widget.config.shortcut.label,
+                    ),
                 ],
               ),
             ),
