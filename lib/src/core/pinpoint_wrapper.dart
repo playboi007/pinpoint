@@ -2,9 +2,13 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
+import '../detect/detector.dart';
+import '../detect/detector_hooks.dart';
+import '../detect/findings_controller.dart';
 import '../env/environment_controller.dart';
 import '../env/environment_host.dart';
 import '../overlay/inspector_overlay.dart';
+import '../search/source_resolver.dart';
 import 'hook_registry.dart';
 import 'keymap.dart';
 import 'pinpoint_config.dart';
@@ -62,6 +66,9 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
   /// The environment [_applyEnvironment] listens to.
   EnvironmentController? _environment;
 
+  /// The hook-based detectors (errors, images); null while disabled.
+  DetectorHooks? _detectors;
+
   PinPointController get _controller =>
       widget.controller ?? (_ownController ??= PinPointController());
 
@@ -89,18 +96,41 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
     } else if (widget.config.enabled) {
       // The controller, and with it the environment, may have changed.
       _watchEnvironment();
+      _watchFindings();
     }
+  }
+
+  /// Installs the hook-based detectors for the controller's findings,
+  /// again when the controller changed.
+  void _watchFindings() {
+    final hooks = _hooks;
+    final FindingsController findings = _controller.findings;
+    if (hooks == null || identical(_detectors?.findings, findings)) return;
+    _detectors?.dispose();
+    _detectors = DetectorHooks(
+      registry: hooks,
+      findings: findings,
+      appRoot: () => _appKey.currentContext?.findRenderObject(),
+      locator: () => FindingLocator(
+        resolver: SourceResolver.forConfig(widget.config),
+        boundary: _contentKey.currentContext as Element?,
+      ),
+    );
   }
 
   void _installHooks() {
     final hooks = _hooks = HookRegistry()..addKeyHandler(_handleKey);
     _globals = EnvironmentGlobals(hooks);
     _watchEnvironment();
+    _watchFindings();
   }
 
-  /// Restores every global slot, the environment's included.
+  /// Restores every global slot, the environment's and the detectors'
+  /// included.
   void _uninstallHooks() {
     _unwatchEnvironment();
+    _detectors?.dispose();
+    _detectors = null;
     _globals = null;
     final platform = debugDefaultTargetPlatformOverride;
     _hooks?.dispose();

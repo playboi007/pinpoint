@@ -164,6 +164,24 @@ class FindingLocator {
     }
   }
 
+  /// Whether [element] is the app's, not Pinpoint's own UI: at or below
+  /// [boundary]. Always true without a boundary.
+  bool isInApp(Element element, {int maxDepth = 2000}) {
+    final top = boundary;
+    if (top == null || identical(element, top)) return true;
+    var found = false;
+    var steps = 0;
+    try {
+      element.visitAncestorElements((ancestor) {
+        found = identical(ancestor, top);
+        return !found && ++steps < maxDepth;
+      });
+    } catch (_) {
+      // An inactive element asserts on ancestor lookup.
+    }
+    return found;
+  }
+
   Element? _elementOf(RenderObject renderObject) {
     final creator = renderObject.debugCreator;
     if (creator is DebugCreator) return creator.element;

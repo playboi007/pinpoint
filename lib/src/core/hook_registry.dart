@@ -3,9 +3,10 @@ import 'package:flutter/services.dart';
 /// Installs global hooks and puts them back on [dispose] (engineering rule 1).
 ///
 /// Every single global slot Pinpoint touches goes through here:
-/// `HardwareKeyboard` handlers, `timeDilation` and
-/// `debugDefaultTargetPlatformOverride` now, later `FlutterError.onError`,
-/// the debug callbacks and the debug paint flags.
+/// `HardwareKeyboard` handlers, `timeDilation`,
+/// `debugDefaultTargetPlatformOverride`, `FlutterError.onError`,
+/// `PlatformDispatcher.onError`, the debug callbacks and the debug paint
+/// flags.
 ///
 /// `SchedulerBinding.addPersistentFrameCallback` has no remove method, so it
 /// cannot be registered here. Guard such callbacks with a disposed flag.
@@ -84,6 +85,11 @@ class GlobalSlot<T> {
 
   /// Whether the slot holds a value written here.
   bool get isHeld => _held;
+
+  /// The value from before the first write: what a chained handler (for
+  /// example `FlutterError.onError`) calls on to. Only valid after a
+  /// [set].
+  T get previous => _previous;
 
   /// Writes [value]. The first write keeps the value it replaces.
   void set(T value) {

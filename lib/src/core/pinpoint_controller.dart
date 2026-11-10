@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
+import '../detect/findings_controller.dart';
 import '../env/environment_controller.dart';
 import '../model/annotation.dart';
 import '../search/pick_result.dart';
@@ -110,6 +111,9 @@ class PinPointController extends ChangeNotifier {
   /// The what-if overrides: viewport, text scale, theme, platform and the
   /// rest. Independent of [mode]: they stay when picking stops.
   final EnvironmentController environment = EnvironmentController();
+
+  /// What the detectors found on the current screen, and which are on.
+  final FindingsController findings = FindingsController();
 
   final ValueNotifier<String?> _openNote = ValueNotifier<String?>(null);
 
@@ -335,6 +339,7 @@ class PinPointController extends ChangeNotifier {
     notes.dispose();
     draft.dispose();
     environment.dispose();
+    findings.dispose();
     super.dispose();
   }
 }
