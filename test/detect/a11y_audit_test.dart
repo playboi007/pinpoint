@@ -208,6 +208,40 @@ void main() {
       expect(await contrast(tester), isEmpty);
     });
 
+    testWidgets('watch out for: text over a mixed background is low '
+        'confidence, with the measured ratio', (tester) async {
+      await tester.pumpWidget(
+        page(
+          const SizedBox(
+            width: 200,
+            height: 40,
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Expanded(child: ColoredBox(color: Color(0xFFFF0000))),
+                      Expanded(child: ColoredBox(color: Color(0xFF0000FF))),
+                    ],
+                  ),
+                ),
+                Center(
+                  child: Text(
+                    'On two colors',
+                    style: TextStyle(color: Color(0xFF808080)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      final finding = (await contrast(tester)).single;
+      expect(finding.data['confidence'], 'low');
+      expect(finding.data['ratio'], isA<double>());
+    });
+
     testWidgets('black text on white is silent', (tester) async {
       await tester.pumpWidget(text(Colors.black));
       expect(await contrast(tester), isEmpty);

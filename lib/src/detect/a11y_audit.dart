@@ -290,6 +290,9 @@ Finding? _contrast(
       x++
     ) {
       if (x >= left && x < right && y >= top && y < bottom) continue;
+      // Nothing painted there inside the app's boundary: what shows is
+      // not known from the capture.
+      if (pixels.getUint8((y * width + x) * 4 + 3) < 0xFF) continue;
       final rgb = rgbAt(x, y);
       if (_near(rgb, textRgb)) continue;
       counts[rgb] = (counts[rgb] ?? 0) + 1;
