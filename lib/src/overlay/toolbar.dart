@@ -95,7 +95,8 @@ class PinPointLauncher extends StatelessWidget {
     final colors = Theme.of(context).colorScheme;
     final active = controller.isActive;
     return Tooltip(
-      message: 'Pinpoint ($shortcutLabel)'
+      message:
+          'Pinpoint ($shortcutLabel)'
           '${controller.frozen ? ', app frozen: P while picking resumes' : ''}',
       child: Material(
         type: MaterialType.circle,
@@ -114,6 +115,61 @@ class PinPointLauncher extends StatelessWidget {
                 active ? Icons.close : Icons.ads_click,
                 color: active ? colors.onPrimary : colors.primary,
                 size: 22,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Says which HTTP sinks did not answer their health check, top-right,
+/// while a mode is active. Notes still go to the other sinks.
+///
+/// It takes no pointer events, so a widget under it can still be picked.
+class BridgeBadge extends StatelessWidget {
+  const BridgeBadge({super.key, required this.offline});
+
+  static const Key badgeKey = ValueKey<String>('pinpoint.bridgeOffline');
+
+  /// For example `bridge offline: 127.0.0.1:4747`, one per sink.
+  final List<String> offline;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return IgnorePointer(
+      child: SafeArea(
+        child: Align(
+          alignment: Alignment.topRight,
+          child: Padding(
+            padding: const EdgeInsets.all(8),
+            child: Material(
+              key: badgeKey,
+              color: colors.errorContainer,
+              borderRadius: BorderRadius.circular(12),
+              elevation: 2,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.cloud_off,
+                      size: 14,
+                      color: colors.onErrorContainer,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      offline.join(', '),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: colors.onErrorContainer,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart' show kDebugMode, listEquals;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -12,6 +14,7 @@ import '../core/pinpoint_controller.dart';
 import '../model/annotation.dart';
 import '../search/render_search.dart';
 import '../search/source_resolver.dart';
+import '../sink/http_sink.dart';
 import '../sink/markdown_formatter.dart';
 import '../sink/pinpoint_sink.dart';
 import 'highlight_painter.dart';
@@ -82,6 +85,14 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
 
   final ToastController _toasts = ToastController();
 
+  /// The HTTP sinks that did not answer their health check, for the badge.
+  final ValueNotifier<List<HttpSink>> _offline = ValueNotifier<List<HttpSink>>(
+    const <HttpSink>[],
+  );
+
+  /// Counts health checks, so an older one never overwrites a newer one.
+  int _healthCheck = 0;
+
   /// The app's focus when the mode became active, restored on return to idle.
   FocusNode? _appFocus;
   PinPointMode _lastMode = PinPointMode.idle;
@@ -132,6 +143,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     _commentFocus.dispose();
     _tab.dispose();
     _toasts.dispose();
+    _offline.dispose();
     super.dispose();
   }
 
@@ -140,7 +152,11 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     final previous = _lastMode;
     if (mode == previous) return;
     _lastMode = mode;
-    if (previous == PinPointMode.idle) _saveAppFocus();
+    if (previous == PinPointMode.idle) {
+      _saveAppFocus();
+      // Once per start, never per frame (rule 2), and never while idle.
+      unawaited(_checkBridges());
+    }
     if (mode == PinPointMode.commenting && previous == PinPointMode.picking) {
       // Notifies _syncFocus when the tab changes; it runs again below.
       _tab.value = PanelTab.comment;
@@ -217,6 +233,25 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     }
   }
 
+  /// Asks each HTTP sink's bridge for its health, all at once, and keeps
+  /// the ones that did not answer for the badge.
+  Future<void> _checkBridges() async {
+    final sinks = widget.config.sinks.whereType<HttpSink>().toList();
+    final check = ++_healthCheck;
+    if (sinks.isEmpty) {
+      _offline.value = const <HttpSink>[];
+      return;
+    }
+    final reachable = await Future.wait([
+      for (final sink in sinks) sink.isReachable(),
+    ]);
+    if (!mounted || check != _healthCheck) return;
+    _offline.value = [
+      for (final (i, sink) in sinks.indexed)
+        if (!reachable[i]) sink,
+    ];
+  }
+
   /// The note for the selection with the draft's comment and intent, or null
   /// after a toast that says why not.
   Annotation? _collect() {
@@ -282,6 +317,8 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
       controller.sendSucceeded();
     } else {
       controller.sendFailed();
+      // The bridge may have stopped since picking started.
+      unawaited(_checkBridges());
     }
   }
 
@@ -444,6 +481,19 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
                       onSend: _send,
                       onCopy: _copy,
                     ),
+                    if (widget.controller.isActive)
+                      ValueListenableBuilder<List<HttpSink>>(
+                        valueListenable: _offline,
+                        builder: (context, offline, _) => offline.isEmpty
+                            ? const SizedBox.shrink()
+                            : BridgeBadge(
+                                offline: [
+                                  for (final sink in offline)
+                                    '${sink.name} offline: '
+                                        '${sink.url.authority}',
+                                ],
+                              ),
+                      ),
                     ToastLayer(toasts: _toasts),
                     // Above the trap, so it can always stop picking. Always
                     // offered by default: some shortcuts never reach Flutter.
