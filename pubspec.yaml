@@ -1,0 +1,20 @@
+name: pinpoint
+description: "Debug-only widget comment overlay: click any widget, comment, and hand a coding agent its source location, layout context and screenshot."
+version: 0.0.1
+repository: https://github.com/playboi007/pinpoint
+
+environment:
+  sdk: ^3.13.4
+  flutter: ">=1.17.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.6.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:

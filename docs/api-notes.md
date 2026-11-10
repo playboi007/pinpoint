@@ -1,0 +1,380 @@
+# API notes (Session 0)
+
+Result of the "Verify first" lists in `PLAN.md`. Where this file differs from the plan, **follow this file**.
+
+- Flutter 3.47.5 (stable, revision `6a19cca564`), Dart 3.13.4, managed by fvm.
+- SDK root: `/Users/mac/fvm/versions/3.47.5`. Below, `$F` means `$SDK/packages/flutter/lib/src`.
+- Line numbers are for this SDK version. They will move on upgrade.
+- Evidence tags: **[source]** read in SDK code, **[run-vm]** run in `flutter test`, **[run-web]** run on Chrome, **[unverified]** needs a browser or device check.
+
+## Summary
+
+| # | Item | Result |
+| --- | --- | --- |
+| 1 | `InspectorSerializationDelegate` and `creationLocation` | OK. Plan code works. JSON has extra fields. |
+| 2 | Format of `creationLocation.file` on web | Absolute `file:///` URI. |
+| 3 | Offstage marking in `debugDescribeChildren()` | OK, but only some render objects mark it. |
+| 4 | `describeApproximatePaintClip` | OK, but clips are conditional. |
+| 5 | `RenderObject.debugCreator` | OK. |
+| 6 | `HardwareKeyboard.addHandler` | **PLAN WRONG.** Returning `true` does not stop the focused field. |
+| 7 | Persistent-callback phase | OK, with one caveat. |
+| 8 | Debug hook names | Names OK. **DevTools conflict is an assert, not a silent replace.** |
+| 9 | `didExceedMaxLines`, `debugImageLabel`, `spacing` | All exist. |
+| 10 | Overflow error diagnostics | **PLAN WRONG.** No `DiagnosticsProperty<RenderObject>`. |
+| 11 | `ensureSemantics()` handle on web | Framework side OK. Web DOM side **[unverified]**. |
+| 12 | `handlePushRoute` / `handlePopRoute` | **PLAN WRONG.** Both are `@protected @visibleForTesting`. |
+| 13 | `userUpdateTextEditingValue` | **PLAN INCOMPLETE.** It takes two arguments. |
+| 14 | `registerExtension` on web | Works only with a debugger attached (DWDS). |
+| 15 | MCP transports and `package:dart_mcp` | Claude Code: stdio, HTTP, SSE. `dart_mcp`: stdio only. |
+| 16 | Tool list of the official Dart and Flutter MCP server | 14 tools by default. See overlap list. |
+
+---
+
+## 1. `InspectorSerializationDelegate` and `creationLocation` — OK
+
+**[source]** `$F/widgets/widget_inspector.dart:4464`
+
+```dart
+InspectorSerializationDelegate({
+  this.groupName,                       // String?
+  this.summaryTree = false,
+  this.maxDescendantsTruncatableNode = -1,
+  this.expandPropertyValues = true,
+  this.subtreeDepth = 1,
+  this.includeProperties = false,
+  required this.service,                // WidgetInspectorService
+  this.addAdditionalPropertiesCallback,
+  this.inDisableWidgetInspectorScope = false,
+});
+```
+
+The plan code for `locationOf` compiles and works as written. **[run-vm]** `test/source/spike_location_test.dart` passes. Raw output:
+
+```text
+{file: file:///Users/mac/Desktop/development/Hobby/PinPoint/test/source/spike_location_test.dart, line: 21, column: 16, name: Text}
+```
+
+Details:
+
+- `DiagnosticsNode.toJsonMap(DiagnosticsSerializationDelegate)` is in `$F/foundation/diagnostics.dart:1642`.
+- `additionalNodeProperties` (`widget_inspector.dart:4521`) adds `creationLocation`, `locationId` and `createdByLocalProject`.
+- `_Location` (`widget_inspector.dart:4185`) has `file`, `line`, `column` (both 1-based) and an optional `name`. The JSON **also carries `name`** (the constructor name, for example `Text`). The plan does not list it. It is free extra data.
+- **Debug only.** The body of `toJsonMap` sits inside `assert(...)`. In profile and release it returns `{}`. Guard with `WidgetInspectorService.instance.isWidgetCreationTracked()` (`widget_inspector.dart:2521`, public).
+- `WidgetInspectorService`, `InspectorSerializationDelegate` and `DiagnosticsNode` all come from `package:flutter/widgets.dart`. No `src/` import is needed.
+- Public helpers exist: `debugIsLocalCreationLocation(Object)` (`:4369`, debug only) and `debugIsWidgetLocalCreation(Widget)` (`:4385`). They use the inspector's own root list. Do not use them for `isLocal`. See the next point.
+
+**Plan correction (why `createdByLocalProject` is unreliable).** The plan says the flag is set only after an IDE registers roots. The real rule is `_isLocalCreationLocationImpl` (`widget_inspector.dart:1805`):
+
+```dart
+final String file = Uri.parse(locationUri).path;
+if (_pubRootDirectories == null) return !file.contains('packages/flutter/');
+for (final dir in _pubRootDirectories!) { if (file.startsWith(dir)) return true; }
+return false;
+```
+
+With no roots set, **everything outside `packages/flutter/` is "local"**. That includes `.pub-cache` packages and path dependencies. So the flag is too permissive, not too strict. The plan's conclusion still holds: classify locality in `isLocal` ourselves.
+
+## 2. Format of `creationLocation.file` — absolute `file://` URI
+
+- **[run-web]** `flutter run -d chrome` (DDC, debug), app file and SDK file:
+  - app: `file:///Users/mac/Desktop/development/Hobby/PinPoint/example/lib/tmp_probe_main.dart`, line 13, column 15
+  - SDK: `file:///Users/mac/fvm/versions/3.47.5/packages/flutter/lib/src/widgets/text.dart`, line 780, column 16
+- **[run-vm]** `flutter test`: same `file:///` form.
+- **[run-web]** `flutter test --platform chrome`: the test entrypoint is `org-dartlang-app:///tmp_web_probe_test.dart`. The directory is dropped. SDK files stay `file:///`.
+
+Use this in the path normalizer:
+
+1. `file:///...` — the normal case. Strip the scheme and decode percent escapes.
+2. `org-dartlang-app:///name.dart` — only seen in `flutter test --platform chrome`. Not a real-app case. Treat as "unknown directory". Do not resolve it against `projectRoot`.
+3. `package:` and Windows drive paths — **not seen** on any platform tested. Keep the table-driven tests the plan asks for, but they are low priority.
+
+The plan lists "plain path, or `packages/...`" as possible. Neither appeared.
+
+The location is the **call site**. A `const TmpPinProbe()` written in the app file reports the app file, even though the class lives in the `pinpoint` package. This matches Milestone 3.
+
+**[unverified]** Not probed: widgets from `.pub-cache` packages, `--wasm` builds, profile mode, Windows.
+
+## 3. Offstage marking in `debugDescribeChildren()` — OK, but only some marks
+
+**[source]** `DiagnosticsTreeStyle.offstage` is set in these places only:
+
+| Render object | File:line | What is marked |
+| --- | --- | --- |
+| `RenderOffstage` | `rendering/proxy_box.dart:3961` | its child when `offstage` |
+| `RenderSliverOffstage` | `rendering/proxy_sliver.dart:413` | its child when `offstage` |
+| `RenderIndexedStack` | `rendering/stack.dart:883` | all children except `index` |
+| sliver keep-alive bucket | `rendering/sliver_multi_box_adaptor.dart:~800` | kept-alive, not laid-out children |
+| `_RenderTheater` (Overlay) | `widgets/overlay.dart:1596` | every entry below the first onstage entry |
+| view element | `widgets/view.dart:880` | extra views |
+
+Routes under an opaque route are covered by the `_RenderTheater` row. The plan's skip rule is right.
+
+Other facts:
+
+- `debugDescribeChildren()` can return nodes whose `value` is **not** a `RenderObject` (for example `DiagnosticsNode.message('no offstage children')` in the theater). The plan's `child is! RenderObject` skip is needed.
+- Flutter's own inspector does the same walk. Copy its shape: `widget_inspector.dart:2931` (`_hitTestHelper`). It:
+  - walks children in **reverse** (topmost first),
+  - skips `style == offstage` and non-`RenderObject` values,
+  - uses `object.describeApproximatePaintClip(child)` in the parent's local space,
+  - carries a transform down with `object.applyPaintTransform(child, transform)` instead of calling `getTransformTo` per node,
+  - uses `semanticBounds` (the plan uses `paintBounds`; for `RenderBox` both are `Offset.zero & size`).
+- The inspector's final sort is by area only (`widget_inspector.dart:2990`). The plan's extra depth and traversal-order tie-breaks are an improvement.
+- Using the `applyPaintTransform` approach is also the fallback the plan names for the 8 ms budget.
+
+## 4. `describeApproximatePaintClip` — OK, clips are conditional
+
+**[source]** `$F/rendering/object.dart:3762`
+
+```dart
+Rect? describeApproximatePaintClip(covariant RenderObject child) => null;
+```
+
+The rect is in **this object's** (the parent's) local coordinate system. It is `null` when the child is not clipped.
+
+Implementers and conditions:
+
+| Class | File:line | Returns a clip when |
+| --- | --- | --- |
+| `_RenderCustomClip<T>` (`ClipRect`, `ClipRRect`, `ClipPath`, ...) | `rendering/proxy_box.dart:1560` | `clipBehavior != Clip.none` |
+| `RenderViewportBase` | `rendering/viewport.dart:886` | `clipBehavior != Clip.none`, except for `ensureSemantics` slivers that are not visible |
+| `_RenderSingleChildViewport` | `widgets/single_child_scroll_view.dart:584` | `_shouldClipAtPaintOffset` |
+| `RenderListWheelViewport` | `rendering/list_wheel_viewport.dart:1069` | `_shouldClipAtCurrentOffset()` |
+| `RenderFlex` | `rendering/flex.dart:1469` | `clipBehavior != none` **and** the flex overflows |
+| `RenderStack` | `rendering/stack.dart:742` | `clipBehavior != none` **and** it has visual overflow |
+| `RenderEditable` | `rendering/editable.dart:2705` | `clipBehavior != none` **and** `_hasVisualOverflow` |
+| `RenderConstraintsTransformBox` | `rendering/shifted_box.dart:1006` | `clipBehavior != none` and it overflows |
+| `_RenderTheater` (Overlay) | `widgets/overlay.dart:1577` | `clipBehavior != none` (always `size`) |
+
+So: viewports and clip widgets clip, as the plan says. A `Row` or `Stack` clips only when it overflows. Do not expect a clip rect from a normal `Row`.
+
+Related, from the plan's M2 "Watch out for":
+
+- The plan says a singular transform **throws** in `transformRect`. **[source]** `RenderObject.getTransformTo` (`object.dart:3686`) returns `Matrix4.zero()` for a singular path. `MatrixUtils.transformRect` (`painting/matrix_utils.dart:271`) has no throw path. The result can be a non-finite rect. Keep the per-node `try/catch` and also test `rect.isFinite`.
+- `getTransformTo` asserts `attached`. Keep the `attached` check.
+
+## 5. `RenderObject.debugCreator` — OK
+
+**[source]**
+
+- Field: `Object? debugCreator;` at `$F/rendering/object.dart:2222`.
+- Set to `DebugCreator(this)` inside an `assert` in `RenderObjectElement._debugUpdateRenderObjectOwner` (`widgets/framework.dart:6829`). So it is `null` outside debug.
+- `class DebugCreator` (`widgets/framework.dart:7387`) has `final Element element;` and is public.
+- The value is the `RenderObjectElement` that owns the render object. The plan's `elementFor` works as written.
+
+## 6. `HardwareKeyboard.addHandler` — PLAN WRONG
+
+**[source]** `$F/services/hardware_keyboard.dart`
+
+```dart
+typedef KeyEventCallback = bool Function(KeyEvent event);   // :317
+void addHandler(KeyEventCallback handler)                    // :570
+void removeHandler(KeyEventCallback handler)                 // :588
+```
+
+The doc on `addHandler` says: *"All registered handlers will be invoked in order regardless of their return value."* The dispatch loop (`:615`) never stops early. The return value only reports "handled" to the embedder (add-to-app case).
+
+Focus is a separate path. `FocusManager` receives keys through `KeyEventManager.keyMessageHandler` (`focus_manager.dart:2139`), after the hardware handlers. So:
+
+- **Plan M1 "Watch out for" is wrong:** returning `true` does **not** swallow the key for the app.
+- **Plan M1 acceptance "caret stops receiving keys" cannot pass** with a handler alone.
+
+Use instead:
+
+- For the shortcut and Esc: `addHandler` is fine. It sees every key. Keep returning `true` only for keys Pinpoint uses.
+- To stop a focused `TextField` from getting keys in picking mode: move focus away. Save `FocusManager.instance.primaryFocus`, call `unfocus()` when picking starts, and restore it on exit (this also matches M5 step 4). Or hold focus in a Pinpoint `Focus` node with `onKeyEvent` that returns `KeyEventResult.handled`.
+- Handlers added during dispatch take effect after dispatch (`:571`). A handler that throws is caught and reported (`:626`).
+
+**[unverified]** Whether key events reach Flutter on web while a DOM `<input>` has focus. The engine code is not in the SDK checkout. This is the M1 manual check.
+
+## 7. Persistent-callback phase — OK, with one caveat
+
+**[source]** `$F/scheduler/binding.dart:906`
+
+```dart
+void ensureVisualUpdate() {
+  switch (schedulerPhase) {
+    case SchedulerPhase.idle:
+    case SchedulerPhase.postFrameCallbacks:
+      scheduleFrame();
+      return;
+    case SchedulerPhase.transientCallbacks:
+    case SchedulerPhase.midFrameMicrotasks:
+    case SchedulerPhase.persistentCallbacks:
+      return;
+  }
+}
+```
+
+`markNeedsPaint`, `markNeedsLayout` and `scheduleBuildFor` all reach this through `PipelineOwner.requestVisualUpdate` (`rendering/binding.dart:891`). Rule 2 is right: a change made in the persistent phase does not schedule a frame.
+
+Caveats:
+
+- A **post-frame** callback runs in `postFrameCallbacks`, where `ensureVisualUpdate` **does** schedule a frame. A post-frame callback that mutates state on every run keeps the app at full frame rate. Mutate only when the value really changed.
+- `scheduleFrame()` itself (`:946`) does not look at the phase. `handleBeginFrame` clears `_hasScheduledFrame` first (`:1254`), so an explicit `scheduleFrame()` in the persistent phase does work.
+- `addPersistentFrameCallback(FrameCallback)` (`:781`) has **no remove method**. A callback added once stays for the life of the app. Guard it with a `disposed` flag. `HookRegistry` tests must account for this: this slot cannot be "restored".
+
+## 8. Debug hook names and signatures
+
+| Hook | Declaration | File:line |
+| --- | --- | --- |
+| `debugOnRebuildDirtyWidget` | `RebuildDirtyWidgetCallback? debugOnRebuildDirtyWidget;` with `typedef void Function(Element e, bool builtOnce)` | `widgets/debug.dart:74`, `:57` |
+| `debugOnPaintImage` | `PaintImageCallback? debugOnPaintImage;` with `typedef void Function(ImageSizeInfo info)` | `painting/debug.dart:150`, `:63` |
+| `debugPaintSizeEnabled` | `bool` | `rendering/debug.dart:36` |
+| `debugPaintBaselinesEnabled` | `bool` | `:39` |
+| `debugPaintTextLayoutBoxes` | `bool` (not in plan) | `:48` |
+| `debugPaintLayerBordersEnabled` | `bool` | `:51` |
+| `debugPaintPointersEnabled` | `bool` | `:59` |
+| `debugRepaintRainbowEnabled` | `bool` | `:67` |
+| `debugRepaintTextRainbowEnabled` | `bool` (not in plan) | `:70` |
+| `timeDilation` | `double get` / `set` (asserts `> 0`) | `scheduler/binding.dart:37`, `:45` |
+| `debugDefaultTargetPlatformOverride` | `TargetPlatform? get` / `set` | `foundation/platform.dart:104`, `:106` |
+| `FlutterError.onError` | `FlutterExceptionHandler?` static | `foundation/assertions.dart` |
+
+`ImageSizeInfo({String? source, required Size displaySize, required Size imageSize})` has getters `displaySizeInBytes` and `decodedSizeInBytes` (`painting/debug.dart:88`).
+
+Behavior that matters for Milestone 10:
+
+- **`debugOnRebuildDirtyWidget` — PLAN WRONG about DevTools.** `Element.rebuild` calls it inside an `assert` (`widgets/framework.dart:5522`), so it is debug only. When DevTools turns on "track rebuilds", the inspector runs `assert(debugOnRebuildDirtyWidget == null)` and then assigns (`widget_inspector.dart:1116`). When it turns tracking off it assigns `null` (`:1123`). So:
+  - If Pinpoint's hook is installed first, the DevTools toggle fails with an **assertion error**.
+  - If DevTools tracking is turned off later, it **clears Pinpoint's hook silently**.
+  - Mitigation: install the hook only while the heat feature is on. Each frame, check `identical(debugOnRebuildDirtyWidget, ours)`. If not, show "tracking taken over" and do not restore over it.
+- **`debugOnPaintImage` is called once per distinct size, not once per frame.** `paintImage` (`painting/decoration_image.dart:683`) skips the call when the same `ImageSizeInfo` was reported in the last frame. A steady oversized image is not re-reported. Pinpoint must keep its own record. It runs when `!kReleaseMode`, so profile mode too.
+  - `displaySize` is in **physical** pixels: `outputSize * maxDevicePixelRatio`. Compare it with `imageSize` directly.
+  - `source` is `debugImageLabel ?? '<Unknown Image(W×H)>'`.
+- `flutter test` fails a test that leaves `debugOnPaintImage` set (`debugAssertAllPaintingVarsUnset`, `painting/debug.dart:190`). Reset it in the test body.
+- The `debugPaint*` flags are plain top-level variables. To make a change show without a rebuild, mark render objects as needing paint yourself.
+
+## 9. Members that must exist — all present
+
+**[source]**
+
+- `RenderParagraph.didExceedMaxLines` — `bool get`, `rendering/paragraph.dart:1208`.
+- `RenderImage.debugImageLabel` — `String? debugImageLabel;` plain field, `rendering/image.dart:104`.
+- `RenderFlex.spacing` — `double get spacing` and `set spacing`, `rendering/flex.dart:694`.
+- `RenderFlex` overflow state is **private** (`_overflow`, `_hasOverflow`, `flex.dart:623`). The measured overflow detector must recompute from child sizes, as the plan says.
+
+## 10. Overflow error diagnostics — PLAN WRONG
+
+**[source]** `$F/rendering/debug_overflow_indicator.dart:215` (`_reportOverflow`) reports:
+
+```dart
+FlutterErrorDetails(
+  exception: FlutterError('A $runtimeType overflowed by $overflowText.'),
+  library: 'rendering library',
+  context: ErrorDescription('during layout'),
+  informationCollector: () => <DiagnosticsNode>[
+    if (kDebugMode && debugCreator != null) DiagnosticsDebugCreator(debugCreator!),
+    ...overflowHints!,
+    describeForError('The specific $runtimeType in question is'),
+    DiagnosticsNode.message('◢◤' * (FlutterError.wrapWidth ~/ 2), allowWrap: false),
+  ],
+)
+```
+
+There is **no `DiagnosticsProperty<RenderObject>`**. Use one of:
+
+1. Call `details.informationCollector?.call()` and take the first node where `node.value is RenderObject`. `describeForError` (`rendering/object.dart:4163`) returns `toDiagnosticsNode(...)`, so `.value` is the render object.
+2. Find the node that `is DiagnosticsDebugCreator` (`rendering/object.dart:6821`, a `DiagnosticsProperty<Object>` named `debugCreator`). Its `.value` is a `DebugCreator`, so `(node.value as DebugCreator).element` gives the **element** directly. Debug only.
+
+Other facts:
+
+- The text is `A RenderFlex overflowed by 23 pixels on the right.` The pixel amount is in the message only. It is not structured data (there is a `TODO(jacobr)` for that).
+- The error is reported from `paintOverflowIndicator` (paint phase), not layout, although the context says "during layout".
+- It is reported once per render object. `_overflowReportNeeded` (`debug_overflow_indicator.dart:127`) resets only in `reassemble()` and only inside an `assert`. The plan is right that the hook misses repeats.
+
+## 11. `ensureSemantics()` handle on web — framework OK, web unverified
+
+**[source]** `$F/semantics/binding.dart:144`
+
+```dart
+SemanticsHandle ensureSemantics()
+```
+
+`SemanticsHandle.dispose()` calls `_didDisposeSemanticsHandle` (`:152`). It lowers the handle count and sets `_semanticsEnabled.value = _outstandingHandles > 0`. When the last handle goes, the framework stops building the tree.
+
+The web DOM tree is built by the engine. The engine is not in the SDK checkout. **[unverified]** Check in Chrome that the `flt-semantics` DOM nodes disappear after the handle is disposed. The framework also tracks `platformDispatcher.semanticsEnabled` separately (`:71`), so a user who has turned on accessibility keeps it on.
+
+## 12. `handlePushRoute` and `handlePopRoute` — PLAN WRONG
+
+**[source]** `$F/widgets/binding.dart`
+
+```dart
+@protected @visibleForTesting
+Future<bool> handlePushRoute(String route)   // :1256
+@protected @visibleForTesting
+Future<bool> handlePopRoute()                // :1113
+```
+
+Calling them from package code is a `invalid_use_of_protected_member` and `invalid_use_of_visible_for_testing_member` violation. `analysis_options.yaml` makes both errors, so this fails the analyzer.
+
+Use the supported entry point, the navigation platform channel (`SystemChannels.navigation`, `JSONMethodCodec`, `services/system_channels.dart:76`). The framework handles it in `_handleNavigationInvocation` (`widgets/binding.dart:1305`):
+
+| Method | Argument | Calls |
+| --- | --- | --- |
+| `pushRoute` | `String` | `handlePushRoute` |
+| `popRoute` | none | `handlePopRoute` |
+| `pushRouteInformation` | `{'location': String, 'state': Object?}` | observers' `didPushRouteInformation` (`:1279`) |
+
+Send a message through `ServicesBinding.instance.defaultBinaryMessenger.handlePlatformMessage('flutter/navigation', const JSONMethodCodec().encodeMethodCall(MethodCall(...)), callback)`. `handlePlatformMessage` is public (`services/platform_channel.dart:61`).
+
+Who listens (all are `WidgetsBindingObserver`s):
+
+- Navigator 1 apps: `_WidgetsAppState.didPushRouteInformation` (`widgets/app.dart:1623`) calls `navigator.pushNamed(...)`. It returns `false` when the app uses a `Router` (`_usesRouterWithDelegates`). Pop: `didPopRoute` (`app.dart:1607`) calls `navigator.maybePop()`.
+- Router apps: `PlatformRouteInformationProvider.didPushRouteInformation` (`widgets/router.dart:1590`) and `RootBackButtonDispatcher.didPopRoute` (`router.dart:1112`).
+
+`pushRoute` **pushes** a named route. It does not replace. **[unverified]** The behavior on a real `Router` app was not run. That is the M12 acceptance test.
+
+## 13. `EditableTextState.userUpdateTextEditingValue` — takes two arguments
+
+**[source]** `$F/widgets/editable_text.dart:5147`
+
+```dart
+void userUpdateTextEditingValue(TextEditingValue value, SelectionChangedCause? cause)
+```
+
+The plan only names the value. Pass a cause (for example `SelectionChangedCause.keyboard`).
+
+Flow: if `value == textEditingValue` it only requests focus and returns. Otherwise it calls `_formatAndSetValue(value, cause, userInteraction: true)` (`:4703`). That applies `widget.inputFormatters` and then calls `widget.onChanged` (`:4766`). The plan's expectation (formatters and `onChanged` run as for typing) is correct.
+
+## 14. `registerExtension` on web
+
+**[source]**
+
+- `void registerExtension(String method, ServiceExtensionHandler handler)` — `dart-sdk/lib/developer/extension.dart:109`. The name must start with `ext.`.
+- DDC (`flutter run -d chrome`, debug): `dart-sdk/lib/_internal/js_dev_runtime/patch/developer_patch.dart:92`. It registers **only when a debugger is attached** and the `$emitRegisterEvent` hook (DWDS) exists. Otherwise it prints a `console.warn` and **ignores** the call.
+- dart2js (`js_runtime/lib/developer_patch.dart:120`) and dart2wasm (`wasm/standalone/developer_patch.dart:92`): the handler goes into a map. Nothing can call it through the VM service.
+- Flutter's own extensions use the same call (`$F/foundation/binding.dart:930`).
+
+So the plan's check is: **works in `flutter run -d chrome` (DWDS attached); not in a served or release build.** The bridge needs the debug service address, as the plan says. **[unverified]** Not run end to end.
+
+## 15. MCP transports
+
+- Claude Code accepts stdio (default), HTTP (`--transport http`) and SSE. **[run]** `claude mcp add --help` shows the HTTP and stdio forms, and `-H` headers for "HTTP/SSE servers".
+- `package:dart_mcp` **0.5.2** (published 2026-06-29; `sdk: ^3.7.0`; deps `async`, `collection`, `json_rpc_2`, `meta`, `stream_channel`, `stream_transform`). Servers and clients run over a `StreamChannel<String>`. The package ships **only `stdioChannel`** (`lib/stdio.dart`). There is no HTTP or SSE transport.
+- Result: the plan's preferred option (MCP over HTTP on the bridge port) needs a hand-written `StreamChannel` adapter over HTTP. The fallback (stdio shim that forwards to the running bridge) works with `dart_mcp` as is.
+- `dart_mcp` has no Flutter dependency, so `bin/bridge.dart` can use it. It is a **new dependency beyond `http`**. Engineering rule 10 needs a recorded decision before adding it.
+- Keep every file that `bin/` imports (for example `lib/src/model/annotation.dart`) free of `dart:ui` and `package:flutter`. A plain Dart process cannot import them. **[unverified]** Whether `dart run pinpoint:bridge` works from a host app that depends on a Flutter package. Check in Session 6.
+
+## 16. Official Dart and Flutter MCP server
+
+**[run]** `dart mcp-server` — name `dart and flutter tooling`, version 1.2.2, protocol `2025-06-18`. Tools listed by default (14):
+
+`analyze_files`, `dtd`, `flutter_driver_command`, `get_runtime_errors`, `hot_reload`, `hot_restart`, `lsp`, `pub`, `pub_dev_search`, `read_package_uris`, `rip_grep_packages`, `roots`, `vm_service`, `widget_inspector`.
+
+Do **not** duplicate:
+
+- `hot_reload`, `hot_restart` — the agent already has these. Pinpoint's `verify_note` flow should ask the agent to reload, not do it.
+- `get_runtime_errors` — covers runtime error reading. Pinpoint's error capture (M10) is for notes and findings, not for this.
+- `widget_inspector` — covers the widget tree and selection. Pinpoint's value is source-line lookup, notes, checks and drive tools.
+- `flutter_driver_command` — a different drive path (needs `flutter_driver`). Pinpoint's synthetic input does not need it.
+
+Extra tools exist behind `--enable` (`launch_app`, `list_devices`, `run_tests`, `stop_app`, `get_app_logs`, `get_active_location`, `create_project`, `dart_fix`, `dart_format`, ...). They are off by default. Re-check the list when the server version changes.
+
+---
+
+## Other plan errors and gaps found while scaffolding
+
+- **Names.** Code samples use `PinpointOverlay`, `PinpointController`, `PinpointMode`, `PinpointConfig`. The "Names to use in code" table says `PinPointWrapper`. The public-surface table mixes `PinPointConfig` / `PinPointController` with `PinpointSink` / `ClipboardSink` / `HttpSink`. Decide one casing before Session 1. The file layout already uses snake_case, so files are not affected.
+- **Receiver name.** Milestone 7 says `bin/receiver.dart` and `dart run pinpoint:receiver`. The layout and the names table say `bin/bridge.dart`. The scaffold uses `bin/bridge.dart`.
+- **Milestone 1 key claims** (item 6 above) need rewriting before Session 1.
+- **Milestone 9 acceptance "Disposing the wrapper restores `timeDilation`"** is fine, but `addPersistentFrameCallback` cannot be undone (item 7). The `HookRegistry` test must not claim to restore that slot.
