@@ -9,6 +9,7 @@ import 'dart:typed_data';
 
 import '../model/annotation.dart' show annotationSchema, clipText;
 import '../sink/markdown_formatter.dart';
+import 'agent_instructions.dart';
 import 'bridge_protocol.dart';
 
 /// Why the bridge could not start.
@@ -68,6 +69,7 @@ class PinPointBridge {
         '--dart-define=PINPOINT_BRIDGE_PORT=<n>.',
       );
     }
+    _hintInstructions(folder, log);
     if (lan) {
       log(
         'pinpoint: LAN mode. Every device on this network can reach port '
@@ -285,6 +287,30 @@ class PinPointBridge {
       '${markdown.path}',
     );
     _json(response, HttpStatus.created, {'id': id, 'markdown': markdown.path});
+  }
+
+  /// Prints the agent section when no agent file in the project (the
+  /// folder above [folder]) has it yet. Never edits those files; Milestone
+  /// 8's `setup --write` does that on request.
+  static void _hintInstructions(Directory folder, void Function(String) log) {
+    final project = folder.parent.path;
+    for (final name in ['CLAUDE.md', 'AGENTS.md']) {
+      final file = File('$project/$name');
+      try {
+        if (file.existsSync() &&
+            file.readAsStringSync().contains(agentSectionHeading)) {
+          return;
+        }
+      } on FileSystemException {
+        // Unreadable: treat it as missing.
+      }
+    }
+    final dir = folder.uri.pathSegments.lastWhere((s) => s.isNotEmpty);
+    log(
+      'pinpoint: so your coding agent can work the notes, add this section '
+      'to CLAUDE.md (Claude Code) or AGENTS.md in $project:\n\n'
+      '${agentInstructions(dir: dir)}',
+    );
   }
 
   bool _originAllowed(String origin) =>
