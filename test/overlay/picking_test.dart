@@ -37,13 +37,19 @@ void main() {
 
   const page = Scaffold(body: Center(child: Text('target')));
 
+  // The info panel shows the text too, so look for the app's copy only.
+  final target = find.descendant(
+    of: find.byType(Scaffold),
+    matching: find.text('target'),
+  );
+
   group('acceptance', () {
     testWidgets('hovering a Text outlines exactly the text bounds', (
       tester,
     ) async {
       await tester.pumpWidget(host(page));
       await startPicking(tester);
-      final textRect = tester.getRect(find.text('target'));
+      final textRect = tester.getRect(target);
 
       final mouse = await mouseAt(tester, Offset.zero);
       addTearDown(mouse.removePointer);
@@ -75,7 +81,7 @@ void main() {
       addTearDown(tester.view.reset);
       await tester.pumpWidget(host(page));
       await startPicking(tester);
-      await tester.tapAt(tester.getCenter(find.text('target')));
+      await tester.tapAt(tester.getCenter(target));
       await tester.pump();
       final before = controller.selection.value!.globalRect;
 
@@ -83,7 +89,7 @@ void main() {
       await tester.pump(); // the app lays out; the rect is read after it
       await tester.pump(); // the highlight repaints
 
-      final after = tester.getRect(find.text('target'));
+      final after = tester.getRect(target);
       expect(after, isNot(before));
       expect(controller.selection.value!.globalRect, after);
       expect(highlight(tester), paints..rect(rect: after));
@@ -107,7 +113,7 @@ void main() {
         ),
       );
       await startPicking(tester);
-      await tester.tapAt(tester.getCenter(find.text('target')));
+      await tester.tapAt(tester.getCenter(target));
       await tester.pump();
       expect(controller.mode, PinPointMode.commenting);
 
@@ -126,7 +132,7 @@ void main() {
       await tester.pumpWidget(host(page));
       await startPicking(tester);
 
-      await tester.tapAt(tester.getCenter(find.text('target')));
+      await tester.tapAt(tester.getCenter(target));
       await tester.pump();
 
       final selection = controller.selection.value!;
@@ -146,7 +152,7 @@ void main() {
     ) async {
       await tester.pumpWidget(host(page));
       await startPicking(tester);
-      final at = tester.getCenter(find.text('target'));
+      final at = tester.getCenter(target);
 
       await tester.tapAt(at);
       await tester.pump();
@@ -202,7 +208,7 @@ void main() {
     ) async {
       await tester.pumpWidget(host(page));
       await startPicking(tester);
-      final textCenter = tester.getCenter(find.text('target'));
+      final textCenter = tester.getCenter(target);
       await tester.tapAt(textCenter);
       final mouse = await mouseAt(tester, textCenter);
       addTearDown(mouse.removePointer);
@@ -219,7 +225,7 @@ void main() {
       await tester.pumpWidget(host(page));
       await startPicking(tester);
       final mouse = await mouseAt(tester, Offset.zero);
-      await mouse.moveTo(tester.getCenter(find.text('target')));
+      await mouse.moveTo(tester.getCenter(target));
       await tester.pump();
       expect(controller.hovered.value, isNotNull);
 
@@ -234,7 +240,7 @@ void main() {
     ) async {
       await tester.pumpWidget(host(page));
       await startPicking(tester);
-      final at = tester.getCenter(find.text('target'));
+      final at = tester.getCenter(target);
       await tester.tapAt(at);
       final mouse = await mouseAt(tester, at);
       addTearDown(mouse.removePointer);

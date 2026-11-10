@@ -1,3 +1,5 @@
+import 'dart:ui' show Offset;
+
 import 'package:flutter/foundation.dart';
 
 import '../search/pick_result.dart';
@@ -64,6 +66,12 @@ class PinPointController extends ChangeNotifier {
   /// The selected widget. Set from commenting on; kept when Esc goes back to
   /// picking.
   ValueListenable<PickResult?> get selection => _selection;
+
+  /// Top-left of the info panel after a drag, in global logical pixels.
+  /// Null means the default corner. Kept here so the panel's place survives
+  /// reselection and stopping. Setting it notifies no one: the panel that
+  /// moved repaints itself.
+  Offset? panelPosition;
 
   /// Whether hover is recorded in the current mode.
   bool get canHover =>

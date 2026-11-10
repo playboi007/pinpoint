@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../core/pinpoint_config.dart';
 import '../core/pinpoint_controller.dart';
 import 'highlight_painter.dart';
+import 'info_panel.dart';
 import 'pick_tracker.dart';
 import 'toolbar.dart';
 
@@ -163,6 +164,8 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
                       ),
                     ),
                   ),
+                  // Above the trap, so clicks on the panel never pick.
+                  InfoPanelLayer(controller: widget.controller),
                   // Above the trap, so it can always stop picking. Always
                   // offered by default: some shortcuts never reach Flutter.
                   if (widget.config.showLauncher)
