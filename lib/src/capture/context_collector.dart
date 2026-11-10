@@ -213,7 +213,18 @@ class ContextCollector {
           : creator is DebugCreator
           ? creator.element
           : null;
-      if (owner == null || !owner.mounted) return null;
+      return owner is RenderObjectElement ? routeNameOf(owner) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// The name of the route [owner] is in, or null. [owner] owns a render
+  /// object, so it is never an inherited element (see [_routeOf] for why
+  /// that matters, and for the exception to engineering rule 3 this is).
+  static String? routeNameOf(RenderObjectElement owner) {
+    try {
+      if (!owner.mounted) return null;
       return ModalRoute.settingsOf(owner)?.name;
     } catch (_) {
       return null;

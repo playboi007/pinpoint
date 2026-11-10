@@ -131,6 +131,44 @@ abstract final class RenderSearch {
   // consistent order.
   static int _areaKey(RenderCandidate c) => (c.area * 1000).round();
 
+  /// Calls [visit] for every render object under [root] that is on screen,
+  /// with its rect in global logical pixels and the part of it that no
+  /// clip hides. [root] itself is not visited.
+  ///
+  /// The same walk as [find], without a point: offstage children (routes
+  /// beneath an opaque route, hidden `IndexedStack` children) are skipped,
+  /// and so is everything a clip hides (list items scrolled out of view).
+  /// Bounded and guarded like every walk (engineering rule 4): a node whose
+  /// read throws, or a [visit] that throws, skips that node only.
+  static RenderWalk visitVisible(
+    RenderObject root,
+    void Function(RenderObject node, Rect rect, Rect visible) visit, {
+    int maxNodes = defaultMaxNodes,
+    int maxDepth = defaultMaxDepth,
+  }) {
+    final walk = _VisibleWalk(visit, maxNodes: maxNodes, maxDepth: maxDepth);
+    final stopwatch = Stopwatch()..start();
+    try {
+      if (root.attached) {
+        // A RenderView's own transform scales to physical pixels; its
+        // child is already in global logical pixels.
+        final transform = root is RenderView
+            ? Matrix4.identity()
+            : root.getTransformTo(null);
+        walk.visit(root, transform, Rect.largest, 0);
+      }
+    } catch (_) {
+      walk.errors++;
+    }
+    stopwatch.stop();
+    return RenderWalk(
+      visited: walk.visited,
+      truncated: walk.truncated,
+      errors: walk.errors,
+      elapsed: stopwatch.elapsed,
+    );
+  }
+
   /// Whether [globalPosition] is on the app: inside [root]'s on-screen
   /// rect, where [root] is the app's boundary.
   ///
@@ -196,6 +234,104 @@ abstract final class RenderSearch {
       // A custom render object that throws: show what is known.
     }
     return visible;
+  }
+}
+
+/// The cost of one [RenderSearch.visitVisible] walk.
+@immutable
+class RenderWalk {
+  const RenderWalk({
+    required this.visited,
+    required this.truncated,
+    required this.errors,
+    required this.elapsed,
+  });
+
+  /// Render objects visited.
+  final int visited;
+
+  /// Whether the walk stopped at the node or depth cap.
+  final bool truncated;
+
+  /// Render objects (or visits) that threw and were skipped.
+  final int errors;
+
+  final Duration elapsed;
+}
+
+class _VisibleWalk {
+  _VisibleWalk(this.onVisit, {required this.maxNodes, required this.maxDepth});
+
+  final void Function(RenderObject node, Rect rect, Rect visible) onVisit;
+  final int maxNodes;
+  final int maxDepth;
+
+  int visited = 0;
+  int errors = 0;
+  bool truncated = false;
+
+  /// [transform] maps [node]'s paint space to global logical pixels;
+  /// [clip] is the global area the clips above [node] leave visible.
+  void visit(RenderObject node, Matrix4 transform, Rect clip, int depth) {
+    if (truncated) return;
+    if (visited >= maxNodes || depth > maxDepth) {
+      truncated = true;
+      return;
+    }
+    visited++;
+
+    final List<DiagnosticsNode> children;
+    try {
+      if (!node.attached) return;
+      if (depth > 0) {
+        final rect = MatrixUtils.transformRect(transform, node.paintBounds);
+        if (rect.isFinite) {
+          final visible = rect.intersect(clip);
+          // A zero-size box (a bare SizedBox.shrink) is on screen too.
+          if (visible.width >= 0 && visible.height >= 0) {
+            try {
+              onVisit(node, rect, visible);
+            } catch (_) {
+              errors++;
+            }
+          }
+        }
+      }
+      children = node.debugDescribeChildren();
+    } catch (_) {
+      errors++;
+      return;
+    }
+
+    for (final child in children) {
+      // Offstage children keep stale geometry, as in the pick walk.
+      if (child.style == DiagnosticsTreeStyle.offstage) continue;
+      final value = child.value;
+      if (value is! RenderObject) continue;
+
+      final Matrix4 childTransform;
+      var childClip = clip;
+      try {
+        final local = node.describeApproximatePaintClip(value);
+        if (local != null) {
+          childClip = clip.intersect(
+            MatrixUtils.transformRect(transform, local),
+          );
+          // Everything beneath is clipped away.
+          if (childClip.width <= 0 || childClip.height <= 0) continue;
+        }
+        childTransform = transform.clone();
+        if (node is! RenderView) {
+          node.applyPaintTransform(value, childTransform);
+        }
+        // A singular transform (scale 0): nothing beneath is on screen.
+        if (Matrix4.tryInvert(childTransform) == null) continue;
+      } catch (_) {
+        errors++;
+        continue;
+      }
+      visit(value, childTransform, childClip, depth + 1);
+    }
   }
 }
 
