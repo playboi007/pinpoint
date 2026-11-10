@@ -1,11 +1,13 @@
 {
-  "schema": 1,
+  "schema": 2,
+  "status": "draft",
   "intent": "improve",
   "comment": "Label truncates at narrow widths",
   "app": {
     "buildMode": "debug",
     "platform": "android",
-    "projectRoot": "<root>"
+    "projectRoot": "<root>",
+    "origin": null
   },
   "page": {
     "url": null,
@@ -51,6 +53,16 @@
       }
     }
   },
+  "anchor": {
+    "file": "test/fixtures/annotation_fixture.dart",
+    "line": "PIN:bar_text",
+    "widget": "Text",
+    "key": null,
+    "ordinal": 0,
+    "itemIndex": null,
+    "route": "/"
+  },
+  "messages": [],
   "ancestors": [
     {
       "widget": "ElevatedButton",

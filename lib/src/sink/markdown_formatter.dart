@@ -33,6 +33,13 @@ String markdownFromJson(Map<String, Object?> json) {
     ..writeln('Comment: ${_block(_string(json['comment']) ?? '')}')
     ..writeln();
 
+  // Only once the agent or the user moved the note on: a sent note is
+  // `submitted`, and a copied one is still a `draft`.
+  final status = _string(json['status']);
+  if (status != null && status != 'submitted' && status != 'draft') {
+    out.writeln('Status: ${_line(status)}');
+  }
+
   final widget = _string(target['widget']);
   final description = _string(target['description']) ?? widget;
   if (description != null) out.writeln('Target: ${_line(description)}');
@@ -125,6 +132,20 @@ String markdownFromJson(Map<String, Object?> json) {
   final truncated = [for (final t in _list(json['truncated'])) ?_string(t)];
   if (truncated.isNotEmpty) {
     out.writeln('Truncated: ${_line(truncated.join(', '))}');
+  }
+
+  final replies = [
+    for (final m in _list(json['messages']))
+      if (_map(m) case final message when _string(message['text']) != null)
+        '- ${_line(_string(message['from']) ?? 'agent')}'
+            '${_string(message['at']) == null ? '' : ' (${_line(_string(message['at'])!)})'}'
+            ': ${_block(_string(message['text'])!)}',
+  ];
+  if (replies.isNotEmpty) {
+    out
+      ..writeln()
+      ..writeln('Replies:');
+    replies.forEach(out.writeln);
   }
 
   final subtree = _string(json['subtree']);

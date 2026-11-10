@@ -171,7 +171,7 @@ void main() {
           reason: '$method $path',
         );
       }
-      final (status, _, headers) = await post({'schema': 2});
+      final (status, _, headers) = await post({'schema': 3});
       expect(status, 400);
       expect(headers.value('access-control-allow-origin'), '*');
     });
@@ -183,7 +183,7 @@ void main() {
       expect(response.statusCode, 200);
       expect(jsonDecode(await utf8.decodeStream(response)), {
         'ok': true,
-        'schema': 1,
+        'schema': 2,
       });
     });
 
@@ -297,8 +297,8 @@ void main() {
   });
 
   group('rejects', () {
-    test('any schema but 1', () async {
-      final (status, body, _) = await post({...sampleNote(), 'schema': 2});
+    test('any schema but 2', () async {
+      final (status, body, _) = await post({...sampleNote(), 'schema': 1});
       expect(status, 400);
       expect(body, contains('schema'));
       expect(names(open()), isEmpty);
@@ -435,11 +435,12 @@ final Uint8List tinyPng = base64Decode(
   'Jq+GwfDQAAAABJRU5ErkJggg==',
 );
 
-/// A schema 1 note as JSON, as the HTTP sink sends it.
+/// A schema 2 note as JSON, as the HTTP sink sends it.
 Map<String, Object?> sampleNote({Object? id = sampleId, Uint8List? png}) => {
-  'schema': 1,
+  'schema': 2,
   'id': id,
   'createdAt': '2026-11-10T14:32:05Z',
+  'status': 'submitted',
   'intent': 'improve',
   'comment': 'Label truncates at narrow widths',
   'app': {'buildMode': 'debug', 'platform': 'web', 'projectRoot': null},

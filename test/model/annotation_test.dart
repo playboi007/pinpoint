@@ -19,7 +19,23 @@ void main() {
       buildMode: 'debug',
       platform: 'web',
       projectRoot: '/Users/me/app',
+      origin: 'http://localhost:5000',
     ),
+    status: NoteStatus.submitted,
+    anchor: const NoteAnchor(
+      file: 'lib/widgets/save_bar.dart',
+      line: 42,
+      column: 18,
+      widget: 'Text',
+      route: '/orders/:id',
+    ),
+    messages: [
+      NoteMessage(
+        at: DateTime.utc(2026, 11, 10, 14, 40),
+        from: 'agent',
+        text: 'Gave the label room to wrap.',
+      ),
+    ],
     page: const PageInfo(
       url: 'http://localhost:5000/#/orders/12',
       route: '/orders/:id',
@@ -107,13 +123,14 @@ void main() {
     expect(actual, expected);
   });
 
-  test('schema is version 1 and keys come in a fixed order', () {
+  test('schema is version 2 and keys come in a fixed order', () {
     final json = example().toJson();
-    expect(json['schema'], 1);
-    expect(json.keys.take(5), [
+    expect(json['schema'], 2);
+    expect(json.keys.take(6), [
       'schema',
       'id',
       'createdAt',
+      'status',
       'intent',
       'comment',
     ]);

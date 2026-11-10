@@ -9,13 +9,88 @@ import '../sink/markdown_formatter.dart';
 
 /// The payload version. The receiver rejects any other value, so a change
 /// to the shape below needs a new number.
-const int annotationSchema = 1;
+///
+/// 2 (Milestone 8): `status`, `anchor`, `messages` and `app.origin`.
+const int annotationSchema = 2;
 
 /// Largest JSON for a note, without the screenshot, in UTF-8 bytes.
 const int maxPayloadBytes = 8 * 1024;
 
 /// What the note asks for.
 enum AnnotationIntent { bug, improve, question }
+
+/// Where a note is in its round trip between the user and the agent.
+///
+/// The JSON value is the enum name, for example `inProgress`.
+enum NoteStatus {
+  /// Written but not sent. Never visible to the agent, so half-written
+  /// feedback never triggers an edit.
+  draft,
+
+  /// Sent: the agent may work on it.
+  submitted,
+
+  /// The agent is working on it.
+  inProgress,
+
+  /// The agent changed the code; not yet checked.
+  fixed,
+
+  /// The user (Milestone 12: a measured check) accepted the result.
+  verified,
+
+  /// The agent says it is done. The pin fades but stays until the user
+  /// accepts it: an agent can mark a note resolved without fixing it.
+  resolved,
+
+  /// The agent will not do it, with a message that says why.
+  rejected;
+
+  /// The status named [name], or null.
+  static NoteStatus? byName(Object? name) {
+    for (final status in values) {
+      if (status.name == name) return status;
+    }
+    return null;
+  }
+
+  /// Statuses whose files live in `open/`: the agent's work list.
+  static const Set<NoteStatus> open = {submitted, inProgress, fixed};
+
+  /// Statuses whose files live in `resolved/`.
+  static const Set<NoteStatus> closed = {verified, resolved, rejected};
+}
+
+/// A message on a note, for example the agent's reply when it resolves it.
+class NoteMessage {
+  const NoteMessage({required this.at, required this.from, required this.text});
+
+  /// [json] as a message, or null when it has no text.
+  static NoteMessage? fromJson(Object? json) {
+    if (json is! Map<String, Object?>) return null;
+    final text = json['text'];
+    if (text is! String) return null;
+    final from = json['from'];
+    return NoteMessage(
+      at: _dateOrNull(json['at']) ?? DateTime.utc(1970),
+      from: from is String ? from : 'agent',
+      text: text,
+    );
+  }
+
+  final DateTime at;
+
+  /// `agent` or `user`.
+  final String from;
+
+  final String text;
+
+  Map<String, Object?> toJson() => {
+    'at': formatTimestamp(at),
+    'from': from,
+    'text': text,
+  };
+}
 
 /// One note: a comment on a widget, with everything an agent needs to act
 /// on it without seeing the app.
@@ -33,6 +108,9 @@ class Annotation {
     required this.app,
     required this.page,
     required this.target,
+    this.status = NoteStatus.draft,
+    this.anchor,
+    this.messages = const <NoteMessage>[],
     this.ancestors = const <AncestorInfo>[],
     this.frameworkChain = const <String>[],
     this.siblings,
@@ -52,6 +130,15 @@ class Annotation {
   final AppInfo app;
   final PageInfo page;
   final TargetInfo target;
+
+  /// A new note is a draft until it is sent.
+  final NoteStatus status;
+
+  /// Where the note's pin belongs. Null when it was not read.
+  final NoteAnchor? anchor;
+
+  /// Replies from the agent and the user, oldest first.
+  final List<NoteMessage> messages;
 
   /// Local widgets above the target, nearest first.
   final List<AncestorInfo> ancestors;
@@ -78,6 +165,10 @@ class Annotation {
 
   Annotation copyWith({
     String? comment,
+    AnnotationIntent? intent,
+    NoteStatus? status,
+    NoteAnchor? Function()? anchor,
+    List<NoteMessage>? messages,
     TargetInfo? target,
     List<AncestorInfo>? ancestors,
     List<String>? frameworkChain,
@@ -89,11 +180,14 @@ class Annotation {
   }) => Annotation(
     id: id,
     createdAt: createdAt,
-    intent: intent,
+    intent: intent ?? this.intent,
     comment: comment ?? this.comment,
     app: app,
     page: page,
     target: target ?? this.target,
+    status: status ?? this.status,
+    anchor: anchor == null ? this.anchor : anchor(),
+    messages: messages ?? this.messages,
     ancestors: ancestors ?? this.ancestors,
     frameworkChain: frameworkChain ?? this.frameworkChain,
     siblings: siblings == null ? this.siblings : siblings(),
@@ -103,6 +197,9 @@ class Annotation {
     errors: errors ?? this.errors,
     truncated: truncated ?? this.truncated,
   );
+
+  /// This note with [status].
+  Annotation withStatus(NoteStatus status) => copyWith(status: status);
 
   /// This note with [shot] as its screenshot.
   Annotation withScreenshot(ScreenshotInfo? shot) =>
@@ -230,6 +327,64 @@ class Annotation {
     );
   }
 
+  /// [json] (a [toJson] map, as the bridge stores it) as a note, or null
+  /// when it has no id.
+  ///
+  /// Reads defensively: a part of the wrong type is left empty, never
+  /// thrown on. A schema 1 note, written before notes had a status, was
+  /// sent, so it reads as [NoteStatus.submitted]. The screenshot's PNG is
+  /// never read: the bridge keeps it beside the JSON.
+  static Annotation? fromJson(Map<String, Object?> json) {
+    final id = json['id'];
+    if (id is! String) return null;
+    final target = _mapOrEmpty(json['target']);
+    final shot = json['screenshot'];
+    return Annotation(
+      id: id,
+      createdAt: _dateOrNull(json['createdAt']) ?? DateTime.utc(1970),
+      status:
+          NoteStatus.byName(json['status']) ??
+          (json['schema'] == 1 ? NoteStatus.submitted : NoteStatus.draft),
+      intent: AnnotationIntent.values.firstWhere(
+        (i) => i.name == json['intent'],
+        orElse: () => AnnotationIntent.improve,
+      ),
+      comment: _stringOrNull(json['comment']) ?? '',
+      app: AppInfo._fromJson(_mapOrEmpty(json['app'])),
+      page: PageInfo._fromJson(_mapOrEmpty(json['page'])),
+      target: TargetInfo._fromJson(target),
+      anchor: json['anchor'] is Map<String, Object?>
+          ? NoteAnchor.fromJson(json['anchor']! as Map<String, Object?>)
+          : null,
+      messages: [
+        for (final m in _listOrEmpty(json['messages']))
+          ?NoteMessage.fromJson(m),
+      ],
+      ancestors: [
+        for (final a in _listOrEmpty(json['ancestors']))
+          if (a is Map<String, Object?> && a['widget'] is String)
+            AncestorInfo(
+              widget: a['widget']! as String,
+              source: SourceRef._fromJson(a['source']),
+            ),
+      ],
+      frameworkChain: [
+        for (final n in _listOrEmpty(json['frameworkChain']))
+          if (n is String) n,
+      ],
+      siblings: SiblingsInfo._fromJson(json['siblings']),
+      subtree: _stringOrNull(json['subtree']),
+      inherited: json['inherited'] is Map<String, Object?>
+          ? InheritedInfo._fromJson(json['inherited']! as Map<String, Object?>)
+          : null,
+      screenshot: shot is Map<String, Object?>
+          ? ScreenshotInfo._fromJson(shot)
+          : null,
+      errors: _strings(json['errors']),
+      truncated: _strings(json['truncated']),
+    );
+  }
+
   /// The note as the Markdown a coding agent reads. Never holds the image.
   String toMarkdown() => markdownFor(this);
 
@@ -240,11 +395,14 @@ class Annotation {
     'schema': annotationSchema,
     'id': id,
     'createdAt': formatTimestamp(createdAt),
+    'status': status.name,
     'intent': intent.name,
     'comment': comment,
     'app': app.toJson(),
     'page': page.toJson(),
     'target': target.toJson(),
+    'anchor': anchor?.toJson(),
+    'messages': [for (final m in messages) m.toJson()],
     'ancestors': [for (final a in ancestors) a.toJson()],
     'frameworkChain': frameworkChain,
     'siblings': siblings?.toJson(),
@@ -262,7 +420,15 @@ class AppInfo {
     required this.buildMode,
     required this.platform,
     this.projectRoot,
+    this.origin,
   });
+
+  factory AppInfo._fromJson(Map<String, Object?> json) => AppInfo(
+    buildMode: _stringOrNull(json['buildMode']) ?? 'debug',
+    platform: _stringOrNull(json['platform']) ?? 'web',
+    projectRoot: _stringOrNull(json['projectRoot']),
+    origin: _stringOrNull(json['origin']),
+  );
 
   /// `debug`, `profile` or `release`.
   final String buildMode;
@@ -273,10 +439,16 @@ class AppInfo {
   /// Null when `PINPOINT_ROOT` is not set.
   final String? projectRoot;
 
+  /// The page's origin on web, for example `http://localhost:5000`; null
+  /// elsewhere. Two apps can poll one bridge; each loads only the notes
+  /// with its own origin.
+  final String? origin;
+
   Map<String, Object?> toJson() => {
     'buildMode': buildMode,
     'platform': platform,
     'projectRoot': projectRoot,
+    'origin': origin,
   };
 }
 
@@ -291,6 +463,16 @@ class PageInfo {
     this.brightness,
     this.locale,
   });
+
+  factory PageInfo._fromJson(Map<String, Object?> json) => PageInfo(
+    url: _stringOrNull(json['url']),
+    route: _stringOrNull(json['route']),
+    viewport: PayloadSize._fromJson(json['viewport']),
+    devicePixelRatio: _doubleOrNull(json['devicePixelRatio']),
+    textScale: _doubleOrNull(json['textScale']),
+    brightness: _stringOrNull(json['brightness']),
+    locale: _stringOrNull(json['locale']),
+  );
 
   /// The browser's URL on web; null elsewhere.
   final String? url;
@@ -339,6 +521,26 @@ class TargetInfo {
     this.properties = const <String, String>{},
     this.sections = const <String, Map<String, String>>{},
   });
+
+  factory TargetInfo._fromJson(Map<String, Object?> json) => TargetInfo(
+    widget: _stringOrNull(json['widget']) ?? '?',
+    description: _stringOrNull(json['description']),
+    key: _stringOrNull(json['key']),
+    source: SourceRef._fromJson(json['source']),
+    sourceUnavailable: json['sourceUnavailable'] == true,
+    rect: PayloadRect._fromJson(json['rect']),
+    renderObject: _stringOrNull(json['renderObject']),
+    constraints: _stringOrNull(json['constraints']),
+    parentData: _stringOrNull(json['parentData']),
+    text: _stringOrNull(json['text']),
+    properties: _stringMap(json['properties']),
+    sections: {
+      for (final MapEntry(:key, :value) in _mapOrEmpty(
+        json['sections'],
+      ).entries)
+        key: _stringMap(value),
+    },
+  );
 
   /// The widget's type name, for example `Text`.
   final String widget;
@@ -462,6 +664,19 @@ class SourceRef {
     required this.column,
   });
 
+  static SourceRef? _fromJson(Object? json) {
+    if (json is! Map<String, Object?>) return null;
+    final file = json['file'];
+    final line = json['line'];
+    if (file is! String || line is! int) return null;
+    final column = json['column'];
+    return SourceRef(
+      file: file,
+      line: line,
+      column: column is int ? column : 1,
+    );
+  }
+
   final String file;
 
   /// 1-based.
@@ -503,6 +718,19 @@ class SiblingsInfo {
     required this.children,
   });
 
+  static SiblingsInfo? _fromJson(Object? json) {
+    if (json is! Map<String, Object?>) return null;
+    final parent = json['parent'];
+    if (parent is! String) return null;
+    return SiblingsInfo(
+      parent: parent,
+      index: _intOrNull(json['index']) ?? 0,
+      count: _intOrNull(json['count']) ?? 0,
+      firstIndex: _intOrNull(json['firstIndex']) ?? 0,
+      children: _strings(json['children']),
+    );
+  }
+
   final String parent;
 
   /// The index of the child that holds the target.
@@ -529,6 +757,14 @@ class InheritedInfo {
     this.textDirection,
   });
 
+  factory InheritedInfo._fromJson(Map<String, Object?> json) => InheritedInfo(
+    themeBrightness: _stringOrNull(json['themeBrightness']),
+    useMaterial3: json['useMaterial3'] is bool
+        ? json['useMaterial3']! as bool
+        : null,
+    textDirection: _stringOrNull(json['textDirection']),
+  );
+
   final String? themeBrightness;
   final bool? useMaterial3;
   final String? textDirection;
@@ -552,6 +788,16 @@ class ScreenshotInfo {
     this.debugPaint = const <String>[],
     this.png,
   });
+
+  factory ScreenshotInfo._fromJson(Map<String, Object?> json) => ScreenshotInfo(
+    file: _stringOrNull(json['file']) ?? '',
+    pixelRatio: _doubleOrNull(json['pixelRatio']) ?? 1,
+    width: _intOrNull(json['width']) ?? 0,
+    height: _intOrNull(json['height']) ?? 0,
+    crop: PayloadRect._fromJson(json['crop']),
+    hasPlatformViews: json['hasPlatformViews'] == true,
+    debugPaint: _strings(json['debugPaint']),
+  );
 
   /// The file name the receiver writes the image to: `<id>.png`.
   final String file;
@@ -593,6 +839,16 @@ class ScreenshotInfo {
 class PayloadRect {
   const PayloadRect(this.x, this.y, this.w, this.h);
 
+  static PayloadRect? _fromJson(Object? json) {
+    if (json is! Map<String, Object?>) return null;
+    final x = _doubleOrNull(json['x']);
+    final y = _doubleOrNull(json['y']);
+    final w = _doubleOrNull(json['w']);
+    final h = _doubleOrNull(json['h']);
+    if (x == null || y == null || w == null || h == null) return null;
+    return PayloadRect(x, y, w, h);
+  }
+
   final double x;
   final double y;
   final double w;
@@ -609,6 +865,14 @@ class PayloadRect {
 /// A size in logical pixels, without `dart:ui`.
 class PayloadSize {
   const PayloadSize(this.width, this.height);
+
+  static PayloadSize? _fromJson(Object? json) {
+    if (json is! Map<String, Object?>) return null;
+    final width = _doubleOrNull(json['width']);
+    final height = _doubleOrNull(json['height']);
+    if (width == null || height == null) return null;
+    return PayloadSize(width, height);
+  }
 
   final double width;
   final double height;
@@ -786,3 +1050,24 @@ class NoteAnchor {
 String? _stringOrNull(Object? value) => value is String ? value : null;
 
 int? _intOrNull(Object? value) => value is int ? value : null;
+
+double? _doubleOrNull(Object? value) => value is num ? value.toDouble() : null;
+
+DateTime? _dateOrNull(Object? value) =>
+    value is String ? DateTime.tryParse(value) : null;
+
+Map<String, Object?> _mapOrEmpty(Object? value) =>
+    value is Map<String, Object?> ? value : const <String, Object?>{};
+
+List<Object?> _listOrEmpty(Object? value) =>
+    value is List<Object?> ? value : const <Object?>[];
+
+List<String> _strings(Object? value) => [
+  for (final v in _listOrEmpty(value))
+    if (v is String) v,
+];
+
+Map<String, String> _stringMap(Object? value) => {
+  for (final MapEntry(:key, :value) in _mapOrEmpty(value).entries)
+    if (value is String) key: value,
+};

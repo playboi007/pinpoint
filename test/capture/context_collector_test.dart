@@ -496,6 +496,7 @@ void main() {
       'buildMode': 'debug',
       'platform': 'android',
       'projectRoot': root,
+      'origin': null,
     });
     expect(note.errors, isEmpty);
   });

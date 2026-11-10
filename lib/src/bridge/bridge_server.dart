@@ -123,7 +123,7 @@ class PinPointBridge {
             ..set('access-control-allow-private-network', 'true')
             ..set('access-control-max-age', '600');
         case 'GET' when path == healthPath:
-          _json(response, HttpStatus.ok, {'ok': true, 'schema': 1});
+          _json(response, HttpStatus.ok, {'ok': true, 'schema': annotationSchema});
         case 'POST' when path == annotationsPath:
           await _receive(request);
         case _ when known:

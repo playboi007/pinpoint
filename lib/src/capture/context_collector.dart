@@ -7,6 +7,7 @@ import '../info/widget_info.dart';
 import '../model/annotation.dart';
 import '../model/source_location.dart';
 import '../search/pick_result.dart';
+import '../search/source_index.dart';
 import 'subtree_outline.dart';
 
 /// Builds the [Annotation] for a selection: everything an agent needs to
@@ -80,19 +81,24 @@ class ContextCollector {
     final field = fields.read;
     final paths = selection.chain.resolver.paths;
     final now = _clock();
+    final page =
+        field('page', () => _page(context, selection)) ?? const PageInfo();
     final note = Annotation(
       id: annotationId(now, _random),
       createdAt: now,
       intent: intent,
       comment: comment,
-      app: _app(paths),
-      page: field('page', () => _page(context, selection)) ?? const PageInfo(),
+      app:
+          field('app.origin', () => _app(paths, origin: _origin())) ??
+          _app(paths),
+      page: page,
       target:
           field('target', () => _target(selection, paths, fields)) ??
           TargetInfo(
             widget: typeName(selection.element),
             sourceUnavailable: selection.sourceUnavailable,
           ),
+      anchor: field('anchor', () => _anchor(selection, page.route)),
       ancestors:
           field('ancestors', () => _ancestors(selection, paths)) ??
           const <AncestorInfo>[],
@@ -124,7 +130,30 @@ class ContextCollector {
     return note;
   }
 
-  static AppInfo _app(SourcePaths paths) => AppInfo(
+  /// The page's origin on web, for example `http://localhost:5000`.
+  String? _origin() {
+    final url = _pageUrl();
+    if (url == null || !(url.isScheme('http') || url.isScheme('https'))) {
+      return null;
+    }
+    return url.origin;
+  }
+
+  /// Where the note's pin belongs: the selected widget's constructor call,
+  /// and which of its matches it is. The walk for the ordinal is bounded,
+  /// and runs once per note.
+  static NoteAnchor? _anchor(PickResult selection, String? route) {
+    final elements = selection.chain.elements;
+    return SourceIndex(resolver: selection.chain.resolver).anchorFor(
+      selection.element,
+      // The chain's last element is the app's top widget, below Pinpoint's
+      // wrappers.
+      root: elements.last,
+      route: route,
+    );
+  }
+
+  static AppInfo _app(SourcePaths paths, {String? origin}) => AppInfo(
     buildMode: kReleaseMode
         ? 'release'
         : kProfileMode
@@ -132,6 +161,7 @@ class ContextCollector {
         : 'debug',
     platform: kIsWeb ? 'web' : defaultTargetPlatform.name,
     projectRoot: paths.projectRoot,
+    origin: origin,
   );
 
   PageInfo _page(BuildContext context, PickResult selection) {

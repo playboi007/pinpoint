@@ -1,13 +1,15 @@
 {
-  "schema": 1,
+  "schema": 2,
   "id": "pp_20261110_143205_a1f3",
   "createdAt": "2026-11-10T14:32:05Z",
+  "status": "submitted",
   "intent": "improve",
   "comment": "Label truncates at narrow widths",
   "app": {
     "buildMode": "debug",
     "platform": "web",
-    "projectRoot": "/Users/me/app"
+    "projectRoot": "/Users/me/app",
+    "origin": "http://localhost:5000"
   },
   "page": {
     "url": "http://localhost:5000/#/orders/12",
@@ -47,6 +49,17 @@
     },
     "sections": {}
   },
+  "anchor": {
+    "file": "lib/widgets/save_bar.dart",
+    "line": 42,
+    "column": 18,
+    "widget": "Text",
+    "key": null,
+    "ordinal": 0,
+    "itemIndex": null,
+    "route": "/orders/:id"
+  },
+  "messages": [],
   "ancestors": [
     {
       "widget": "ElevatedButton",
