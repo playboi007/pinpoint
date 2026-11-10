@@ -22,3 +22,14 @@ int markerLine(String file, String marker) {
 
 const String saveBarFixture = 'test/fixtures/save_bar_fixture.dart';
 const String generatedFixture = 'test/fixtures/generated_fixture.g.dart';
+
+/// The 1-based column of [code] on the line that `// PIN:<marker>` names
+/// in [file].
+int markerColumn(String file, String marker, String code) {
+  final line = File(file).readAsLinesSync()[markerLine(file, marker) - 1];
+  final index = line.indexOf(code);
+  if (index < 0) throw StateError('$code not on the line of PIN:$marker');
+  return index + 1;
+}
+
+const String annotationFixture = 'test/fixtures/annotation_fixture.dart';

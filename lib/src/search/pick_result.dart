@@ -108,6 +108,44 @@ class PickResult {
     return fallback;
   }
 
+  /// A result that selects [element] itself, with no search: for a widget
+  /// found another way than by position (a sweep over the tree, and later a
+  /// pin's anchor).
+  ///
+  /// The chain starts at [element], so [pickedElement] is [element] too.
+  /// Null when [element] has no render object that is laid out.
+  static PickResult? forElement(
+    Element element, {
+    required Element rootElement,
+    Element? chainBoundary,
+    SourceResolver resolver = const SourceResolver(),
+  }) {
+    final renderObject = _renderObjectOf(element);
+    if (renderObject == null) return null;
+    final rect = RenderSearch.globalRectOf(renderObject);
+    if (rect == null) return null;
+    final chain = resolver.chain(
+      element,
+      boundary: chainBoundary ?? rootElement,
+    );
+    return _build(
+      position: rect.center,
+      candidates: [
+        RenderCandidate(
+          renderObject: renderObject,
+          globalRect: rect,
+          depth: renderObject.depth,
+          order: 0,
+        ),
+      ],
+      index: 0,
+      chain: chain,
+      chainIndex: 0,
+      sourceUnavailable: chain.defaultIndex == null,
+      root: rootElement.renderObject,
+    );
+  }
+
   static PickResult _build({
     required Offset position,
     required List<RenderCandidate> candidates,
