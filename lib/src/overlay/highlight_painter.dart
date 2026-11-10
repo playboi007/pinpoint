@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
+import '../info/widget_info.dart';
 import '../search/pick_result.dart';
 
 /// Colors of the outlines. Fixed, so they read on any app theme.
@@ -12,11 +13,8 @@ abstract final class HighlightColors {
 
 /// The label pill text: widget name and size, for example
 /// `RichText 120.0 x 16.0`.
-String highlightLabel(PickResult pick) {
-  final size = pick.globalRect.size;
-  return '${pick.element.widget.runtimeType} '
-      '${size.width.toStringAsFixed(1)} x ${size.height.toStringAsFixed(1)}';
-}
+String highlightLabel(PickResult pick) =>
+    '${pick.element.widget.runtimeType} ${formatSize(pick.globalRect.size)}';
 
 /// Where a label of [label] size goes for [target], inside [canvas].
 ///
