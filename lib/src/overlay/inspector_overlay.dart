@@ -223,6 +223,10 @@ class _PointerTrap extends StatelessWidget {
       key: InspectorOverlay.trapKey,
       behavior: HitTestBehavior.opaque,
       onPointerHover: (event) => tracker.hoverAt(event.position),
+      // The trap takes the wheel too; pass it on so the app still scrolls.
+      onPointerSignal: (event) {
+        if (event is PointerScrollEvent) tracker.scrollAt(event);
+      },
       // Select on pointer down, not on hover: touch devices have no hover,
       // so a tap alone must select.
       onPointerDown: (event) {

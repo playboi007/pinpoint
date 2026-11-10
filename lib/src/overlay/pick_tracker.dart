@@ -1,9 +1,11 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 
 import '../core/pinpoint_controller.dart';
 import '../search/pick_result.dart';
 import '../search/render_search.dart';
+import '../search/scroll_passthrough.dart';
 
 /// Prints p50 and p95 pick time after every 200 hover picks, in debug.
 ///
@@ -76,6 +78,28 @@ class PickTracker {
     if (_disposed) return false;
     final pick = _pick(position, previous: controller.selection.value);
     return pick != null && controller.select(pick);
+  }
+
+  /// Forwards a wheel [event] over the trap to the scrollable under the
+  /// cursor, then picks again where the pointer is, since other content is
+  /// under it now.
+  void scrollAt(PointerScrollEvent event) {
+    if (_disposed) return;
+    final context = appKey.currentContext;
+    final root = context?.findRenderObject();
+    if (context is! Element || root == null) return;
+    if (!scrollPassthrough(event, root: root, rootElement: context)) return;
+    _hoverPosition = event.position;
+    _cancelHover();
+    // Not a transient callback like hoverAt: that runs before the scrolled
+    // list is laid out again and would pick the item that just left. After
+    // the frame the geometry is new; the hover change repaints in one more
+    // frame.
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      final at = _hoverPosition;
+      if (_disposed || at == null || !controller.canHover) return;
+      controller.hover(_pick(at));
+    }, debugLabel: 'pinpoint.pickAfterScroll');
   }
 
   PickResult? _pick(
