@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:pinpoint/pinpoint.dart';
 
+import 'screens/counter_screen.dart';
 import 'screens/custom_paint_screen.dart';
 import 'screens/dialog_sheet_screen.dart';
 import 'screens/form_screen.dart';
@@ -21,6 +23,8 @@ class ExampleApp extends StatelessWidget {
         colorSchemeSeed: Colors.indigo,
         brightness: Brightness.dark,
       ),
+      // Above the Navigator, so dialogs and routes render beneath Pinpoint.
+      builder: (context, child) => PinPointWrapper(child: child),
       home: const HomeScreen(),
     );
   }
@@ -30,6 +34,7 @@ class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
   static const List<({String title, Widget Function() build})> screens = [
+    (title: 'Counter and spinner', build: CounterScreen.new),
     (title: 'Long list', build: LongListScreen.new),
     (title: 'Dialog and bottom sheet', build: DialogSheetScreen.new),
     (title: 'Nested navigator', build: NestedNavigatorScreen.new),

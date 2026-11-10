@@ -7,10 +7,13 @@ void main() {
 
     for (final screen in HomeScreen.screens) {
       await tester.tap(find.text(screen.title));
-      await tester.pumpAndSettle();
+      // Not pumpAndSettle: the counter screen's spinner never settles.
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
       expect(find.text(screen.title), findsOneWidget, reason: screen.title);
       await tester.pageBack();
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
     }
   });
 }
