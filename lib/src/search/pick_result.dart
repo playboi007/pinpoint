@@ -17,6 +17,8 @@ class PickResult {
     required this.index,
     required this.element,
     required this.globalRect,
+    required this.ancestor,
+    required this.ancestorRect,
   });
 
   /// A result built by hand, for tests that need no render tree.
@@ -27,6 +29,8 @@ class PickResult {
     required this.index,
     required this.element,
     required this.globalRect,
+    this.ancestor,
+    this.ancestorRect,
   });
 
   /// Builds a result from [search] at [position].
@@ -52,12 +56,19 @@ class PickResult {
       final candidate = candidates[index];
       final element = elementFor(candidate.renderObject, root: rootElement);
       if (element == null) continue;
+      final ancestor = _ancestorOf(
+        candidate.renderObject,
+        candidate.globalRect,
+        root: rootElement.renderObject,
+      );
       return PickResult._(
         position: position,
         candidates: candidates,
         index: index,
         element: element,
         globalRect: candidate.globalRect,
+        ancestor: ancestor?.$1,
+        ancestorRect: ancestor?.$2,
       );
     }
     return null;
@@ -79,6 +90,14 @@ class PickResult {
   /// [refreshed].
   final Rect globalRect;
 
+  /// The nearest render ancestor whose rect differs from [globalRect], below
+  /// the app root. The rulers measure to it. Milestone 3 changes this to the
+  /// nearest local-project ancestor.
+  final RenderObject? ancestor;
+
+  /// [ancestor]'s paint bounds in global logical pixels.
+  final Rect? ancestorRect;
+
   RenderObject get renderObject => candidates[index].renderObject;
 
   /// This result with [globalRect] read again from the render tree.
@@ -88,15 +107,41 @@ class PickResult {
   /// of 0 mid-animation).
   PickResult? refreshed() {
     if (!element.mounted) return null;
-    final rect = RenderSearch.globalRectOf(renderObject);
-    if (rect == null || rect == globalRect) return this;
+    final rect = RenderSearch.globalRectOf(renderObject) ?? globalRect;
+    final parent = ancestor;
+    final parentRect = parent == null
+        ? null
+        : RenderSearch.globalRectOf(parent) ?? ancestorRect;
+    if (rect == globalRect && parentRect == ancestorRect) return this;
     return PickResult._(
       position: position,
       candidates: candidates,
       index: index,
       element: element,
       globalRect: rect,
+      ancestor: parent,
+      ancestorRect: parentRect,
     );
+  }
+
+  /// Steps up from [node] until a rect differs from [rect]. Wrappers often
+  /// share one rect (`Padding` inside `Align`), and a ruler of 0 to each
+  /// edge says nothing. Bounded like every walk.
+  static (RenderObject, Rect)? _ancestorOf(
+    RenderObject node,
+    Rect rect, {
+    required RenderObject? root,
+  }) {
+    var current = node.parent;
+    for (var steps = 0; current != null && steps < 512; steps++) {
+      if (identical(current, root)) return null;
+      final parentRect = RenderSearch.globalRectOf(current);
+      if (parentRect != null && parentRect != rect) {
+        return (current, parentRect);
+      }
+      current = current.parent;
+    }
+    return null;
   }
 
   bool _sameCandidates(List<RenderCandidate> other) {

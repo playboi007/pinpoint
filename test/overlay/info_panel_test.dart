@@ -55,9 +55,7 @@ void main() {
     await tester.pumpWidget(host());
     await selectText(tester);
 
-    final info = WidgetInfo.fromRenderObject(
-      tester.renderObject(appText),
-    );
+    final info = WidgetInfo.fromRenderObject(tester.renderObject(appText));
     expect(inPanel('RichText'), findsOneWidget);
     expect(inPanel('RenderParagraph'), findsOneWidget);
     expect(inPanel(info.sizeLabel), findsOneWidget);

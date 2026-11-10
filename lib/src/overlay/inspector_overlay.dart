@@ -6,6 +6,7 @@ import '../core/pinpoint_controller.dart';
 import 'highlight_painter.dart';
 import 'info_panel.dart';
 import 'pick_tracker.dart';
+import 'ruler_painter.dart';
 import 'toolbar.dart';
 
 /// Pinpoint's own UI layer, painted above the app.
@@ -25,6 +26,9 @@ class InspectorOverlay extends StatefulWidget {
 
   /// Key of the `CustomPaint` that draws the hover and selection outlines.
   static const Key highlightKey = ValueKey<String>('pinpoint.highlight');
+
+  /// Key of the `CustomPaint` that draws the rulers.
+  static const Key rulerKey = ValueKey<String>('pinpoint.rulers');
 
   final PinPointController controller;
 
@@ -154,13 +158,27 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
                     _PointerTrap(tracker: _tracker),
                   IgnorePointer(
                     child: Builder(
-                      builder: (paintContext) => CustomPaint(
-                        key: InspectorOverlay.highlightKey,
-                        painter: HighlightPainter(
-                          hovered: widget.controller.hovered,
-                          selected: widget.controller.selection,
-                          origin: () => _originOf(paintContext),
-                        ),
+                      builder: (paintContext) => Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          CustomPaint(
+                            key: InspectorOverlay.rulerKey,
+                            painter: RulerPainter(
+                              selected: widget.controller.selection,
+                              hovered: widget.controller.hovered,
+                              measuring: widget.controller.measuring,
+                              origin: () => _originOf(paintContext),
+                            ),
+                          ),
+                          CustomPaint(
+                            key: InspectorOverlay.highlightKey,
+                            painter: HighlightPainter(
+                              hovered: widget.controller.hovered,
+                              selected: widget.controller.selection,
+                              origin: () => _originOf(paintContext),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),

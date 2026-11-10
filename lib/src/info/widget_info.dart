@@ -165,10 +165,7 @@ class WidgetInfo {
   static String _range(double min, double max) =>
       min == max ? _n(min) : '${_n(min)}-${_n(max)}';
 
-  static String _n(double v) {
-    if (v.isInfinite) return '∞';
-    return v == v.roundToDouble() ? v.toInt().toString() : v.toStringAsFixed(1);
-  }
+  static String _n(double v) => formatNumber(v);
 }
 
 /// The constraints [renderObject] was last laid out with, or null when it
@@ -181,6 +178,12 @@ Constraints? constraintsOf(RenderObject renderObject) => switch (renderObject) {
   final RenderSliver sliver => sliver.constraints,
   _ => null,
 };
+
+/// `320` for whole numbers, `12.5` otherwise, `∞` for infinity.
+String formatNumber(double v) {
+  if (v.isInfinite) return v.isNegative ? '-∞' : '∞';
+  return v == v.roundToDouble() ? v.toInt().toString() : v.toStringAsFixed(1);
+}
 
 /// For example `320.0 x 48.0`.
 String formatSize(Size size) =>

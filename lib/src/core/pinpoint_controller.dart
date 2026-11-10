@@ -48,6 +48,7 @@ class PinPointController extends ChangeNotifier {
   final ValueNotifier<PickResult?> _selection = ValueNotifier<PickResult?>(
     null,
   );
+  final ValueNotifier<bool> _measuring = ValueNotifier<bool>(false);
 
   /// The current mode.
   PinPointMode get mode => _mode;
@@ -72,6 +73,15 @@ class PinPointController extends ChangeNotifier {
   /// reselection and stopping. Setting it notifies no one: the panel that
   /// moved repaints itself.
   Offset? panelPosition;
+
+  /// Whether Alt is held, so the rulers measure from the selection to the
+  /// hovered widget instead of to the selection's ancestor.
+  ValueListenable<bool> get measuring => _measuring;
+
+  /// Records whether Alt is held. Ignored in idle.
+  void setMeasuring(bool held) {
+    _measuring.value = held && isActive;
+  }
 
   /// Whether hover is recorded in the current mode.
   bool get canHover =>
@@ -178,6 +188,7 @@ class PinPointController extends ChangeNotifier {
     if (_mode != from) return false;
     _mode = to;
     if (!canHover) _hovered.value = null;
+    if (!isActive) _measuring.value = false;
     notifyListeners();
     return true;
   }
@@ -186,6 +197,7 @@ class PinPointController extends ChangeNotifier {
   void dispose() {
     _hovered.dispose();
     _selection.dispose();
+    _measuring.dispose();
     super.dispose();
   }
 }

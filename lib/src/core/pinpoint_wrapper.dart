@@ -79,6 +79,9 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
   }
 
   bool _handleKey(KeyEvent event) {
+    // Alt alone is not claimed: it only switches the rulers to measuring
+    // the gap between the selection and the hovered widget.
+    _controller.setMeasuring(HardwareKeyboard.instance.isAltPressed);
     final action = keyActionFor(
       event,
       mode: _controller.mode,

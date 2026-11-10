@@ -223,6 +223,20 @@ void main() {
     });
   });
 
+  group('measuring (Alt held)', () {
+    test('is ignored in idle and cleared on stop', () {
+      controller.setMeasuring(true);
+      expect(controller.measuring.value, isFalse);
+
+      controller.startPicking();
+      controller.setMeasuring(true);
+      expect(controller.measuring.value, isTrue);
+
+      controller.stop();
+      expect(controller.measuring.value, isFalse);
+    });
+  });
+
   group('freeze', () {
     test('toggles and notifies, independent of mode', () {
       controller.toggleFreeze();
