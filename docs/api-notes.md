@@ -34,6 +34,7 @@ Result of the "Verify first" lists in `PLAN.md`. Where this file differs from th
 | 21 | Facts found in Session 5 | A text field outside the Navigator needs a `DismissIntent` action; key results for text fields; a focused field draws frames. |
 | 22 | Facts found in Session 6 | `RenderObject.layer` is protected, so capture the whole boundary; `endOfFrame` forces a frame; images in tests need `runAsync`. |
 | 23 | Facts found in Session 7 | `dart run pinpoint:bridge` works from a Flutter host app; an early 413 is lost unless the body is read; widget tests fake `HttpClient`. |
+| 24 | Facts found in Session 8 | A lazy list re-uses tree order, so pins need the item index; visibility from offstage marks and clips; Flutter PNGs decode with `dart:io` zlib; MCP over HTTP by hand. |
 
 ---
 
@@ -360,6 +361,7 @@ So the plan's check is: **works in `flutter run -d chrome` (DWDS attached); not 
 - `package:dart_mcp` **0.5.2** (published 2026-06-29; `sdk: ^3.7.0`; deps `async`, `collection`, `json_rpc_2`, `meta`, `stream_channel`, `stream_transform`). Servers and clients run over a `StreamChannel<String>`. The package ships **only `stdioChannel`** (`lib/stdio.dart`). There is no HTTP or SSE transport.
 - Result: the plan's preferred option (MCP over HTTP on the bridge port) needs a hand-written `StreamChannel` adapter over HTTP. The fallback (stdio shim that forwards to the running bridge) works with `dart_mcp` as is.
 - `dart_mcp` has no Flutter dependency, so `bin/bridge.dart` can use it. It is a **new dependency beyond `http`**. Engineering rule 10 needs a recorded decision before adding it.
+- **Decided in Session 8:** the bridge serves MCP itself, over HTTP at `/mcp` on its own port: a hand-written JSON-RPC 2.0 handler (`lib/src/bridge/mcp_server.dart`, about 300 lines), Streamable HTTP with JSON answers only (202 for notifications, 405 for `GET /mcp`: no server-sent event stream). No `dart_mcp`, so no new dependency (rule 10). **[unverified]** with a real Claude Code session; tested with a scripted client (`test/bridge/mcp_test.dart`) and `curl`.
 - Keep every file that `bin/` imports (for example `lib/src/model/annotation.dart`) free of `dart:ui` and `package:flutter`. A plain Dart process cannot import them. **[run]** `dart run pinpoint:bridge` works from `example/`, a Flutter app that depends on the package (Session 7, item 23).
 
 ## 16. Official Dart and Flutter MCP server
@@ -446,6 +448,14 @@ Extra tools exist behind `--enable` (`launch_app`, `list_devices`, `run_tests`, 
 - **[source]** `package:http` 1.6 does not add `charset` to an `application/json` content type (`request.dart:20`). The request is still not a CORS "simple request", so a browser sends the preflight.
 - **[run]** Under fvm, `dart run` is a wrapper process around the Dart VM. A SIGINT sent only to the wrapper (for example `pkill -f pinpoint:bridge`) does not stop the bridge; Ctrl+C in a terminal signals both.
 - **[unverified]** In Chrome: the preflight and POST from the app to `http://127.0.0.1:4747`, the Private Network Access header, `Clipboard.setData` after the screenshot's awaits (the click's user activation must still hold), and the toast text for a refused connection (the browser gives only `XMLHttpRequest error`).
+
+## 24. Facts found in Session 8
+
+- **[run-vm]** `ListView.builder` builds only the rows near the viewport and disposes the others. One constructor call makes every row, so the "ordinal among matches in tree order" of PLAN.md Milestone 8 moves to another row after a scroll. The row's index is public: `SliverMultiBoxAdaptorParentData.index` (`rendering/sliver_multi_box_adaptor.dart`) on the parent data of the render box that is the list's child. `NoteAnchor.itemIndex` records it; the ordinal counts only within that item.
+- **[run-vm]** A pin's visibility needs no hit test: walk up the render parents, and at each step (a) find the child in `parent.debugDescribeChildren()` and hide when its style is `DiagnosticsTreeStyle.offstage` (a route beneath an opaque route, as in item 3), (b) cut the rect by `parent.describeApproximatePaintClip(child)` through `parent.getTransformTo(null)` (a scroll view). `RenderSearch.visibleRectOf`. **[source]** A route under a **non-opaque** route (a dialog) is not offstage (item 3: the theater marks only entries below the first opaque one), so its pins stay visible above the barrier. **[unverified]** whether that looks wrong in Chrome.
+- **[run-vm]** `Element.visitChildren` walks every mounted element, offstage routes included; a full walk of the example's long list screen is about 1.5 ms cold and 0.7 ms warm in the VM (resolution cached per widget instance, type filter first). **[unverified]** On web (DDC, about 20 times slower), expect about 30 ms cold and 15 ms warm against the plan's 300 ms and 20 ms budgets.
+- **[run-vm]** A post-frame callback that skips work (a throttle) must arrange its own retry: the app may draw no further frame. `PinTracker` uses a one-shot `Timer`, which draws only if a pin moves (rule 2).
+- **[run-vm]** `ui.Image.toByteData(format: png)` writes 8-bit RGBA, not interlaced, with per-row filters. `dart:io`'s `zlib` inflates it, so the bridge (plain Dart) can read, shrink and re-encode a screenshot without an image package (`lib/src/bridge/png_resize.dart`).
 
 ---
 

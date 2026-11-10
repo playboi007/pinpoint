@@ -4,7 +4,7 @@ A debug-only Flutter package. Click any widget in a running app, write a comment
 
 Web is the first target.
 
-> **Status: Milestone 7 (Session 7).** The wrapper, the inspect mode (Alt+Shift+C or the launcher button), Esc and freeze (P while picking) work. Hover outlines the widget under the pointer, and a click selects the nearest widget written in your own project (a `Text`, not the `RichText` it builds), with `file:line` in the label. The click opens a panel next to the widget with a clickable breadcrumb and two tabs. Comment: choose Bug, Improve or Question, type the comment, then Send (or Ctrl/Cmd+Enter) to every sink in `PinPointConfig.sinks`, with a toast per sink, or Copy as Markdown. The comment is kept until a send succeeds. Info: the widget's layout data; there, Arrow Up or `[` moves to the next local ancestor, Arrow Down or `]` moves back, and Alt plus an arrow steps through framework widgets too. Rulers measure to the nearest local ancestor (hold Alt and hover another widget to measure the gap), and the mouse wheel still scrolls the app. The note is an `Annotation` (schema 1, under 8 KB as JSON). With "Include screenshot" ticked (the default), Send adds a PNG crop of the widget with a red outline, at most 1600 px wide (`PinPointConfig.maxScreenshotWidth`). `HttpSink` posts each note to the local bridge (`dart run pinpoint:bridge`), which writes it into `.pinpoint/open/` as Markdown, JSON and PNG; `ClipboardSink` copies the Markdown. When picking starts and the bridge does not answer, a "bridge offline" badge shows. Empty files under `lib/src/` and `bin/setup.dart` are for later milestones. See `PLAN.md` for the build order.
+> **Status: Milestone 8 (Session 8).** The wrapper, the inspect mode (Alt+Shift+C or the launcher button), Esc and freeze (P while picking) work. Hover outlines the widget under the pointer, and a click selects the nearest widget written in your own project (a `Text`, not the `RichText` it builds), with `file:line` in the label. The click opens a panel next to the widget with a clickable breadcrumb and two tabs. Comment: choose Bug, Improve or Question, type the comment, then Send (or Ctrl/Cmd+Enter) to every sink in `PinPointConfig.sinks`, with a toast per sink, or Copy as Markdown. The comment is kept until a send succeeds. Info: the widget's layout data; there, Arrow Up or `[` moves to the next local ancestor, Arrow Down or `]` moves back, and Alt plus an arrow steps through framework widgets too. Rulers measure to the nearest local ancestor (hold Alt and hover another widget to measure the gap), and the mouse wheel still scrolls the app. The note is an `Annotation` (schema 2, under 8 KB as JSON). With "Include screenshot" ticked (the default), Send adds a PNG crop of the widget with a red outline, at most 1600 px wide (`PinPointConfig.maxScreenshotWidth`). `HttpSink` posts each note to the local bridge (`dart run pinpoint:bridge`), which writes it into `.pinpoint/open/` as Markdown, JSON and PNG; `ClipboardSink` copies the Markdown. When picking starts and the bridge does not answer, a "bridge offline" badge shows. Each note stays on screen as a numbered pin on its widget, through scroll, resize and hot reload; Save draft keeps a note as a draft pin that no agent sees until you send it. A click on a pin opens its note: Send, Send all, Delete, and Accept or Reopen once the agent is done. The agent reads and resolves notes through MCP tools on the bridge, and a resolved pin shows a tick and fades within 3 seconds. Empty files under `lib/src/` are for later milestones. See `PLAN.md` for the build order.
 
 ```dart
 MaterialApp(
@@ -25,13 +25,21 @@ dart run pinpoint:bridge            # http://127.0.0.1:4747, notes in .pinpoint/
 dart run pinpoint:bridge --help     # --port, --dir, --lan, --allow-origin
 ```
 
-Each Send writes `.pinpoint/open/<id>.md`, `<id>.json` (no image data) and `<id>.png`. The bridge listens on this machine only and accepts notes only from pages served from this machine (`localhost`, `127.0.0.1`); `--lan` and `--allow-origin <url>` widen that for testing on a phone. It writes `.pinpoint/.gitignore` (`*`), so the notes are never committed; add `.pinpoint/` to your own `.gitignore` too if you like.
+Each Send writes `.pinpoint/open/<id>.md`, `<id>.json` (no image data) and `<id>.png`. Drafts go to `.pinpoint/drafts/` (no `.md`, so no agent finds them), and closed notes to `.pinpoint/resolved/`. The app loads its pins from the bridge at start, and asks it every 2 seconds what changed, only while the overlay is active. The bridge address comes from `PinPointConfig.bridgeUrl`, else from the first `HttpSink.bridge()` in `sinks`. The bridge listens on this machine only and accepts notes only from pages served from this machine (`localhost`, `127.0.0.1`); `--lan` and `--allow-origin <url>` widen that for testing on a phone. It writes `.pinpoint/.gitignore` (`*`), so the notes are never committed; add `.pinpoint/` to your own `.gitignore` too if you like.
 
 If port 4747 is taken, start the bridge with `--port <n>` and give the app the same port: `HttpSink.bridge(port: n)`, or `--dart-define=PINPOINT_BRIDGE_PORT=n`.
 
 ## Agent hand-off
 
-Add this section to your agent instruction file (`CLAUDE.md` for Claude Code, `AGENTS.md` for others). The bridge prints it at start until one of them has it:
+```bash
+dart run pinpoint:setup             # writes .pinpoint/agent-instructions.md and mcp.json, prints the rest
+dart run pinpoint:setup --write     # also edits CLAUDE.md (or AGENTS.md) and .mcp.json
+claude mcp add --transport http pinpoint http://127.0.0.1:4747/mcp   # or this, for Claude Code
+```
+
+The bridge serves MCP at `/mcp` (HTTP, on the bridge's port) with three tools: `list_notes(status, detail)`, `get_note(id, detail)` and `update_note(id, status, message)`. `detail` is `compact` (comment, source, rect; under 600 characters), `standard` (the default: adds layout, enclosing widgets and the screenshot, at most 800 px wide) or `full`. Drafts are invisible to every tool.
+
+The section setup adds to your agent instruction file (the bridge prints it at start until `CLAUDE.md` or `AGENTS.md` has it):
 
 ```text
 ## Pinpoint notes
@@ -41,6 +49,10 @@ file at the given line, read the comment, view the PNG named on the
 Screenshot line, make the change, run flutter analyze, then move the
 note's files (<id>.md, <id>.json and <id>.png) to .pinpoint/resolved/ and
 append one line describing the fix to the .md.
+With the pinpoint MCP server connected, use its tools instead: list_notes,
+get_note (it attaches the screenshot), then update_note(id, "resolved",
+message) with one line saying what you changed. The pin in the app
+updates. Leave .pinpoint/drafts/ alone: drafts are not sent yet.
 ```
 
 ## What it will do
@@ -50,7 +62,8 @@ append one line describing the fix to the .md.
 - Comments and a payload an agent can act on without seeing the app.
 - Sinks: clipboard, and a local bridge that writes notes into `.pinpoint/`.
 - Agent hand-off: an instruction section, so the agent works the notes in `.pinpoint/open/`.
-- Later: pins, an MCP bridge, what-if environment switches, automatic problem detection, live tweak, and agent drive and verify.
+- Pins and drafts, and MCP tools on the bridge, so a resolved note clears its pin in the running app.
+- Later: what-if environment switches, automatic problem detection, live tweak, and agent drive and verify.
 
 Source locations come from Flutter's `--track-widget-creation`, which is on only in debug builds. The package defaults to `enabled: kDebugMode`.
 
@@ -60,7 +73,7 @@ Source locations come from Flutter's `--track-widget-creation`, which is on only
 PLAN.md             # the implementation plan (read this first)
 docs/api-notes.md   # Flutter SDK API checks; overrides PLAN.md where they differ
 lib/                # package source (empty files are later milestones)
-bin/                # bridge.dart (Milestone 7); setup.dart is empty
+bin/                # bridge.dart (Milestones 7 and 8), setup.dart (Milestone 8)
 example/            # manual test bed: six screens
 test/               # package tests
 ```
@@ -102,6 +115,11 @@ flutter test test/capture/screenshot_plan_test.dart test/capture/screenshot_capt
 # Milestone 7: Markdown goldens, bridge, HTTP and clipboard sinks, offline badge
 flutter test test/sink test/bridge test/overlay/bridge_badge_test.dart
 
+# Milestone 8: SourceIndex, pins and drafts, bridge store and feed, polling, MCP, setup
+flutter test test/search/source_index_test.dart test/overlay/pins_test.dart \
+  test/overlay/note_sync_test.dart test/core/note_book_test.dart test/model/note_status_test.dart \
+  test/bridge test/sink/bridge_client_test.dart
+
 # after a deliberate change to the note's shape: rewrite the golden, review the diff
 flutter test --update-goldens test/capture/target_test.dart
 flutter test --update-goldens test/sink/markdown_formatter_test.dart
@@ -112,6 +130,9 @@ curl -i -X OPTIONS http://localhost:4747/annotations -H 'Origin: http://localhos
   -H 'Access-Control-Request-Method: POST' -H 'Access-Control-Request-Headers: content-type'
 curl -i -X POST http://localhost:4747/annotations -H 'content-type: application/json' \
   --data @test/fixtures/note.json
+# and an MCP tool call, as an agent makes it
+curl -s -X POST http://localhost:4747/mcp -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_notes","arguments":{}}}'
 
 # the example app; PINPOINT_ROOT makes paths project-relative. Start the bridge
 # in example/ first (dart run pinpoint:bridge), or Send reports it offline.
