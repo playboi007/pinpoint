@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:pinpoint/pinpoint.dart';
 
+import 'screens/bug_zoo_screen.dart';
 import 'screens/counter_screen.dart';
 import 'screens/custom_paint_screen.dart';
 import 'screens/dialog_sheet_screen.dart';
@@ -47,6 +48,8 @@ class ExampleApp extends StatelessWidget {
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
+  static const String bugZooTitle = 'Bug zoo';
+
   static const List<({String title, Widget Function() build})> screens = [
     (title: 'Counter and spinner', build: CounterScreen.new),
     (title: 'Long list', build: LongListScreen.new),
@@ -72,6 +75,16 @@ class HomeScreen extends StatelessWidget {
                 context,
               ).push(MaterialPageRoute<void>(builder: (_) => screen.build())),
             ),
+          // Not in [screens]: its planted errors would fail every test that
+          // walks the clean screens.
+          ListTile(
+            title: const Text(bugZooTitle),
+            subtitle: const Text('One planted problem of each kind'),
+            trailing: const Icon(Icons.bug_report_outlined),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const BugZooScreen()),
+            ),
+          ),
         ],
       ),
     );

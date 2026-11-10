@@ -191,11 +191,11 @@ double contrastRatio(Color a, Color b) {
 /// (24 px, or 18.66 px bold).
 ///
 /// Takes one capture of [boundary] and, for each paragraph, compares its
-/// text color with the most common other color inside its rect. That is
-/// an estimate (watch out for): text over an image or a gradient has no
-/// one background, so when the most common color covers under 60% of the
-/// non-text pixels the finding says `confidence: low`. The measured ratio
-/// is always reported.
+/// text color with the most common color in a 3 px ring around its rect.
+/// That is an estimate (watch out for): text over an image or a gradient
+/// has no one background, so when the most common color covers under 60%
+/// of the ring the finding says `confidence: low`. The measured ratio is
+/// always reported.
 Future<List<Finding>> contrastFindings(
   RenderRepaintBoundary boundary,
   List<(RenderParagraph, Rect)> paragraphs, {
@@ -254,15 +254,43 @@ Finding? _contrast(
   if (right <= left || bottom <= top) return null;
 
   final textRgb = color.toARGB32() & 0xFFFFFF;
-  final counts = <int, int>{};
-  var others = 0;
+  int rgbAt(int x, int y) {
+    final offset = (y * width + x) * 4;
+    return pixels.getUint8(offset) << 16 |
+        pixels.getUint8(offset + 1) << 8 |
+        pixels.getUint8(offset + 2);
+  }
+
+  // Is the text painted in its style's color at all? Not under an Opacity,
+  // a color filter or a running transition: the declared color says
+  // nothing then, so the paragraph is skipped rather than given a made-up
+  // ratio.
+  var painted = 0;
   for (var y = top; y < bottom; y++) {
     for (var x = left; x < right; x++) {
-      final offset = (y * width + x) * 4;
-      final rgb =
-          pixels.getUint8(offset) << 16 |
-          pixels.getUint8(offset + 1) << 8 |
-          pixels.getUint8(offset + 2);
+      if (_near(rgbAt(x, y), textRgb)) painted++;
+    }
+  }
+  if (painted == 0) return null;
+
+  // The background is read from a thin ring just outside the paragraph,
+  // where no glyph is drawn. Inside the rect, glyphs of a see-through or
+  // anti-aliased text would pass for it.
+  const ring = 3;
+  final counts = <int, int>{};
+  var others = 0;
+  for (
+    var y = math.max(0, top - ring);
+    y < math.min(height, bottom + ring);
+    y++
+  ) {
+    for (
+      var x = math.max(0, left - ring);
+      x < math.min(width, right + ring);
+      x++
+    ) {
+      if (x >= left && x < right && y >= top && y < bottom) continue;
+      final rgb = rgbAt(x, y);
       if (_near(rgb, textRgb)) continue;
       counts[rgb] = (counts[rgb] ?? 0) + 1;
       others++;

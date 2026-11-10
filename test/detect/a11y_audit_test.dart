@@ -166,6 +166,48 @@ void main() {
       expect(finding.rect, tester.getRect(find.byType(RichText)));
     });
 
+    testWidgets('see-through glyphs are not taken for the background', (
+      tester,
+    ) async {
+      // Painted lighter than declared: the background comes from around
+      // the text, not from its glyphs.
+      await tester.pumpWidget(
+        page(
+          ColoredBox(
+            color: Colors.white,
+            child: Padding(
+              padding: const EdgeInsets.all(8),
+              child: Text(
+                'Label',
+                style: TextStyle(color: Colors.black.withValues(alpha: 0.9)),
+              ),
+            ),
+          ),
+        ),
+      );
+      expect(await contrast(tester), isEmpty);
+    });
+
+    testWidgets('text not painted in its own color is skipped', (tester) async {
+      // Under an Opacity, no pixel has the declared color: no ratio can be
+      // trusted, so none is reported.
+      await tester.pumpWidget(
+        page(
+          const ColoredBox(
+            color: Colors.white,
+            child: Padding(
+              padding: EdgeInsets.all(8),
+              child: Opacity(
+                opacity: 0.3,
+                child: Text('Faded', style: TextStyle(color: Colors.black)),
+              ),
+            ),
+          ),
+        ),
+      );
+      expect(await contrast(tester), isEmpty);
+    });
+
     testWidgets('black text on white is silent', (tester) async {
       await tester.pumpWidget(text(Colors.black));
       expect(await contrast(tester), isEmpty);
