@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart' show ThemeData;
 
 import '../sink/pinpoint_sink.dart';
 import 'keymap.dart';
@@ -17,6 +18,7 @@ class PinPointConfig {
     this.sinks = const <PinPointSink>[],
     this.bridgeUrl,
     this.maxScreenshotWidth = 1600,
+    this.themeVariants = const <String, ThemeData>{},
   }) : assert(maxScreenshotWidth > 0);
 
   /// The bridge (`dart run pinpoint:bridge`), for example
@@ -28,6 +30,11 @@ class PinPointConfig {
   /// `/annotations`, such as `HttpSink.bridge()`. With neither, notes and
   /// pins live in this tab only.
   final Uri? bridgeUrl;
+
+  /// Themes the what-if panel offers by name, for apps that switch themes
+  /// through their own state or use `ThemeExtension` tokens. When set, the
+  /// panel lists these instead of the app's `theme` and `darkTheme`.
+  final Map<String, ThemeData> themeVariants;
 
   /// The widest screenshot, in image pixels. A wider crop is captured at a
   /// lower pixel ratio. PNG encoding takes most of a capture's time, so this

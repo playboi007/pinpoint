@@ -188,6 +188,7 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
               listenable: environment,
               builder: (context, child) => EnvironmentHost(
                 environment: environment.value,
+                themeVariants: widget.config.themeVariants,
                 child: child!,
               ),
               child: ListenableBuilder(

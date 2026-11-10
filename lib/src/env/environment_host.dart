@@ -21,10 +21,15 @@ class EnvironmentHost extends StatelessWidget {
   const EnvironmentHost({
     super.key,
     required this.environment,
+    this.themeVariants = const <String, ThemeData>{},
     required this.child,
   });
 
   final Environment environment;
+
+  /// `PinPointConfig.themeVariants`: themes the app supplies by name.
+  final Map<String, ThemeData> themeVariants;
+
   final Widget child;
 
   /// The `MediaQuery` the app gets: [real] with the overrides.
@@ -33,12 +38,70 @@ class EnvironmentHost extends StatelessWidget {
   /// agree. Code that reads `View.of(context).physicalSize` or
   /// `PlatformDispatcher` directly still sees the real window: that is a
   /// finding about the app, not a bug in Pinpoint.
-  static MediaQueryData mediaFor(MediaQueryData real, Environment env) {
+  ///
+  /// [brightness] is the overridden theme's brightness, so an app that
+  /// reads `platformBrightness` agrees with the theme it gets.
+  static MediaQueryData mediaFor(
+    MediaQueryData real,
+    Environment env, {
+    Brightness? brightness,
+  }) {
     var data = real;
     if (env.viewport case final size?) data = data.copyWith(size: size);
+    if (env.textScale case final scale?) {
+      data = data.copyWith(textScaler: TextScaler.linear(scale));
+    }
+    if (env.boldText case final bold?) data = data.copyWith(boldText: bold);
+    if (env.safeArea case final insets?) {
+      data = data.copyWith(padding: insets, viewPadding: insets);
+    }
+    if (env.keyboardHeight case final height? when height > 0) {
+      data = data.copyWith(
+        viewInsets: data.viewInsets.copyWith(bottom: height),
+        // As the engine does: the keyboard covers the bottom inset, so the
+        // padding loses it; viewPadding keeps it.
+        padding: data.padding.copyWith(
+          bottom: math.max(0, data.viewPadding.bottom - height),
+        ),
+      );
+    }
+    if (brightness != null) {
+      data = data.copyWith(platformBrightness: brightness);
+    }
     // The device pixel ratio is never changed: it cannot be faked. A
     // 390-wide viewport on a 1x laptop screen renders at 1x.
     return data;
+  }
+
+  /// The theme the app gets, or null for the one it already has.
+  ///
+  /// `MaterialApp` chose its theme above the wrapper, so overriding
+  /// `platformBrightness` alone changes nothing. Light and dark use the
+  /// app's own `theme` and `darkTheme`, found as widgets, without a
+  /// dependency.
+  ThemeData? _overriddenTheme(BuildContext context, ThemeData inherited) {
+    ThemeData? theme = themeVariants[environment.themeVariant];
+    if (theme == null && environment.brightness != null) {
+      final app = context.findAncestorWidgetOfExactType<MaterialApp>();
+      theme = environment.brightness == Brightness.dark
+          ? app?.darkTheme ?? ThemeData(brightness: Brightness.dark)
+          : app?.theme ?? ThemeData();
+    }
+    if (environment.seedColor case final seed?) {
+      final base = theme ?? inherited;
+      // Material 3 only: in a Material 2 theme, copyWith(colorScheme:)
+      // does not re-derive the component themes, so the colors would mix.
+      // The panel says so and disables the switch.
+      if (base.useMaterial3) {
+        theme = base.copyWith(
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: seed,
+            brightness: base.brightness,
+          ),
+        );
+      }
+    }
+    return theme;
   }
 
   @override
@@ -49,11 +112,17 @@ class EnvironmentHost extends StatelessWidget {
     final real =
         MediaQuery.maybeOf(context) ??
         MediaQueryData.fromView(View.of(context));
+    final inherited = Theme.of(context);
+    final theme = _overriddenTheme(context, inherited);
     return MediaQuery(
-      data: mediaFor(real, environment),
+      data: mediaFor(real, environment, brightness: theme?.brightness),
       child: Directionality(
-        textDirection: Directionality.maybeOf(context) ?? TextDirection.ltr,
-        child: Theme(data: Theme.of(context), child: child),
+        // Only the direction: strings stay in the current locale.
+        textDirection:
+            environment.textDirection ??
+            Directionality.maybeOf(context) ??
+            TextDirection.ltr,
+        child: Theme(data: theme ?? inherited, child: child),
       ),
     );
   }
