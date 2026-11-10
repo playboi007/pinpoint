@@ -4,9 +4,11 @@ import 'package:flutter/services.dart';
 
 import '../core/pinpoint_controller.dart';
 import '../info/widget_info.dart';
+import '../model/annotation.dart';
 import '../search/pick_result.dart';
 import 'comment_form.dart';
 import 'highlight_painter.dart';
+import 'note_view.dart';
 
 /// Space kept between the panel and the viewport's edges.
 const double panelMargin = 12;
@@ -152,22 +154,33 @@ class InfoPanelLayer extends StatelessWidget {
     required this.tab,
     required this.commentFocus,
     required this.onSend,
+    required this.onSaveDraft,
     required this.onCopy,
+    required this.noteActions,
   });
 
   final PinPointController controller;
   final ValueNotifier<PanelTab> tab;
   final FocusNode commentFocus;
   final VoidCallback onSend;
+  final VoidCallback onSaveDraft;
   final VoidCallback onCopy;
+  final NoteActions noteActions;
 
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: Listenable.merge([controller.selection, tab]),
+      listenable: Listenable.merge([
+        controller.selection,
+        tab,
+        controller.openNote,
+        controller.notes,
+      ]),
       builder: (context, _) {
         final selection = controller.selection.value;
         if (selection == null) return const SizedBox.shrink();
+        final openId = controller.openNote.value;
+        final note = openId == null ? null : controller.notes.byId(openId);
         return _PanelPlacement(
           controller: controller,
           selection: selection,
@@ -178,9 +191,16 @@ class InfoPanelLayer extends StatelessWidget {
             onTab: (value) => tab.value = value,
             commentFocus: commentFocus,
             onSend: onSend,
+            onSaveDraft: onSaveDraft,
             onCopy: onCopy,
             onClose: controller.clearSelection,
             onDrag: onDrag,
+            note: note,
+            noteNumber: note == null
+                ? null
+                : controller.notes.numberOf(note.id),
+            drafts: controller.notes.drafts.length,
+            noteActions: noteActions,
           ),
         );
       },
@@ -298,9 +318,14 @@ class InfoPanel extends StatelessWidget {
     required this.onTab,
     required this.commentFocus,
     required this.onSend,
+    this.onSaveDraft,
     required this.onCopy,
     required this.onClose,
     this.onDrag,
+    this.note,
+    this.noteNumber,
+    this.drafts = 0,
+    this.noteActions,
   });
 
   static const Key panelKey = ValueKey<String>('pinpoint.infoPanel');
@@ -322,9 +347,23 @@ class InfoPanel extends StatelessWidget {
   final ValueChanged<PanelTab> onTab;
   final FocusNode commentFocus;
   final VoidCallback onSend;
+  final VoidCallback? onSaveDraft;
   final VoidCallback onCopy;
   final VoidCallback onClose;
   final ValueChanged<Offset>? onDrag;
+
+  /// The pinned note to show instead of the comment form, after a click
+  /// on its pin.
+  final Annotation? note;
+
+  /// [note]'s pin number.
+  final int? noteNumber;
+
+  /// How many drafts there are.
+  final int drafts;
+
+  /// What [note]'s buttons do. Required with [note].
+  final NoteActions? noteActions;
 
   @override
   Widget build(BuildContext context) {
@@ -399,16 +438,33 @@ class InfoPanel extends StatelessWidget {
             child: _Header(selection: selection, onClose: onClose),
           ),
           _Crumbs(selection: selection, onSelect: controller.selectChainIndex),
-          _Tabs(tab: tab, onTab: onTab),
+          _Tabs(
+            tab: tab,
+            onTab: onTab,
+            commentLabel: note == null
+                ? 'Comment'
+                : noteNumber == null
+                ? 'Note'
+                : 'Note $noteNumber',
+          ),
           Flexible(
             child: SingleChildScrollView(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
               child: switch (tab) {
                 PanelTab.info => _info(theme),
+                PanelTab.comment when note != null && noteActions != null =>
+                  NoteView(
+                    note: note!,
+                    number: noteNumber,
+                    drafts: drafts,
+                    focusNode: commentFocus,
+                    actions: noteActions!,
+                  ),
                 PanelTab.comment => CommentForm(
                   controller: controller,
                   focusNode: commentFocus,
                   onSend: onSend,
+                  onSaveDraft: onSaveDraft,
                   onCopy: onCopy,
                 ),
               },
@@ -555,10 +611,15 @@ class _Crumb extends StatelessWidget {
 }
 
 class _Tabs extends StatelessWidget {
-  const _Tabs({required this.tab, required this.onTab});
+  const _Tabs({
+    required this.tab,
+    required this.onTab,
+    required this.commentLabel,
+  });
 
   final PanelTab tab;
   final ValueChanged<PanelTab> onTab;
+  final String commentLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -572,7 +633,7 @@ class _Tabs extends StatelessWidget {
         ),
         _TabButton(
           key: InfoPanel.commentTabKey,
-          label: 'Comment',
+          label: commentLabel,
           selected: tab == PanelTab.comment,
           onTap: () => onTab(PanelTab.comment),
         ),

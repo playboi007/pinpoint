@@ -12,6 +12,7 @@ import '../capture/screenshot.dart';
 import '../core/pinpoint_config.dart';
 import '../core/pinpoint_controller.dart';
 import '../model/annotation.dart';
+import '../search/pick_result.dart';
 import '../search/render_search.dart';
 import '../search/source_resolver.dart';
 import '../sink/http_sink.dart';
@@ -19,7 +20,10 @@ import '../sink/markdown_formatter.dart';
 import '../sink/pinpoint_sink.dart';
 import 'highlight_painter.dart';
 import 'info_panel.dart';
+import 'note_view.dart';
 import 'pick_tracker.dart';
+import 'pin_marker.dart';
+import 'pin_tracker.dart';
 import 'ruler_painter.dart';
 import 'toast_layer.dart';
 import 'toolbar.dart';
@@ -106,6 +110,25 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     resolver: SourceResolver.forConfig(widget.config),
   );
 
+  late PinTracker _pins = _newPins();
+
+  PinTracker _newPins() => PinTracker(
+    notes: widget.controller.notes,
+    contentKey: widget.contentKey,
+    resolver: SourceResolver.forConfig(widget.config),
+  );
+
+  late final NoteActions _noteActions = NoteActions(
+    send: (id) => unawaited(_sendNotes([id])),
+    sendAll: () => unawaited(
+      _sendNotes([for (final n in widget.controller.notes.drafts) n.id]),
+    ),
+    delete: _deleteNote,
+    accept: (id) => _setStatus(id, NoteStatus.verified),
+    reopen: (id) => _setStatus(id, NoteStatus.submitted),
+    edit: _editNote,
+  );
+
   @override
   void initState() {
     super.initState();
@@ -121,12 +144,15 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
         oldWidget.contentKey != widget.contentKey) {
       _tracker.dispose();
       _tracker = _newTracker();
+      _pins.dispose();
+      _pins = _newPins();
     } else if (oldWidget.config.projectRoot != widget.config.projectRoot ||
         !listEquals(
           oldWidget.config.localPathHints,
           widget.config.localPathHints,
         )) {
       _tracker.resolver = SourceResolver.forConfig(widget.config);
+      _pins.resolver = SourceResolver.forConfig(widget.config);
     }
     if (oldWidget.controller != widget.controller) {
       oldWidget.controller.removeListener(_onControllerChanged);
@@ -136,9 +162,18 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
   }
 
   @override
+  void reassemble() {
+    super.reassemble();
+    // After a hot reload held elements may be stale and lines may have
+    // moved: every pin is looked up again.
+    _pins.reset();
+  }
+
+  @override
   void dispose() {
     widget.controller.removeListener(_onControllerChanged);
     _tracker.dispose();
+    _pins.dispose();
     _holder.dispose();
     _commentFocus.dispose();
     _tab.dispose();
@@ -196,7 +231,13 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     }
     // The panel builds in the frame the mode change already scheduled.
     SchedulerBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !(_commentFocus.context?.mounted ?? false)) return;
+      if (!mounted) return;
+      if (!(_commentFocus.context?.mounted ?? false)) {
+        // A sent note shows no field. Keys must still stay away from the
+        // app.
+        if (widget.controller.isActive) _holder.requestFocus();
+        return;
+      }
       final mode = widget.controller.mode;
       if (_tab.value == PanelTab.comment &&
           (mode == PinPointMode.commenting || mode == PinPointMode.sending)) {
@@ -280,8 +321,9 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     final controller = widget.controller;
     final draft = controller.draft;
     if (controller.selection.value == null || !draft.hasText) return;
+    final selection = controller.selection.value!;
     if (!controller.submit()) return;
-    var note = _collect();
+    var note = _collect()?.withStatus(NoteStatus.submitted);
     if (note == null) {
       controller.sendFailed();
       return;
@@ -313,6 +355,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
       }
     }
     if (results.every((result) => result.ok)) {
+      _pin(note, selection);
       draft.text.clear();
       controller.sendSucceeded();
     } else {
@@ -320,6 +363,114 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
       // The bridge may have stopped since picking started.
       unawaited(_checkBridges());
     }
+  }
+
+  /// Keeps the comment as a draft pin: collected and captured now, while
+  /// the widget looks the way the comment means, but sent to no agent.
+  /// Back to picking, for the next widget.
+  Future<void> _saveDraft() async {
+    final controller = widget.controller;
+    final draft = controller.draft;
+    final selection = controller.selection.value;
+    if (selection == null || !draft.hasText) return;
+    if (!controller.submit()) return;
+    var note = _collect();
+    if (note == null) {
+      controller.sendFailed();
+      return;
+    }
+    if (draft.includeScreenshot) {
+      note = await _withScreenshot(note);
+      if (!mounted) return;
+    }
+    _pin(note, selection);
+    draft.text.clear();
+    controller.draftSaved();
+    _toasts.show(
+      'Saved as draft ${controller.notes.numberOf(note.id) ?? ''}. '
+      'The agent sees it once you send it.',
+    );
+  }
+
+  /// Shows [note] as a pin on [selection]'s widget.
+  void _pin(Annotation note, PickResult selection) {
+    _pins.seed(note.id, selection.element);
+    widget.controller.notes.put(note);
+  }
+
+  /// Opens the note [id] in the panel, on its pin's widget.
+  void _openPin(String id) {
+    final element = _pins.elementOf(id);
+    final root = widget.appKey.currentContext;
+    final boundary = widget.contentKey.currentContext;
+    if (element == null || root is! Element) return;
+    final pick = PickResult.forElement(
+      element,
+      rootElement: root,
+      chainBoundary: boundary is Element ? boundary : null,
+      resolver: _tracker.resolver,
+    );
+    if (pick == null) return;
+    _tab.value = PanelTab.comment;
+    widget.controller.openPin(id, pick);
+  }
+
+  /// Submits the notes [ids] (drafts) to every sink, one after another.
+  /// A note that every sink took becomes submitted; one that failed stays
+  /// a draft, with a toast that says why.
+  Future<void> _sendNotes(List<String> ids) async {
+    final notes = widget.controller.notes;
+    final sinks = widget.config.sinks;
+    if (sinks.isEmpty) {
+      _toasts.show('No sink is set up in PinPointConfig.sinks.', error: true);
+      return;
+    }
+    var sent = 0;
+    for (final id in ids) {
+      final note = notes.byId(id);
+      if (note == null || note.status != NoteStatus.draft) continue;
+      if (note.comment.trim().isEmpty) continue;
+      final submitted = note.withStatus(NoteStatus.submitted);
+      final results = await sendToSinks(submitted, sinks);
+      if (!mounted) return;
+      final failed = results.where((r) => !r.ok).toList();
+      if (failed.isEmpty) {
+        notes.put(submitted);
+        sent++;
+      } else {
+        for (final result in failed) {
+          _toasts.show(
+            'Note ${notes.numberOf(id) ?? ''}: ${result.sink} failed: '
+            '${_short(result.error!)}',
+            error: true,
+          );
+        }
+      }
+    }
+    if (sent > 0) {
+      _toasts.show(sent == 1 ? 'Sent 1 note' : 'Sent $sent notes');
+    }
+  }
+
+  void _deleteNote(String id) {
+    final controller = widget.controller;
+    controller.closeNote();
+    controller.notes.remove(id);
+  }
+
+  void _setStatus(String id, NoteStatus status) {
+    final notes = widget.controller.notes;
+    final note = notes.byId(id);
+    if (note == null) return;
+    if (status == NoteStatus.verified) widget.controller.closeNote();
+    notes.put(note.withStatus(status));
+  }
+
+  void _editNote(String id, String comment) {
+    final notes = widget.controller.notes;
+    final note = notes.byId(id);
+    if (note == null || note.status != NoteStatus.draft) return;
+    notes.put(note.copyWith(comment: comment));
   }
 
   /// [note] with a screenshot of the selection. When the capture fails, the
@@ -473,13 +624,18 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
                         ),
                       ),
                     ),
+                    // Above the trap, so a click on a pin opens its note
+                    // instead of picking. In every mode, idle included.
+                    PinLayer(placements: _pins.placements, onOpen: _openPin),
                     // Above the trap, so clicks on the panel never pick.
                     InfoPanelLayer(
                       controller: widget.controller,
                       tab: _tab,
                       commentFocus: _commentFocus,
                       onSend: _send,
+                      onSaveDraft: _saveDraft,
                       onCopy: _copy,
+                      noteActions: _noteActions,
                     ),
                     if (widget.controller.isActive)
                       ValueListenableBuilder<List<HttpSink>>(

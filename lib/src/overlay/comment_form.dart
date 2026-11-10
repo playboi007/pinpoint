@@ -14,6 +14,7 @@ class CommentForm extends StatelessWidget {
     required this.controller,
     required this.focusNode,
     required this.onSend,
+    this.onSaveDraft,
     required this.onCopy,
   });
 
@@ -22,6 +23,7 @@ class CommentForm extends StatelessWidget {
     'pinpoint.comment.screenshot',
   );
   static const Key sendKey = ValueKey<String>('pinpoint.comment.send');
+  static const Key draftKey = ValueKey<String>('pinpoint.comment.draft');
   static const Key copyKey = ValueKey<String>('pinpoint.comment.copy');
   static const Key cancelKey = ValueKey<String>('pinpoint.comment.cancel');
 
@@ -32,6 +34,11 @@ class CommentForm extends StatelessWidget {
   final FocusNode focusNode;
 
   final VoidCallback onSend;
+
+  /// Keeps the comment as a draft pin, sent to no agent. Null hides the
+  /// button.
+  final VoidCallback? onSaveDraft;
+
   final VoidCallback onCopy;
 
   static String _label(AnnotationIntent intent) => switch (intent) {
@@ -123,6 +130,13 @@ class CommentForm extends StatelessWidget {
                   onPressed: commenting && draft.hasText ? onSend : null,
                   child: Text(sending ? 'Sending…' : 'Send'),
                 ),
+                if (onSaveDraft != null)
+                  OutlinedButton(
+                    key: draftKey,
+                    style: compact,
+                    onPressed: commenting && draft.hasText ? onSaveDraft : null,
+                    child: const Text('Save draft'),
+                  ),
                 OutlinedButton(
                   key: copyKey,
                   style: compact,

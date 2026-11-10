@@ -145,6 +145,47 @@ abstract final class RenderSearch {
       return null;
     }
   }
+
+  /// The part of [renderObject] that is on screen, in global logical
+  /// pixels: its rect cut by every clip above it (a scroll view, a
+  /// `ClipRect`). Null when nothing of it shows: it is offstage (a route
+  /// beneath an opaque route, a hidden `IndexedStack` child, `Offstage`),
+  /// clipped away, or not laid out.
+  ///
+  /// It walks up to the root once; bounded like every walk (engineering
+  /// rule 4).
+  static Rect? visibleRectOf(RenderObject renderObject, {int maxDepth = 512}) {
+    var visible = globalRectOf(renderObject);
+    if (visible == null) return null;
+    try {
+      var child = renderObject;
+      var parent = child.parent;
+      for (var steps = 0; parent != null && steps < maxDepth; steps++) {
+        // The same offstage marks the pick walk skips. Their geometry is
+        // stale, and they are not painted.
+        for (final node in parent.debugDescribeChildren()) {
+          if (identical(node.value, child)) {
+            if (node.style == DiagnosticsTreeStyle.offstage) return null;
+            break;
+          }
+        }
+        final clip = parent.describeApproximatePaintClip(child);
+        if (clip != null) {
+          final global = MatrixUtils.transformRect(
+            parent.getTransformTo(null),
+            clip,
+          );
+          if (!global.overlaps(visible!)) return null;
+          visible = visible.intersect(global);
+        }
+        child = parent;
+        parent = child.parent;
+      }
+    } catch (_) {
+      // A custom render object that throws: show what is known.
+    }
+    return visible;
+  }
 }
 
 class _Walk {

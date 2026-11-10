@@ -3,6 +3,7 @@ import 'package:flutter/widgets.dart';
 
 import '../model/annotation.dart';
 import '../search/pick_result.dart';
+import 'note_book.dart';
 
 /// What Pinpoint is doing right now.
 enum PinPointMode {
@@ -76,7 +77,9 @@ class CommentDraft extends ChangeNotifier {
 ///   ^                                                                  |
 ///   +------------------------- sendSucceeded --------------------------+
 /// sending --sendFailed--> commenting
+/// sending --draftSaved--> picking
 /// commenting --select--> commenting (a new selection)
+/// openPin: idle, picking or commenting -> commenting (a pin's note)
 /// back (Esc): sending -> commenting -> picking -> idle
 /// stop: any -> idle
 /// ```
@@ -99,6 +102,15 @@ class PinPointController extends ChangeNotifier {
 
   /// The comment being written. Kept until a send succeeds.
   final CommentDraft draft = CommentDraft();
+
+  /// Drafts and sent notes, shown as pins.
+  final NoteBook notes = NoteBook();
+
+  final ValueNotifier<String?> _openNote = ValueNotifier<String?>(null);
+
+  /// The id of the note whose pin was clicked. While set, the panel shows
+  /// that note instead of the comment form.
+  ValueListenable<String?> get openNote => _openNote;
 
   /// The current mode.
   PinPointMode get mode => _mode;
@@ -148,13 +160,44 @@ class PinPointController extends ChangeNotifier {
       // A click outside the panel is ambiguous. With a comment typed it does
       // nothing, so a stray click never takes the comment off its widget.
       // The breadcrumb, or Esc and a click, still choose another one.
-      if (draft.hasText) return false;
+      if (draft.hasText && _openNote.value == null) return false;
+      _openNote.value = null;
       _selection.value = pick;
       return true;
     }
     if (_mode != PinPointMode.picking) return false;
+    _openNote.value = null;
     _selection.value = pick;
     return _move(from: PinPointMode.picking, to: PinPointMode.commenting);
+  }
+
+  /// Opens the note [id] on [pick], its pin's widget, as a click on the pin
+  /// does: from any mode to commenting, with the panel showing the note. A
+  /// comment being written stays in [draft].
+  ///
+  /// Returns false while sending, or when there is no such note.
+  bool openPin(String id, PickResult pick) {
+    if (_mode == PinPointMode.sending || notes.byId(id) == null) return false;
+    _openNote.value = id;
+    _selection.value = pick;
+    if (_mode == PinPointMode.commenting) return true;
+    _mode = PinPointMode.commenting;
+    notifyListeners();
+    return true;
+  }
+
+  /// Closes the open note. Keeps the selection and the mode.
+  void closeNote() {
+    _openNote.value = null;
+  }
+
+  /// sending -> picking, after a draft was saved: ready for the next
+  /// widget. Drops the selection, which now has its pin.
+  bool draftSaved() {
+    if (_mode != PinPointMode.sending) return false;
+    _selection.value = null;
+    _openNote.value = null;
+    return _move(from: PinPointMode.sending, to: PinPointMode.picking);
   }
 
   /// commenting -> sending.
@@ -165,6 +208,7 @@ class PinPointController extends ChangeNotifier {
   bool sendSucceeded() {
     if (_mode != PinPointMode.sending) return false;
     _selection.value = null;
+    _openNote.value = null;
     return _move(from: PinPointMode.sending, to: PinPointMode.idle);
   }
 
@@ -191,6 +235,7 @@ class PinPointController extends ChangeNotifier {
   void stop() {
     if (_mode == PinPointMode.idle) return;
     _selection.value = null;
+    _openNote.value = null;
     _move(from: _mode, to: PinPointMode.idle);
   }
 
@@ -262,6 +307,7 @@ class PinPointController extends ChangeNotifier {
     _hovered.value = null;
     if (_selection.value == null) return;
     _selection.value = null;
+    _openNote.value = null;
     if (_mode == PinPointMode.commenting) _mode = PinPointMode.picking;
     notifyListeners();
   }
@@ -280,6 +326,8 @@ class PinPointController extends ChangeNotifier {
     _hovered.dispose();
     _selection.dispose();
     _measuring.dispose();
+    _openNote.dispose();
+    notes.dispose();
     draft.dispose();
     super.dispose();
   }
