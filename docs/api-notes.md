@@ -32,6 +32,7 @@ Result of the "Verify first" lists in `PLAN.md`. Where this file differs from th
 | 19 | Facts found in Session 3 | Read locations from the widget's node; a custom widget shares its build root's render object; refinement cost. |
 | 20 | Facts found in Session 4 | `ModalRoute.settingsOf` on an inherited element can self-depend; diagnostics formats; collection cost. |
 | 21 | Facts found in Session 5 | A text field outside the Navigator needs a `DismissIntent` action; key results for text fields; a focused field draws frames. |
+| 22 | Facts found in Session 6 | `RenderObject.layer` is protected, so capture the whole boundary; `endOfFrame` forces a frame; images in tests need `runAsync`. |
 
 ---
 
@@ -422,6 +423,19 @@ Extra tools exist behind `--enable` (`launch_app`, `list_devices`, `run_tests`, 
 - **[run-vm]** A focused `TextField` draws frames on its own: about 170 ms after it gains focus (the decoration animates), about 100 ms after a metrics change (it scrolls the caret into view), and a caret blink twice a second. A test that checks `hasScheduledFrame` after a selection must wait about 300 ms, and can set `EditableText.debugDeterministicCursor`.
 - **[run-vm]** The first mouse event after a touch tap starts a ticker in Pinpoint's panel that stops after about 150 ms. The owner was not found; it is a Material animation, not a loop.
 - **[run-vm]** The `flutter test` font makes every glyph 1 em wide. Labels are wider than in a browser and wrap sooner (in the 360 px panel, the intent chips and the buttons wrap). Size checks in tests are pessimistic.
+
+## 22. Facts found in Session 6
+
+- **[source]** `RenderObject.layer` is `@protected` (`rendering/object.dart:3158`). So `OffsetLayer.toImage(Rect bounds)` (`rendering/layer.dart:1546`), which could render only the crop, cannot be called from package code without failing the strict analyzer. Capture the whole boundary with `RenderRepaintBoundary.toImage` (`rendering/proxy_box.dart:3552`) and crop with `drawImageRect`, as the plan does.
+- **[source]** `OffsetLayer.toImage` rounds the image size up: `(pixelRatio * bounds.width).ceil()` (`layer.dart:1553`). At a fractional ratio the full capture is up to one pixel larger than the boundary times the ratio. Pinpoint clamps its source rect to the image it gets.
+- **[source]** `RenderRepaintBoundary.toImage` asserts `!debugNeedsPaint` (`proxy_box.dart:3553`). `debugNeedsPaint` returns `false` outside debug (`object.dart:3292`), so profile builds do not check it.
+- **[source]** `SchedulerBinding.endOfFrame` (`scheduler/binding.dart:847`) calls `scheduleFrame()` when the phase is idle. Awaiting it always forces a frame. Pinpoint awaits it only when `hasScheduledFrame` is true or a frame is running (`paintSettled`).
+- **[run-vm]** In `flutter test`, `RenderRepaintBoundary.toImage`, `Picture.toImage`, `Image.toByteData` and `instantiateImageCodec` finish only inside `tester.runAsync`. `pump` alone never completes them. A test that taps Send must alternate `pump` and a short real delay in `runAsync` (`test/support/finish_send.dart`).
+- **[run-vm]** `ui.Image.onCreate` / `onDispose` and `ui.Picture.onCreate` / `onDispose` (`dart:ui`, `painting.dart:1993`, `:8442`) are static hooks. A test can count live images and pictures around a capture.
+- **[run-vm]** `PlatformViewLink` with a fake `PlatformViewController` (four members: `viewId`, `dispatchPointerEvent`, `clearFocus`, `dispose`) builds and lays out in a VM test, so platform-view detection is testable without a browser.
+- **[run-vm]** `200 * 1.1` is `220.00000000000003`. A plain `ceil()` on a scaled edge adds a pixel; `pixelRectFor` uses a slack of `1e-6`.
+- **[run-vm]** The flutter_tester renderer draws solid colours exactly. Pixel tests can sample the outline colour within 8 per channel at ratios 1, 1.25 and 2.
+- **[unverified]** Capture under CanvasKit and `--wasm` in Chrome, capture time in a browser (budget 300 ms), and blank platform views on the example's HTML view screen.
 
 ---
 

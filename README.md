@@ -4,7 +4,7 @@ A debug-only Flutter package. Click any widget in a running app, write a comment
 
 Web is the first target.
 
-> **Status: Milestone 5 (Session 5).** The wrapper, the inspect mode (Alt+Shift+C or the launcher button), Esc and freeze (P while picking) work. Hover outlines the widget under the pointer, and a click selects the nearest widget written in your own project (a `Text`, not the `RichText` it builds), with `file:line` in the label. The click opens a panel next to the widget with a clickable breadcrumb and two tabs. Comment: choose Bug, Improve or Question, type the comment, then Send (or Ctrl/Cmd+Enter) to every sink in `PinPointConfig.sinks`, with a toast per sink, or Copy as Markdown. The comment is kept until a send succeeds. Info: the widget's layout data; there, Arrow Up or `[` moves to the next local ancestor, Arrow Down or `]` moves back, and Alt plus an arrow steps through framework widgets too. Rulers measure to the nearest local ancestor (hold Alt and hover another widget to measure the gap), and the mouse wheel still scrolls the app. The note is an `Annotation` (schema 1, under 8 KB as JSON). Screenshots come in Milestone 6, and the HTTP and clipboard sinks in Milestone 7; the example app prints each note to the console. Empty files under `lib/src/` and `bin/` are for later milestones. See `PLAN.md` for the build order.
+> **Status: Milestone 6 (Session 6).** The wrapper, the inspect mode (Alt+Shift+C or the launcher button), Esc and freeze (P while picking) work. Hover outlines the widget under the pointer, and a click selects the nearest widget written in your own project (a `Text`, not the `RichText` it builds), with `file:line` in the label. The click opens a panel next to the widget with a clickable breadcrumb and two tabs. Comment: choose Bug, Improve or Question, type the comment, then Send (or Ctrl/Cmd+Enter) to every sink in `PinPointConfig.sinks`, with a toast per sink, or Copy as Markdown. The comment is kept until a send succeeds. Info: the widget's layout data; there, Arrow Up or `[` moves to the next local ancestor, Arrow Down or `]` moves back, and Alt plus an arrow steps through framework widgets too. Rulers measure to the nearest local ancestor (hold Alt and hover another widget to measure the gap), and the mouse wheel still scrolls the app. The note is an `Annotation` (schema 1, under 8 KB as JSON). With "Include screenshot" ticked (the default), Send adds a PNG crop of the widget with a red outline, at most 1600 px wide (`PinPointConfig.maxScreenshotWidth`); the image goes to a sink as base64 only when it asks for it. The HTTP and clipboard sinks come in Milestone 7; the example app prints each note to the console, and the screenshot as a `data:` URL you can paste in the address bar. Empty files under `lib/src/` and `bin/` are for later milestones. See `PLAN.md` for the build order.
 
 ```dart
 MaterialApp(
@@ -66,6 +66,11 @@ cd example && flutter test test/collect_sweep_test.dart
 flutter test test/overlay/place_panel_test.dart test/overlay/comment_form_test.dart \
   test/overlay/comment_keys_test.dart test/overlay/comment_send_test.dart test/sink
 
+# Milestone 6: crop math, capture and outline, payload, width cap
+flutter test test/capture/screenshot_plan_test.dart test/capture/screenshot_capture_test.dart \
+  test/capture/screenshot_context_test.dart test/model/screenshot_info_test.dart \
+  test/overlay/screenshot_send_test.dart
+
 # after a deliberate change to the note's shape: rewrite the golden, review the diff
 flutter test --update-goldens test/capture/target_test.dart
 
@@ -74,6 +79,12 @@ cd example && flutter run -d chrome --dart-define=PINPOINT_ROOT=$(pwd)
 
 # the same, printing p50 and p95 pick time after every 200 hover picks
 cd example && flutter run -d chrome --dart-define=PINPOINT_PICK_TIMINGS=true
+
+# the same, printing the time and size of each screenshot (over 300 ms prints anyway)
+cd example && flutter run -d chrome --dart-define=PINPOINT_CAPTURE_TIMINGS=true
+
+# screenshots under the WebAssembly build
+cd example && flutter run -d chrome --wasm
 ```
 
 ## Example screens
