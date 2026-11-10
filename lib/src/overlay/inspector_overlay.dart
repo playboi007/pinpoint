@@ -9,12 +9,14 @@ import 'package:flutter/services.dart';
 
 import '../capture/context_collector.dart';
 import '../capture/screenshot.dart';
+import '../core/note_sync.dart';
 import '../core/pinpoint_config.dart';
 import '../core/pinpoint_controller.dart';
 import '../model/annotation.dart';
 import '../search/pick_result.dart';
 import '../search/render_search.dart';
 import '../search/source_resolver.dart';
+import '../sink/bridge_client.dart';
 import '../sink/http_sink.dart';
 import '../sink/markdown_formatter.dart';
 import '../sink/pinpoint_sink.dart';
@@ -118,6 +120,39 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     resolver: SourceResolver.forConfig(widget.config),
   );
 
+  /// The bridge sync, or null without a bridge.
+  NoteSync? _sync;
+
+  /// Holds a draft's edits for a moment, so the bridge gets one PATCH per
+  /// pause in typing, not one per key.
+  Timer? _editTimer;
+
+  NoteSync? _newSync() {
+    final client = BridgeClient.find(
+      url: widget.config.bridgeUrl,
+      sinks: widget.config.sinks,
+    );
+    if (client == null) return null;
+    return NoteSync(
+      client: client,
+      notes: widget.controller.notes,
+      // Two tabs of different apps can poll one bridge. Each loads only
+      // the notes written on its own origin.
+      origin: NoteSync.pageOrigin(),
+      onAgentChange: (note) {
+        if (!mounted) return;
+        final number = widget.controller.notes.numberOf(note.id);
+        _toasts.show(
+          'Note ${number ?? ''} is ${PinMarker.label(note.status)}'
+          '${note.messages.isEmpty ? '' : ': ${_short(note.messages.last.text)}'}',
+        );
+      },
+      onError: (message) {
+        if (mounted) _toasts.show(_short(message), error: true);
+      },
+    );
+  }
+
   late final NoteActions _noteActions = NoteActions(
     send: (id) => unawaited(_sendNotes([id])),
     sendAll: () => unawaited(
@@ -134,6 +169,17 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     super.initState();
     widget.controller.addListener(_onControllerChanged);
     _tab.addListener(_syncFocus);
+    _startSync();
+  }
+
+  /// Loads the pins once: a restarted app gets them back. One request, not
+  /// a poll; the poll runs only while the overlay is active.
+  void _startSync() {
+    _sync = _newSync();
+    final sync = _sync;
+    if (sync == null) return;
+    unawaited(sync.load());
+    sync.active = widget.controller.isActive;
   }
 
   @override
@@ -159,6 +205,12 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
       widget.controller.addListener(_onControllerChanged);
       _onControllerChanged();
     }
+    if (oldWidget.controller != widget.controller ||
+        oldWidget.config.bridgeUrl != widget.config.bridgeUrl ||
+        !listEquals(oldWidget.config.sinks, widget.config.sinks)) {
+      _sync?.dispose();
+      _startSync();
+    }
   }
 
   @override
@@ -174,6 +226,8 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     widget.controller.removeListener(_onControllerChanged);
     _tracker.dispose();
     _pins.dispose();
+    _sync?.dispose();
+    _editTimer?.cancel();
     _holder.dispose();
     _commentFocus.dispose();
     _tab.dispose();
@@ -187,6 +241,9 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     final previous = _lastMode;
     if (mode == previous) return;
     _lastMode = mode;
+    // Polls only while active: an idle overlay must not keep the network
+    // busy or the tab awake.
+    _sync?.active = widget.controller.isActive;
     if (previous == PinPointMode.idle) {
       _saveAppFocus();
       // Once per start, never per frame (rule 2), and never while idle.
@@ -390,6 +447,9 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
       'Saved as draft ${controller.notes.numberOf(note.id) ?? ''}. '
       'The agent sees it once you send it.',
     );
+    // On the bridge too, so it survives a restart. Drafts go to a folder
+    // no agent reads.
+    unawaited(_sync?.save(note));
   }
 
   /// Shows [note] as a pin on [selection]'s widget.
@@ -452,18 +512,23 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     }
   }
 
+  /// Deletes the note, and closes the panel: there is nothing left to show
+  /// on that widget.
   void _deleteNote(String id) {
     final controller = widget.controller;
-    controller.closeNote();
+    controller.clearSelection();
     controller.notes.remove(id);
+    unawaited(_sync?.delete(id));
   }
 
   void _setStatus(String id, NoteStatus status) {
     final notes = widget.controller.notes;
     final note = notes.byId(id);
     if (note == null) return;
-    if (status == NoteStatus.verified) widget.controller.closeNote();
+    // Accepted: the pin goes, and so does the panel.
+    if (status == NoteStatus.verified) widget.controller.clearSelection();
     notes.put(note.withStatus(status));
+    unawaited(_sync?.update(id, status: status));
   }
 
   void _editNote(String id, String comment) {
@@ -471,6 +536,12 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     final note = notes.byId(id);
     if (note == null || note.status != NoteStatus.draft) return;
     notes.put(note.copyWith(comment: comment));
+    _editTimer?.cancel();
+    _editTimer = Timer(const Duration(milliseconds: 600), () {
+      final latest = notes.byId(id);
+      if (latest == null || latest.status != NoteStatus.draft) return;
+      unawaited(_sync?.update(id, comment: latest.comment));
+    });
   }
 
   /// [note] with a screenshot of the selection. When the capture fails, the

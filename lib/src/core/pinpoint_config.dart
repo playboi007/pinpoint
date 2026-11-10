@@ -5,7 +5,7 @@ import 'keymap.dart';
 
 /// Settings for [PinPointWrapper].
 ///
-/// Later milestones add the bridge URL and more.
+/// Later milestones add more.
 @immutable
 class PinPointConfig {
   const PinPointConfig({
@@ -15,8 +15,19 @@ class PinPointConfig {
     this.projectRoot = const String.fromEnvironment('PINPOINT_ROOT'),
     this.localPathHints = const <String>[],
     this.sinks = const <PinPointSink>[],
+    this.bridgeUrl,
     this.maxScreenshotWidth = 1600,
   }) : assert(maxScreenshotWidth > 0);
+
+  /// The bridge (`dart run pinpoint:bridge`), for example
+  /// `http://127.0.0.1:4747`. The app loads its pins from it at start, stores
+  /// drafts on it, and polls it for the agent's changes while the overlay is
+  /// active.
+  ///
+  /// Null: the bridge of the first `HttpSink` in [sinks] that posts to
+  /// `/annotations`, such as `HttpSink.bridge()`. With neither, notes and
+  /// pins live in this tab only.
+  final Uri? bridgeUrl;
 
   /// The widest screenshot, in image pixels. A wider crop is captured at a
   /// lower pixel ratio. PNG encoding takes most of a capture's time, so this
