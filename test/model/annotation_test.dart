@@ -123,9 +123,9 @@ void main() {
     expect(actual, expected);
   });
 
-  test('schema is version 3 and keys come in a fixed order', () {
+  test('schema is version 4 and keys come in a fixed order', () {
     final json = example().toJson();
-    expect(json['schema'], 3);
+    expect(json['schema'], 4);
     expect(json.keys.take(6), [
       'schema',
       'id',
@@ -180,6 +180,70 @@ void main() {
         ) as Map<String, Object?>,
       )!;
       expect(back.environment, {'textDirection': 'rtl'});
+    });
+  });
+
+  group('finding and checks (Milestone 10)', () {
+    Annotation note({
+      Map<String, Object?>? finding,
+      List<Map<String, Object?>> checks = const [],
+    }) => Annotation(
+      id: 'pp_1',
+      createdAt: DateTime.utc(2026),
+      intent: AnnotationIntent.bug,
+      comment: '',
+      app: const AppInfo(buildMode: 'debug', platform: 'web'),
+      page: const PageInfo(),
+      target: const TargetInfo(widget: 'Row', sourceUnavailable: true),
+      finding: finding,
+      checks: checks,
+    );
+
+    const finding = {
+      'kind': 'overflow',
+      'severity': 'error',
+      'summary': 'Row overflows by 72 px on the right',
+      'key': 'overflow|lib/a.dart:3:5|',
+      'data': {'overflow': 72.0, 'side': 'right'},
+    };
+
+    test('are left out of a note made by hand', () {
+      final json = note().toJson();
+      expect(json.containsKey('finding'), isFalse);
+      expect(json.containsKey('checks'), isFalse);
+    });
+
+    test('follow the environment slot and read back from JSON', () {
+      final json = note(
+        finding: finding,
+        checks: const [
+          {'type': 'no_overflow'},
+        ],
+      ).toJson();
+      final keys = json.keys.toList();
+      expect(keys.indexOf('finding'), keys.indexOf('page') + 1);
+      expect(keys.indexOf('checks'), keys.indexOf('finding') + 1);
+      final back = Annotation.fromJson(
+        jsonDecode(jsonEncode(json)) as Map<String, Object?>,
+      )!;
+      expect(back.finding, finding);
+      expect(back.checks, [
+        {'type': 'no_overflow'},
+      ]);
+    });
+
+    test('a check without a type is dropped on read', () {
+      final back = Annotation.fromJson({
+        ...note().toJson(),
+        'checks': [
+          {'min': 48},
+          'no_overflow',
+          {'type': 'visible'},
+        ],
+      })!;
+      expect(back.checks, [
+        {'type': 'visible'},
+      ]);
     });
   });
 

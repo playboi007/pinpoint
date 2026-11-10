@@ -295,4 +295,47 @@ void main() {
       );
     });
   });
+
+  group('finding and checks lines (Milestone 10)', () {
+    test('name the finding and the suggested checks, after the page', () {
+      final md = markdownFromJson({
+        ...full.toJson(),
+        'finding': {
+          'kind': 'overflow',
+          'severity': 'error',
+          'summary': 'Row overflows by 72 px\non the right',
+        },
+        'checks': [
+          {'type': 'no_overflow'},
+          {'type': 'tap_target_min', 'min': 48},
+        ],
+      });
+      expect(
+        md,
+        contains(
+          '\nFound: overflow (error): Row overflows by 72 px on the right\n'
+          'Checks: no_overflow, tap_target_min (min 48)\n',
+        ),
+      );
+      final lines = md.split('\n');
+      expect(
+        lines.indexWhere((l) => l.startsWith('Found:')),
+        lines.indexWhere((l) => l.startsWith('Page:')) + 1,
+      );
+    });
+
+    test('are left out without a finding, and a malformed one is skipped', () {
+      expect(markdownFor(full), isNot(contains('Found:')));
+      final md = markdownFromJson({
+        ...full.toJson(),
+        'finding': 'overflow',
+        'checks': [
+          3,
+          {'min': 1},
+        ],
+      });
+      expect(md, isNot(contains('Found:')));
+      expect(md, isNot(contains('Checks:')));
+    });
+  });
 }

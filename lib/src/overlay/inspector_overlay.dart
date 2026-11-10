@@ -12,6 +12,10 @@ import '../capture/screenshot.dart';
 import '../core/note_sync.dart';
 import '../core/pinpoint_config.dart';
 import '../core/pinpoint_controller.dart';
+import '../detect/detector.dart';
+import '../detect/image_detector.dart';
+import '../detect/overflow_detector.dart';
+import '../detect/truncation_detector.dart';
 import '../model/annotation.dart';
 import '../search/pick_result.dart';
 import '../search/render_search.dart';
@@ -21,6 +25,7 @@ import '../sink/http_sink.dart';
 import '../sink/markdown_formatter.dart';
 import '../sink/pinpoint_sink.dart';
 import 'environment_panel.dart';
+import 'findings_panel.dart';
 import 'highlight_painter.dart';
 import 'info_panel.dart';
 import 'note_view.dart';
@@ -52,6 +57,9 @@ class InspectorOverlay extends StatefulWidget {
 
   /// Key of the `CustomPaint` that draws the rulers.
   static const Key rulerKey = ValueKey<String>('pinpoint.rulers');
+
+  /// Key of the `CustomPaint` that outlines the hovered finding.
+  static const Key findingKey = ValueKey<String>('pinpoint.finding');
 
   final PinPointController controller;
 
@@ -99,6 +107,13 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
 
   /// Whether the what-if panel is open. It closes when the mode goes idle.
   final ValueNotifier<bool> _environmentPanel = ValueNotifier<bool>(false);
+
+  /// Whether the findings list is open. It takes turns with the what-if
+  /// panel, in the same place, and closes when the mode goes idle.
+  final ValueNotifier<bool> _findingsPanel = ValueNotifier<bool>(false);
+
+  /// Whether a rescan waits for the end of the frame.
+  bool _rescanQueued = false;
 
   /// Counts health checks, so an older one never overwrites a newer one.
   int _healthCheck = 0;
@@ -172,7 +187,14 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
   void initState() {
     super.initState();
     widget.controller.addListener(_onControllerChanged);
+    widget.controller.environment.addListener(_onEnvironmentChanged);
     _tab.addListener(_syncFocus);
+    _environmentPanel.addListener(() {
+      if (_environmentPanel.value) _findingsPanel.value = false;
+    });
+    _findingsPanel.addListener(() {
+      if (_findingsPanel.value) _environmentPanel.value = false;
+    });
     _startSync();
   }
 
@@ -206,7 +228,9 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     }
     if (oldWidget.controller != widget.controller) {
       oldWidget.controller.removeListener(_onControllerChanged);
+      oldWidget.controller.environment.removeListener(_onEnvironmentChanged);
       widget.controller.addListener(_onControllerChanged);
+      widget.controller.environment.addListener(_onEnvironmentChanged);
       _onControllerChanged();
     }
     if (oldWidget.controller != widget.controller ||
@@ -228,6 +252,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
   @override
   void dispose() {
     widget.controller.removeListener(_onControllerChanged);
+    widget.controller.environment.removeListener(_onEnvironmentChanged);
     _tracker.dispose();
     _pins.dispose();
     _sync?.dispose();
@@ -238,6 +263,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     _toasts.dispose();
     _offline.dispose();
     _environmentPanel.dispose();
+    _findingsPanel.dispose();
     super.dispose();
   }
 
@@ -249,7 +275,10 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     // Polls only while active: an idle overlay must not keep the network
     // busy or the tab awake.
     _sync?.active = widget.controller.isActive;
-    if (mode == PinPointMode.idle) _environmentPanel.value = false;
+    if (mode == PinPointMode.idle) {
+      _environmentPanel.value = false;
+      _findingsPanel.value = false;
+    }
     if (previous == PinPointMode.idle) {
       _saveAppFocus();
       // Once per start, never per frame (rule 2), and never while idle.
@@ -551,10 +580,101 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     });
   }
 
+  /// Runs the scan-type detectors over the app as it is on screen now.
+  void _scanFindings() {
+    final root = widget.appKey.currentContext?.findRenderObject();
+    if (root == null) return;
+    final content = widget.contentKey.currentContext;
+    final result = scanTree(
+      root,
+      [
+        const OverflowDetector(),
+        const TruncationDetector(),
+        ImageDetector(devicePixelRatio: MediaQuery.devicePixelRatioOf(context)),
+      ],
+      locator: FindingLocator(
+        resolver: _tracker.resolver,
+        boundary: content is Element ? content : null,
+      ),
+    );
+    widget.controller.findings.setScanned(result.findings);
+  }
+
+  /// A what-if change moves the layout: while the list is open, scan again
+  /// once the frame that lays out the change is done. That frame is drawn
+  /// anyway; this adds none (engineering rule 2).
+  void _onEnvironmentChanged() {
+    if (!_findingsPanel.value || _rescanQueued) return;
+    _rescanQueued = true;
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      _rescanQueued = false;
+      if (mounted && _findingsPanel.value) _scanFindings();
+    }, debugLabel: 'pinpoint.rescanFindings');
+  }
+
+  /// Makes [finding] a draft note on its nearest local widget, with the
+  /// summary as the comment, the matching check for Milestone 12, and the
+  /// current environment. The mode and the list stay, for the next one.
+  Future<void> _noteFromFinding(Finding finding) async {
+    final element = finding.element;
+    final root = widget.appKey.currentContext;
+    final boundary = widget.contentKey.currentContext;
+    var pick = element == null || !element.mounted || root is! Element
+        ? null
+        : PickResult.forElement(
+            element,
+            rootElement: root,
+            chainBoundary: boundary is Element ? boundary : null,
+            resolver: _tracker.resolver,
+          );
+    if (pick == null) {
+      _toasts.show('The widget is gone. Scan this screen again.', error: true);
+      return;
+    }
+    // The widget written in this project, not the framework's render
+    // widget inside it (RichText inside Text).
+    final local = pick.chain.defaultIndex;
+    if (local != null) pick = pick.selecting(local);
+    final controller = widget.controller;
+    Annotation note;
+    try {
+      note = _collector
+          .collect(
+            pick,
+            finding.summary,
+            finding.severity == Severity.info
+                ? AnnotationIntent.improve
+                : AnnotationIntent.bug,
+            context: context,
+            environment: controller.environment.toJson(),
+          )
+          .copyWith(
+            finding: () => finding.toJson(),
+            checks: checksFor(finding),
+          );
+    } catch (error) {
+      _toasts.show('Could not build the note: ${_short(error)}', error: true);
+      return;
+    }
+    if (controller.draft.includeScreenshot) {
+      note = await _withScreenshot(note, target: pick.renderObject);
+      if (!mounted) return;
+    }
+    _pin(note, pick);
+    _toasts.show(
+      'Saved as draft ${controller.notes.numberOf(note.id) ?? ''}. '
+      'The agent sees it once you send it.',
+    );
+    unawaited(_sync?.save(note));
+  }
+
   /// [note] with a screenshot of the selection. When the capture fails, the
   /// note goes without one, names `screenshot` in its errors, and a toast
   /// says why: the comment matters more than the image.
-  Future<Annotation> _withScreenshot(Annotation note) async {
+  Future<Annotation> _withScreenshot(
+    Annotation note, {
+    RenderObject? target,
+  }) async {
     final watch = Stopwatch()..start();
     try {
       final boundary = widget.appKey.currentContext?.findRenderObject();
@@ -565,9 +685,8 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
       await paintSettled();
       if (!mounted) return note;
       final selection = widget.controller.selection.value;
-      final rect = selection == null
-          ? null
-          : RenderSearch.globalRectOf(selection.renderObject);
+      final shown = target ?? selection?.renderObject;
+      final rect = shown == null ? null : RenderSearch.globalRectOf(shown);
       final shot = rect == null
           ? null
           : await captureScreenshot(
@@ -702,6 +821,13 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
                                 origin: () => _originOf(paintContext),
                               ),
                             ),
+                            CustomPaint(
+                              key: InspectorOverlay.findingKey,
+                              painter: FindingPainter(
+                                hovered: widget.controller.findings.hovered,
+                                origin: () => _originOf(paintContext),
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -725,6 +851,18 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
                       panelOpen: _environmentPanel,
                       themeVariants: widget.config.themeVariants.keys.toList(),
                       material3: material3,
+                    ),
+                    // Above the trap, so clicks on it never pick.
+                    FindingsPanelLayer(
+                      controller: widget.controller,
+                      panelOpen: _findingsPanel,
+                      onScan: _scanFindings,
+                      onMakeNote: (finding) =>
+                          unawaited(_noteFromFinding(finding)),
+                    ),
+                    FindingsButton(
+                      controller: widget.controller,
+                      panelOpen: _findingsPanel,
                     ),
                     // In idle too while an override is active.
                     EnvironmentBar(

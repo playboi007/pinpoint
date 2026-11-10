@@ -68,6 +68,25 @@ class Finding {
   String toString() => 'Finding($kind, ${severity.name}, $summary)';
 }
 
+/// The checks Milestone 12's `verify_note` runs for a note made from
+/// [finding]: the measurement that found it, which must pass after the fix.
+/// Empty when no check measures that kind.
+List<Map<String, Object?>> checksFor(Finding finding) => switch (finding.kind) {
+  'overflow' => const [
+    {'type': 'no_overflow'},
+  ],
+  'truncated_text' => const [
+    {'type': 'not_truncated'},
+  ],
+  'small_tap_target' => const [
+    {'type': 'tap_target_min', 'min': 48},
+  ],
+  'low_contrast' => [
+    {'type': 'contrast_min', 'min': finding.data['required'] ?? 4.5},
+  ],
+  _ => const <Map<String, Object?>>[],
+};
+
 /// A detector that runs over the render tree on demand ("Scan this
 /// screen").
 ///

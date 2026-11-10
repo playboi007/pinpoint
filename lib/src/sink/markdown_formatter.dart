@@ -84,6 +84,7 @@ String markdownFromJson(Map<String, Object?> json) {
   ];
   if (pageParts.isNotEmpty) out.writeln('Page: ${_line(pageParts.join('  '))}');
   if (whatIfLine(json['environment']) case final whatIf?) out.writeln(whatIf);
+  findingLines(json).forEach(out.writeln);
 
   final rect = _map(target['rect']);
   final x = _number(rect['x']);
@@ -187,6 +188,37 @@ String? whatIfLine(Object? environment) {
     if (_number(env['timeDilation']) case final d?) 'slow motion ${d}x',
   ];
   return parts.isEmpty ? null : 'What-if: ${_line(parts.join(', '))}';
+}
+
+/// The finding a note was made from and its suggested checks, for example
+/// `Found: overflow (error): Row overflows by 23 px on the right` and
+/// `Checks: no_overflow`. Empty for a note written by hand; a field of the
+/// wrong type is skipped.
+List<String> findingLines(Map<String, Object?> json) {
+  final finding = _map(json['finding']);
+  final kind = _string(finding['kind']);
+  final severity = _string(finding['severity']);
+  final summary = _string(finding['summary']);
+  final checks = [
+    for (final check in _list(json['checks']))
+      if (_string(_map(check)['type']) case final type?)
+        _checkLabel(type, _map(check)),
+  ];
+  return [
+    if (kind != null && summary != null)
+      _line('Found: $kind${severity == null ? '' : ' ($severity)'}: $summary'),
+    if (checks.isNotEmpty) _line('Checks: ${checks.join(', ')}'),
+  ];
+}
+
+/// `tap_target_min (min 48)`: the type, then its other fields.
+String _checkLabel(String type, Map<String, Object?> check) {
+  final args = [
+    for (final MapEntry(:key, :value) in check.entries)
+      if (key != 'type')
+        if (_number(value) ?? _string(value) case final v?) '$key $v',
+  ];
+  return args.isEmpty ? type : '$type (${args.join(', ')})';
 }
 
 /// [constraints] (a `toString()` of the target's constraints) without the

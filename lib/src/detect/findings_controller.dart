@@ -12,6 +12,9 @@ class FindingsController extends ChangeNotifier {
   /// At most this many captured findings are kept, newest last.
   static const int maxCaptured = 100;
 
+  /// The finding under the pointer in the list; its rect is outlined.
+  final ValueNotifier<Finding?> hovered = ValueNotifier<Finding?>(null);
+
   List<Finding> _scanned = const <Finding>[];
   final List<Finding> _captured = <Finding>[];
   List<Finding>? _merged;
@@ -79,6 +82,16 @@ class FindingsController extends ChangeNotifier {
 
   void _changed() {
     _merged = null;
+    final shown = hovered.value;
+    if (shown != null && !findings.any((f) => identical(f, shown))) {
+      hovered.value = null;
+    }
     notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    hovered.dispose();
+    super.dispose();
   }
 }

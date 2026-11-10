@@ -12,7 +12,8 @@ import '../sink/markdown_formatter.dart';
 ///
 /// 2 (Milestone 8): `status`, `anchor`, `messages` and `app.origin`.
 /// 3 (Milestone 9): `environment`, the what-if overrides.
-const int annotationSchema = 3;
+/// 4 (Milestone 10): `finding` and `checks`, for a note made from a finding.
+const int annotationSchema = 4;
 
 /// Largest JSON for a note, without the screenshot, in UTF-8 bytes.
 const int maxPayloadBytes = 8 * 1024;
@@ -99,8 +100,9 @@ class NoteMessage {
 /// [toJson] keeps a fixed shape: every key is present, with null for a part
 /// that could not be read, except [errors] and [truncated], which appear
 /// only when not empty, [screenshot], which appears only when the note
-/// has one, and [environment], which appears only while a what-if override
-/// is active. `test/goldens/annotation_schema.json` fixes it.
+/// has one, [environment], which appears only while a what-if override
+/// is active, and [finding] and [checks], which appear only on a note made
+/// from a finding. `test/goldens/annotation_schema.json` fixes it.
 class Annotation {
   const Annotation({
     required this.id,
@@ -119,6 +121,8 @@ class Annotation {
     this.subtree,
     this.inherited,
     this.environment,
+    this.finding,
+    this.checks = const <Map<String, Object?>>[],
     this.screenshot,
     this.errors = const <String>[],
     this.truncated = const <String>[],
@@ -162,6 +166,15 @@ class Annotation {
   /// nothing was overridden. [page] keeps the real window.
   final Map<String, Object?>? environment;
 
+  /// The finding this note was made from (`Finding.toJson`: kind,
+  /// severity, summary, key and measured data), or null for a note written
+  /// by hand.
+  final Map<String, Object?>? finding;
+
+  /// What Milestone 12's `verify_note` measures, each with a `type`, for
+  /// example `{type: no_overflow}`. Empty for a note written by hand.
+  final List<Map<String, Object?>> checks;
+
   /// Null when "Include screenshot" was off or the capture failed.
   final ScreenshotInfo? screenshot;
 
@@ -185,6 +198,8 @@ class Annotation {
     String? Function()? subtree,
     ScreenshotInfo? Function()? screenshot,
     Map<String, Object?>? Function()? environment,
+    Map<String, Object?>? Function()? finding,
+    List<Map<String, Object?>>? checks,
     List<String>? errors,
     List<String>? truncated,
   }) => Annotation(
@@ -204,6 +219,8 @@ class Annotation {
     subtree: subtree == null ? this.subtree : subtree(),
     inherited: inherited,
     environment: environment == null ? this.environment : environment(),
+    finding: finding == null ? this.finding : finding(),
+    checks: checks ?? this.checks,
     screenshot: screenshot == null ? this.screenshot : screenshot(),
     errors: errors ?? this.errors,
     truncated: truncated ?? this.truncated,
@@ -367,6 +384,14 @@ class Annotation {
         final Map<String, Object?> env when env.isNotEmpty => env,
         _ => null,
       },
+      finding: switch (json['finding']) {
+        final Map<String, Object?> finding when finding.isNotEmpty => finding,
+        _ => null,
+      },
+      checks: [
+        for (final check in _listOrEmpty(json['checks']))
+          if (check is Map<String, Object?> && check['type'] is String) check,
+      ],
       target: TargetInfo._fromJson(target),
       anchor: json['anchor'] is Map<String, Object?>
           ? NoteAnchor.fromJson(json['anchor']! as Map<String, Object?>)
@@ -416,6 +441,8 @@ class Annotation {
     'app': app.toJson(),
     'page': page.toJson(),
     if (environment case final env? when env.isNotEmpty) 'environment': env,
+    'finding': ?finding,
+    if (checks.isNotEmpty) 'checks': checks,
     'target': target.toJson(),
     'anchor': anchor?.toJson(),
     'messages': [for (final m in messages) m.toJson()],
