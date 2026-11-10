@@ -10,6 +10,7 @@ import 'dart:typed_data';
 import '../model/annotation.dart' show NoteStatus, annotationSchema, clipText;
 import 'agent_instructions.dart';
 import 'bridge_protocol.dart';
+import 'mcp_server.dart';
 import 'note_store.dart';
 
 /// Why the bridge could not start.
@@ -37,12 +38,17 @@ class BridgeStartException implements Exception {
 /// - `DELETE /annotations/<id>`.
 /// - `GET /changes?since=<cursor>&origin=o`: what changed since a cursor.
 /// - `GET /health`.
+///
+/// MCP for the agent: `POST /mcp` (Streamable HTTP with JSON answers; no
+/// server-sent events) with the tools of [McpServer].
 class PinPointBridge {
-  PinPointBridge._(this._server, this.store, this._allowedOrigins, this._log) {
+  PinPointBridge._(this._server, this.store, this._allowedOrigins, this._log)
+    : _mcp = McpServer(store) {
     _subscription = _server.listen(_handle);
   }
 
-  /// Creates `<dir>/open/` and `<dir>/resolved/` and starts listening.
+  /// Creates `<dir>/drafts/`, `<dir>/open/` and `<dir>/resolved/`, reads
+  /// the notes already there, and starts listening.
   ///
   /// Port 0 picks a free port; read it from [port]. Throws a
   /// [BridgeStartException] when the port cannot be bound.
@@ -91,6 +97,7 @@ class PinPointBridge {
   final NoteStore store;
 
   final List<String> _allowedOrigins;
+  final McpServer _mcp;
   final void Function(String line) _log;
   late final StreamSubscription<HttpRequest> _subscription;
 
@@ -124,6 +131,7 @@ class PinPointBridge {
           path == annotationsPath ||
           path == healthPath ||
           path == changesPath ||
+          path == mcpPath ||
           noteId != null;
       if (request.method == 'OPTIONS' && known) {
         // A browser sends this before every JSON POST, PATCH and DELETE.
@@ -133,7 +141,10 @@ class PinPointBridge {
             'access-control-allow-methods',
             'GET, POST, PATCH, DELETE, OPTIONS',
           )
-          ..set('access-control-allow-headers', 'content-type')
+          ..set(
+            'access-control-allow-headers',
+            'content-type, mcp-protocol-version, mcp-session-id',
+          )
           // Chrome asks for this when a page calls a more private
           // address (Private Network Access), for example a page on the
           // LAN calling localhost.
@@ -215,6 +226,8 @@ class PinPointBridge {
       );
     }
     switch ((method, path)) {
+      case ('POST', mcpPath):
+        return _mcpCall(request);
       case ('POST', annotationsPath):
         return _receive(request);
       case ('GET', annotationsPath):
@@ -246,6 +259,37 @@ class PinPointBridge {
       _ => 'GET, POST, OPTIONS',
     });
     _error(response, HttpStatus.methodNotAllowed, 'Method not allowed');
+  }
+
+  /// One MCP message or batch. Answers 202 with no body when nothing is
+  /// owed (notifications), else 200 with the JSON-RPC answer.
+  Future<void> _mcpCall(HttpRequest request) async {
+    final response = request.response;
+    if (request.headers.contentType?.mimeType != ContentType.json.mimeType) {
+      return _error(
+        response,
+        HttpStatus.unsupportedMediaType,
+        'Send MCP messages as application/json',
+      );
+    }
+    final body = await _readBody(request);
+    Object? message;
+    try {
+      if (body == null) throw const FormatException('over the size cap');
+      message = jsonDecode(utf8.decode(body));
+    } on FormatException catch (error) {
+      return _json(response, HttpStatus.badRequest, {
+        'jsonrpc': '2.0',
+        'id': null,
+        'error': {'code': -32700, 'message': 'Parse error: ${error.message}'},
+      });
+    }
+    final answer = await _mcp.handle(message);
+    if (answer == null) {
+      response.statusCode = HttpStatus.accepted;
+      return;
+    }
+    _json(response, HttpStatus.ok, answer);
   }
 
   /// `a,b` as statuses; null for none or empty. Throws a

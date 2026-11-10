@@ -93,7 +93,12 @@ void main() {
           headers.value('access-control-allow-methods'),
           'GET, POST, PATCH, DELETE, OPTIONS',
         );
-        expect(headers.value('access-control-allow-headers'), 'content-type');
+        // content-type for the app; the MCP headers for a browser-based
+        // MCP client.
+        expect(
+          headers.value('access-control-allow-headers'),
+          'content-type, mcp-protocol-version, mcp-session-id',
+        );
       },
     );
 

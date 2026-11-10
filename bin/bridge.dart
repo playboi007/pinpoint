@@ -1,4 +1,5 @@
-// `dart run pinpoint:bridge`: the local receiver for Pinpoint notes.
+// `dart run pinpoint:bridge`: the local bridge between the Pinpoint overlay
+// and a coding agent (HTTP for the app, MCP for the agent).
 //
 // Plain Dart. Everything it imports stays free of `dart:ui` and
 // `package:flutter` (test/bridge/bridge_options_test.dart checks this).
@@ -40,10 +41,12 @@ Future<void> main(List<String> args) async {
     exitCode = 1;
     return;
   }
+  final url = 'http://${bridge.address.address}:${bridge.port}';
   stdout
+    ..writeln('pinpoint: bridge on $url, notes in ${bridge.openDir.path}')
     ..writeln(
-      'pinpoint: bridge on http://${bridge.address.address}:${bridge.port}, '
-      'notes in ${bridge.openDir.path}',
+      'pinpoint: MCP for your agent at $url/mcp '
+      '(Claude Code: claude mcp add --transport http pinpoint $url/mcp)',
     )
     ..writeln('pinpoint: Ctrl+C stops it.');
 
