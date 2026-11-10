@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pinpoint/pinpoint.dart';
@@ -155,6 +156,114 @@ void main() {
     });
   });
 
+  group('pointer trap', () {
+    testWidgets('acceptance: in picking mode an app button does not fire', (
+      tester,
+    ) async {
+      await tester.pumpWidget(host());
+      controller.startPicking();
+      await tester.pump();
+
+      await tester.tap(find.text('increment'), warnIfMissed: false);
+      await tester.pump();
+      expect(find.text('count: 0'), findsOneWidget);
+    });
+
+    testWidgets('a tap alone selects: touch has no hover', (tester) async {
+      await tester.pumpWidget(host());
+      controller.startPicking();
+      await tester.pump();
+
+      final at = tester.getCenter(find.text('count: 0'));
+      await tester.tapAt(at, kind: PointerDeviceKind.touch);
+      await tester.pump();
+
+      expect(controller.mode, PinPointMode.commenting);
+      expect(controller.selectedPosition, at);
+    });
+
+    testWidgets('mouse hover is reported while picking', (tester) async {
+      await tester.pumpWidget(host());
+      controller.startPicking();
+      await tester.pump();
+
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      addTearDown(mouse.removePointer);
+      await mouse.addPointer(location: const Offset(40, 50));
+      await mouse.moveTo(const Offset(60, 70));
+      await tester.pump();
+      expect(controller.hovered.value, const Offset(60, 70));
+    });
+
+    testWidgets('a secondary click does not select', (tester) async {
+      await tester.pumpWidget(host());
+      controller.startPicking();
+      await tester.pump();
+
+      await tester.tapAt(
+        const Offset(50, 50),
+        kind: PointerDeviceKind.mouse,
+        buttons: kSecondaryMouseButton,
+      );
+      await tester.pump();
+      expect(controller.mode, PinPointMode.picking);
+    });
+
+    testWidgets('the trap stays while commenting', (tester) async {
+      await tester.pumpWidget(host());
+      controller
+        ..startPicking()
+        ..select(Offset.zero);
+      await tester.pump();
+
+      await tester.tap(find.text('increment'), warnIfMissed: false);
+      await tester.pump();
+      expect(find.text('count: 0'), findsOneWidget);
+    });
+
+    testWidgets(
+      'acceptance: dialogs and pushed routes render beneath the trap',
+      (tester) async {
+        await tester.pumpWidget(host(home: const _DialogPage()));
+        await tester.tap(find.text('open dialog'));
+        await tester.pumpAndSettle();
+        expect(find.text('in dialog'), findsOneWidget);
+
+        controller.startPicking();
+        await tester.pump();
+
+        // A hit test at the dialog's button reaches Pinpoint's trap and
+        // nothing of the dialog: the Stack stops at its topmost hit child.
+        final result = HitTestResult();
+        tester.binding.hitTestInView(
+          result,
+          tester.getCenter(find.text('in dialog')),
+          tester.view.viewId,
+        );
+        final targets = [for (final entry in result.path) entry.target];
+        final trap = tester.renderObject(find.byKey(InspectorOverlay.trapKey));
+        expect(targets, contains(same(trap)));
+        expect(
+          targets,
+          isNot(contains(same(tester.renderObject(find.text('in dialog'))))),
+        );
+
+        // Neither the button nor the barrier react.
+        await tester.tap(find.text('in dialog'), warnIfMissed: false);
+        await tester.tapAt(const Offset(5, 5));
+        await tester.pumpAndSettle();
+        expect(find.text('in dialog'), findsOneWidget);
+        expect(find.text('dialog taps: 0'), findsOneWidget);
+
+        // The dialog is part of the app, inside its RepaintBoundary.
+        expect(
+          find.descendant(of: appBoundary(), matching: find.text('in dialog')),
+          findsOneWidget,
+        );
+      },
+    );
+  });
+
   testWidgets('hot reload clears the selection', (tester) async {
     await tester.pumpWidget(host());
     controller
@@ -171,6 +280,45 @@ void main() {
     expect(controller.selectedPosition, isNull);
     expect(controller.mode, PinPointMode.picking);
   });
+}
+
+class _DialogPage extends StatefulWidget {
+  const _DialogPage();
+
+  @override
+  State<_DialogPage> createState() => _DialogPageState();
+}
+
+class _DialogPageState extends State<_DialogPage> {
+  int _taps = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Center(
+        child: ElevatedButton(
+          onPressed: () => showDialog<void>(
+            context: context,
+            builder: (context) => Dialog(
+              child: StatefulBuilder(
+                builder: (context, setDialogState) => Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('dialog taps: $_taps'),
+                    TextButton(
+                      onPressed: () => setDialogState(() => _taps++),
+                      child: const Text('in dialog'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          child: const Text('open dialog'),
+        ),
+      ),
+    );
+  }
 }
 
 class _CounterPage extends StatefulWidget {
