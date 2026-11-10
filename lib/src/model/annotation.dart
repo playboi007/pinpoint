@@ -5,6 +5,8 @@ import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import '../sink/markdown_formatter.dart';
+
 /// The payload version. The receiver rejects any other value, so a change
 /// to the shape below needs a new number.
 const int annotationSchema = 1;
@@ -227,6 +229,9 @@ class Annotation {
       ),
     );
   }
+
+  /// The note as the Markdown a coding agent reads. Never holds the image.
+  String toMarkdown() => markdownFor(this);
 
   /// The note as JSON. The screenshot's PNG goes in as base64 only with
   /// [includeScreenshotData], for a sink that wants the image (the HTTP

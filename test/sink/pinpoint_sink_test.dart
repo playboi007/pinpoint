@@ -1,9 +1,7 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pinpoint/pinpoint.dart';
-import 'package:pinpoint/src/sink/markdown_formatter.dart';
 import 'package:pinpoint/src/sink/pinpoint_sink.dart';
 
 import '../support/fake_sink.dart';
@@ -71,28 +69,6 @@ void main() {
 
     test('no sinks, no results', () async {
       expect(await sendToSinks(note, const []), isEmpty);
-    });
-  });
-
-  group('markdownFor (interim until Milestone 7)', () {
-    test('leads with the comment and the location, then the full note', () {
-      final markdown = markdownFor(note);
-      final lines = markdown.split('\n');
-      expect(lines.first, '# Pinpoint ${note.id} (${note.intent.name})');
-      expect(markdown, contains('Comment: ${note.comment}'));
-      expect(
-        markdown,
-        contains('Enclosing: SaveBar (lib/pages/order_page.dart:88)'),
-      );
-      final source = note.target.source!;
-      expect(
-        markdown,
-        contains('Source: ${source.file}:${source.line}:${source.column}'),
-      );
-      final json = RegExp(r'```json\n([\s\S]*)\n```')
-          .firstMatch(markdown)!
-          .group(1)!;
-      expect(jsonDecode(json), jsonDecode(jsonEncode(note.toJson())));
     });
   });
 }
