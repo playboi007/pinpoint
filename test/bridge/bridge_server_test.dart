@@ -91,7 +91,7 @@ void main() {
         expect(headers.value('access-control-allow-origin'), '*');
         expect(
           headers.value('access-control-allow-methods'),
-          'POST, GET, OPTIONS',
+          'GET, POST, PATCH, DELETE, OPTIONS',
         );
         expect(headers.value('access-control-allow-headers'), 'content-type');
       },
@@ -105,6 +105,7 @@ void main() {
       expect(status, 201, reason: body);
       expect(jsonDecode(body), {
         'id': sampleId,
+        'status': 'submitted',
         'markdown': '${root.path}/.pinpoint/open/$sampleId.md',
       });
       expect(names(open()), [
@@ -223,6 +224,7 @@ void main() {
       expect(names(root), ['.pinpoint'], reason: 'nothing beside the folder');
       expect(names(Directory('${root.path}/.pinpoint')), [
         '.gitignore',
+        'drafts',
         'open',
         'resolved',
       ]);
@@ -397,12 +399,12 @@ void main() {
       final (status, _, _) = await post({
         ...sampleNote(),
         'comment': 'Second try',
-      });
+      }..remove('screenshot'));
       expect(status, 201);
       expect(names(open()), [
         '$sampleId.json',
         '$sampleId.md',
-      ], reason: 'the old image does not belong to the new note');
+      ], reason: 'the old image does not belong to a note with none');
       expect(
         File('${open().path}/$sampleId.md').readAsStringSync(),
         contains('Comment: Second try'),

@@ -7,10 +7,10 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import '../model/annotation.dart' show annotationSchema, clipText;
-import '../sink/markdown_formatter.dart';
+import '../model/annotation.dart' show NoteStatus, annotationSchema, clipText;
 import 'agent_instructions.dart';
 import 'bridge_protocol.dart';
+import 'note_store.dart';
 
 /// Why the bridge could not start.
 class BridgeStartException implements Exception {
@@ -22,11 +22,23 @@ class BridgeStartException implements Exception {
   String toString() => message;
 }
 
-/// The local receiver: takes each note the overlay posts and writes it into
-/// `<dir>/open/` as `<id>.md`, `<id>.json` and `<id>.png`, for a coding
-/// agent to read.
+/// The local bridge between the overlay and a coding agent.
+///
+/// It takes each note the overlay posts and writes it into `<dir>/open/` as
+/// `<id>.md`, `<id>.json` and `<id>.png`, for a coding agent to read
+/// (drafts go to `<dir>/drafts/`, which no agent reads). The app reloads
+/// its pins from it, and polls it for what the agent changed.
+///
+/// HTTP for the app:
+///
+/// - `POST /annotations`: a new or changed note.
+/// - `GET /annotations?status=a,b&origin=o`: notes, to restore pins.
+/// - `PATCH /annotations/<id>`: `status`, `comment`, `intent`, `message`.
+/// - `DELETE /annotations/<id>`.
+/// - `GET /changes?since=<cursor>&origin=o`: what changed since a cursor.
+/// - `GET /health`.
 class PinPointBridge {
-  PinPointBridge._(this._server, this._dir, this._allowedOrigins, this._log) {
+  PinPointBridge._(this._server, this.store, this._allowedOrigins, this._log) {
     _subscription = _server.listen(_handle);
   }
 
@@ -42,13 +54,7 @@ class PinPointBridge {
     void Function(String line) log = _noLog,
   }) async {
     final folder = Directory(dir).absolute;
-    await Directory('${folder.path}/open').create(recursive: true);
-    await Directory('${folder.path}/resolved').create(recursive: true);
-    // Keeps the notes (comments, screenshots) out of git without editing
-    // the project's own .gitignore: `*` here ignores the folder, this file
-    // included.
-    final ignore = File('${folder.path}/.gitignore');
-    if (!ignore.existsSync()) await ignore.writeAsString('*\n');
+    final store = await NoteStore.open(folder, log: log);
 
     // Loopback only by default: a note becomes files a coding agent acts
     // on, so no other machine may send one. Flutter Agentation binds
@@ -76,11 +82,14 @@ class PinPointBridge {
         '${server.port}.',
       );
     }
-    return PinPointBridge._(server, folder, allowedOrigins, log);
+    return PinPointBridge._(server, store, allowedOrigins, log);
   }
 
   final HttpServer _server;
-  final Directory _dir;
+
+  /// The notes on disk.
+  final NoteStore store;
+
   final List<String> _allowedOrigins;
   final void Function(String line) _log;
   late final StreamSubscription<HttpRequest> _subscription;
@@ -92,9 +101,7 @@ class PinPointBridge {
   InternetAddress get address => _server.address;
 
   /// The folder an agent reads: `<dir>/open/`.
-  Directory get openDir => Directory('${_dir.path}/open');
-
-  Directory get _resolvedDir => Directory('${_dir.path}/resolved');
+  Directory get openDir => store.openDir;
 
   /// Stops listening and drops open connections.
   Future<void> close() async {
@@ -105,36 +112,60 @@ class PinPointBridge {
   Future<void> _handle(HttpRequest request) async {
     final response = request.response;
     // On every response, so the app can read errors too. It carries no
-    // credentials, so `*` exposes nothing.
+    // credentials, so `*` exposes nothing a page could not get anyway; the
+    // origin check below decides who may read and change notes.
     response.headers.set('access-control-allow-origin', '*');
     try {
       final path = request.uri.path;
-      final known = path == annotationsPath || path == healthPath;
-      switch (request.method) {
-        case 'OPTIONS' when known:
-          // A browser sends this before every JSON POST.
-          response.statusCode = HttpStatus.noContent;
-          response.headers
-            ..set('access-control-allow-methods', 'POST, GET, OPTIONS')
-            ..set('access-control-allow-headers', 'content-type')
-            // Chrome asks for this when a page calls a more private
-            // address (Private Network Access), for example a page on the
-            // LAN calling localhost.
-            ..set('access-control-allow-private-network', 'true')
-            ..set('access-control-max-age', '600');
-        case 'GET' when path == healthPath:
-          _json(response, HttpStatus.ok, {'ok': true, 'schema': annotationSchema});
-        case 'POST' when path == annotationsPath:
-          await _receive(request);
-        case _ when known:
-          response.headers.set(
-            'allow',
-            path == healthPath ? 'GET, OPTIONS' : 'POST, OPTIONS',
-          );
-          _error(response, HttpStatus.methodNotAllowed, 'Method not allowed');
-        default:
-          _error(response, HttpStatus.notFound, 'Not found: $path');
+      final noteId = path.startsWith('$annotationsPath/')
+          ? path.substring(annotationsPath.length + 1)
+          : null;
+      final known =
+          path == annotationsPath ||
+          path == healthPath ||
+          path == changesPath ||
+          noteId != null;
+      if (request.method == 'OPTIONS' && known) {
+        // A browser sends this before every JSON POST, PATCH and DELETE.
+        response.statusCode = HttpStatus.noContent;
+        response.headers
+          ..set(
+            'access-control-allow-methods',
+            'GET, POST, PATCH, DELETE, OPTIONS',
+          )
+          ..set('access-control-allow-headers', 'content-type')
+          // Chrome asks for this when a page calls a more private
+          // address (Private Network Access), for example a page on the
+          // LAN calling localhost.
+          ..set('access-control-allow-private-network', 'true')
+          ..set('access-control-max-age', '600');
+      } else if (request.method == 'GET' && path == healthPath) {
+        _json(response, HttpStatus.ok, {
+          'ok': true,
+          'schema': annotationSchema,
+        });
+      } else if (!known) {
+        _error(response, HttpStatus.notFound, 'Not found: $path');
+      } else if (_refusedOrigin(request) case final origin?) {
+        // Any web page open in the browser can call localhost. Notes go to
+        // a coding agent and hold comments and screenshots, so only pages
+        // from this machine may send or read them, unless named with
+        // --allow-origin.
+        _log(
+          'pinpoint: refused a request from $origin. Start the bridge '
+          'with --allow-origin $origin to accept it.',
+        );
+        _error(
+          response,
+          HttpStatus.forbidden,
+          'Requests from $origin are refused. Start the bridge with '
+          '--allow-origin $origin to accept them.',
+        );
+      } else {
+        await _route(request, path, noteId);
       }
+    } on StoreException catch (error) {
+      _error(response, error.status, error.message);
     } catch (error) {
       _log('pinpoint: request failed: $error');
       try {
@@ -150,64 +181,162 @@ class PinPointBridge {
     }
   }
 
-  Future<void> _receive(HttpRequest request) async {
+  Future<void> _route(HttpRequest request, String path, String? noteId) async {
     final response = request.response;
-
-    final origin = request.headers.value('origin');
-    if (origin != null && !_originAllowed(origin)) {
-      // Any web page open in the browser can post to localhost. The note
-      // goes to a coding agent, so only pages from this machine may, unless
-      // named with --allow-origin.
-      _log(
-        'pinpoint: refused a note from $origin. Start the bridge with '
-        '--allow-origin $origin to accept it.',
-      );
+    final method = request.method;
+    if (noteId != null) {
+      // The id becomes a file name. A crafted id such as `../../x` would
+      // reach outside the notes folder, so it must match the pattern.
+      if (!noteIdPattern.hasMatch(noteId)) {
+        return _error(
+          response,
+          HttpStatus.badRequest,
+          'The id must match ${noteIdPattern.pattern}',
+        );
+      }
+      switch (method) {
+        case 'GET':
+          final note = await store.read(noteId);
+          return note == null
+              ? _error(response, HttpStatus.notFound, 'No note $noteId')
+              : _json(response, HttpStatus.ok, note);
+        case 'PATCH':
+          return _patch(request, noteId);
+        case 'DELETE':
+          return await store.delete(noteId)
+              ? _json(response, HttpStatus.ok, {'id': noteId, 'deleted': true})
+              : _error(response, HttpStatus.notFound, 'No note $noteId');
+      }
+      response.headers.set('allow', 'GET, PATCH, DELETE, OPTIONS');
       return _error(
         response,
-        HttpStatus.forbidden,
-        'Notes from $origin are refused. Start the bridge with '
-        '--allow-origin $origin to accept them.',
+        HttpStatus.methodNotAllowed,
+        'Method not allowed',
       );
     }
+    switch ((method, path)) {
+      case ('POST', annotationsPath):
+        return _receive(request);
+      case ('GET', annotationsPath):
+        final query = request.uri.queryParameters;
+        final Set<NoteStatus>? statuses;
+        try {
+          statuses = _statuses(query['status']);
+        } on FormatException catch (error) {
+          return _error(response, HttpStatus.badRequest, error.message);
+        }
+        final notes = await store.list(
+          statuses: statuses,
+          origin: query['origin'],
+        );
+        return _json(response, HttpStatus.ok, {
+          'cursor': store.cursor,
+          'notes': notes,
+        });
+      case ('GET', changesPath):
+        final query = request.uri.queryParameters;
+        final changes = await store.changes(
+          query['since'],
+          origin: query['origin'],
+        );
+        return _json(response, HttpStatus.ok, changes.toJson());
+    }
+    response.headers.set('allow', switch (path) {
+      healthPath || changesPath => 'GET, OPTIONS',
+      _ => 'GET, POST, OPTIONS',
+    });
+    _error(response, HttpStatus.methodNotAllowed, 'Method not allowed');
+  }
+
+  /// `a,b` as statuses; null for none or empty. Throws a
+  /// [FormatException] for an unknown name.
+  static Set<NoteStatus>? _statuses(String? text) {
+    if (text == null || text.trim().isEmpty) return null;
+    return {
+      for (final name in text.split(','))
+        NoteStatus.byName(name.trim()) ??
+            (throw FormatException('Unknown status: ${name.trim()}')),
+    };
+  }
+
+  Future<void> _patch(HttpRequest request, String id) async {
+    final response = request.response;
+    final body = await _jsonBody(request);
+    if (body == null) return;
+    final status = body['status'];
+    final parsed = status == null ? null : NoteStatus.byName(status);
+    if (status != null && parsed == null) {
+      return _error(response, HttpStatus.badRequest, 'Unknown status: $status');
+    }
+    for (final field in ['comment', 'intent', 'message']) {
+      if (body[field] != null && body[field] is! String) {
+        return _error(
+          response,
+          HttpStatus.badRequest,
+          '$field must be a string',
+        );
+      }
+    }
+    final note = await store.update(
+      id,
+      status: parsed,
+      comment: body['comment'] as String?,
+      intent: body['intent'] as String?,
+      message: body['message'] as String?,
+    );
+    _log('pinpoint: note $id is ${note['status']}');
+    _json(response, HttpStatus.ok, note);
+  }
+
+  /// The request's JSON object, or null after answering with the error.
+  Future<Map<String, Object?>?> _jsonBody(HttpRequest request) async {
+    final response = request.response;
     if (request.headers.contentType?.mimeType != ContentType.json.mimeType) {
-      return _error(
+      _error(
         response,
         HttpStatus.unsupportedMediaType,
-        'Send the note as application/json',
+        'Send the body as application/json',
       );
+      return null;
     }
-
     final body = await _readBody(request);
     if (body == null) {
       // Cap the body: base64 makes the screenshot a third larger, and an
       // endless body must not fill the memory. Close the connection after
       // this answer; it may hold more of the body.
       response.persistentConnection = false;
-      return _error(
+      _error(
         response,
         HttpStatus.requestEntityTooLarge,
         'The note is over ${maxBodyBytes ~/ (1024 * 1024)} MB',
       );
+      return null;
     }
-
     final Object? decoded;
     try {
       decoded = jsonDecode(utf8.decode(body));
     } on FormatException catch (error) {
-      return _error(
-        response,
-        HttpStatus.badRequest,
-        'Not JSON: ${error.message}',
-      );
+      _error(response, HttpStatus.badRequest, 'Not JSON: ${error.message}');
+      return null;
     }
     if (decoded is! Map<String, Object?>) {
-      return _error(
-        response,
-        HttpStatus.badRequest,
-        'The note must be a JSON object',
-      );
+      _error(response, HttpStatus.badRequest, 'The body must be a JSON object');
+      return null;
     }
-    final note = decoded;
+    return decoded;
+  }
+
+  /// The request's origin when it may not use the bridge, else null. No
+  /// `Origin` (curl, an agent) is allowed.
+  String? _refusedOrigin(HttpRequest request) {
+    final origin = request.headers.value('origin');
+    return origin == null || _originAllowed(origin) ? null : origin;
+  }
+
+  Future<void> _receive(HttpRequest request) async {
+    final response = request.response;
+    final note = await _jsonBody(request);
+    if (note == null) return;
     if (note['schema'] != annotationSchema) {
       return _error(
         response,
@@ -226,13 +355,9 @@ class PinPointBridge {
         'The id must match ${noteIdPattern.pattern}',
       );
     }
-    if (File('${_resolvedDir.path}/$id.md').existsSync() ||
-        File('${_resolvedDir.path}/$id.json').existsSync()) {
-      return _error(
-        response,
-        HttpStatus.conflict,
-        'Note $id is already resolved',
-      );
+    final status = note['status'];
+    if (status != null && NoteStatus.byName(status) == null) {
+      return _error(response, HttpStatus.badRequest, 'Unknown status: $status');
     }
 
     Uint8List? png;
@@ -256,37 +381,27 @@ class PinPointBridge {
           );
         }
       }
-      // The bridge names the file, so the note always points at the image
-      // beside it.
-      shot['file'] = png == null ? null : '$id.png';
     }
 
-    final open = openDir.path;
-    final markdown = File('$open/$id.md');
-    // Image first and Markdown last: an agent that lists *.md sees a note
-    // only when everything it points at is in place.
-    if (png != null) {
-      await _writeAtomic(File('$open/$id.png'), png);
-    } else {
-      final stale = File('$open/$id.png');
-      if (stale.existsSync()) await stale.delete();
-    }
-    await _writeAtomic(
-      File('$open/$id.json'),
-      utf8.encode('${const JsonEncoder.withIndent('  ').convert(note)}\n'),
-    );
-    await _writeAtomic(markdown, utf8.encode(markdownFromJson(note)));
+    // A draft sent again (now submitted) after an app restart has no image
+    // data; its PNG is already here.
+    final path = await store.save(note, png, keepPng: png == null);
 
     final comment = note['comment'];
     final summary = comment is String
         ? ' "${clipText(comment.replaceAll(RegExp(r'\s+'), ' '), 60)}"'
         : '';
     final intent = note['intent'];
+    final saved = note['status'];
     _log(
-      'pinpoint: ${intent is String ? '$intent ' : ''}note$summary -> '
-      '${markdown.path}',
+      'pinpoint: ${saved == 'draft' ? 'draft ' : ''}'
+      '${intent is String ? '$intent ' : ''}note$summary -> $path',
     );
-    _json(response, HttpStatus.created, {'id': id, 'markdown': markdown.path});
+    _json(response, HttpStatus.created, {
+      'id': id,
+      'status': saved,
+      if (saved != 'draft') 'markdown': path,
+    });
   }
 
   /// Prints the agent section when no agent file in the project (the
@@ -340,16 +455,6 @@ class PinPointBridge {
 
   /// How much of a body over [maxBodyBytes] is read only to drop it.
   static const int _drainLimit = 4 * maxBodyBytes;
-
-  /// Writes [bytes] to a hidden temporary name in the same folder, then
-  /// renames it. A rename within one folder is atomic, so an agent never
-  /// reads a half-written note.
-  static Future<void> _writeAtomic(File file, List<int> bytes) async {
-    final name = file.uri.pathSegments.last;
-    final temp = File('${file.parent.path}/.$name.tmp');
-    await temp.writeAsBytes(bytes, flush: true);
-    await temp.rename(file.path);
-  }
 
   static bool _isPng(Uint8List bytes) {
     const signature = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];

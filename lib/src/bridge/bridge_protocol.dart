@@ -18,6 +18,15 @@ const String annotationsPath = '/annotations';
 /// Answers 200 while the bridge runs.
 const String healthPath = '/health';
 
+/// What changed since a cursor, for the app's poll.
+const String changesPath = '/changes';
+
+/// The MCP endpoint for the agent (Streamable HTTP, JSON answers).
+const String mcpPath = '/mcp';
+
+/// How often the app asks [changesPath], only while the overlay is active.
+const Duration pollInterval = Duration(seconds: 2);
+
 /// The largest request body the bridge reads. Base64 makes the screenshot a
 /// third larger than its PNG.
 const int maxBodyBytes = 10 * 1024 * 1024;

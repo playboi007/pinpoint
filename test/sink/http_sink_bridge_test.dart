@@ -37,6 +37,8 @@ void main() {
     id: id,
     createdAt: DateTime.utc(2026, 11, 10, 14, 32, 5),
     intent: AnnotationIntent.improve,
+    // A draft would go to drafts/, where no agent looks.
+    status: NoteStatus.submitted,
     comment: 'Label truncates at narrow widths',
     app: const AppInfo(buildMode: 'debug', platform: 'web'),
     page: const PageInfo(route: '/orders/:id'),
