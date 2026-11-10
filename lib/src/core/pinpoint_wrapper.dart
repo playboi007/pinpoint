@@ -1,6 +1,7 @@
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
+import '../env/environment_host.dart';
 import '../overlay/inspector_overlay.dart';
 import 'hook_registry.dart';
 import 'keymap.dart';
@@ -158,6 +159,7 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
     // The shape of this tree never changes between modes (engineering rule
     // 5). Adding or removing a wrapper around the app would remount it and
     // lose its state.
+    final environment = _controller.environment;
     return Stack(
       // Tight constraints, as the Navigator gets without Pinpoint. With the
       // default loose fit the Navigator still fills the screen, but anything
@@ -166,21 +168,42 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
       // Not directional, so the wrapper works without a Directionality.
       alignment: Alignment.topLeft,
       children: [
-        RepaintBoundary(
-          key: _appKey,
-          child: ListenableBuilder(
-            listenable: _controller,
-            // Always present; only `enabled` changes. TickerMode mutes the
-            // app's tickers, so no frames are drawn for them while frozen.
-            // It does not pause Timer or Future based logic. A muted ticker
-            // keeps its start time, so on resume an animation jumps ahead by
-            // the frozen time: a spinner looks continuous, a one-shot
-            // transition may finish at once.
-            builder: (context, child) =>
-                TickerMode(enabled: !_controller.frozen, child: child!),
-            // Innermost, so wrappers added later (Milestone 9) stay out of
-            // the chain too.
-            child: KeyedSubtree(key: _contentKey, child: app),
+        // With no viewport the frame passes the Stack's constraints
+        // straight on. With one, the app's boundary is no longer at the
+        // screen origin and may be scaled: every rect is global and goes
+        // through the frame's paint transform (engineering rule 7).
+        ListenableBuilder(
+          listenable: environment,
+          builder: (context, child) => ViewportFrame(
+            viewport: environment.value.viewport,
+            keyboardHeight: environment.value.keyboardHeight ?? 0,
+            child: child,
+          ),
+          child: RepaintBoundary(
+            key: _appKey,
+            // Inside the boundary, so screenshots show the overridden app,
+            // and above the content key, so its widgets never appear in a
+            // picked widget's chain.
+            child: ListenableBuilder(
+              listenable: environment,
+              builder: (context, child) => EnvironmentHost(
+                environment: environment.value,
+                child: child!,
+              ),
+              child: ListenableBuilder(
+                listenable: _controller,
+                // Always present; only `enabled` changes. TickerMode mutes
+                // the app's tickers, so no frames are drawn for them while
+                // frozen. It does not pause Timer or Future based logic. A
+                // muted ticker keeps its start time, so on resume an
+                // animation jumps ahead by the frozen time: a spinner looks
+                // continuous, a one-shot transition may finish at once.
+                builder: (context, child) =>
+                    TickerMode(enabled: !_controller.frozen, child: child!),
+                // Innermost, so Pinpoint's wrappers stay out of the chain.
+                child: KeyedSubtree(key: _contentKey, child: app),
+              ),
+            ),
           ),
         ),
         // Beside the app's TickerMode, not inside it: the comment field's

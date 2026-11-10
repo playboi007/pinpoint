@@ -131,6 +131,17 @@ abstract final class RenderSearch {
   // consistent order.
   static int _areaKey(RenderCandidate c) => (c.area * 1000).round();
 
+  /// Whether [globalPosition] is on the app: inside [root]'s on-screen
+  /// rect, where [root] is the app's boundary.
+  ///
+  /// With a what-if viewport the boundary is smaller than the screen. A
+  /// pointer outside the viewport frame is over nothing, even where an
+  /// app widget overflows its boundary (the frame clips it): the picker
+  /// and the wheel passthrough refuse it, and Milestone 12's synthetic
+  /// taps must too.
+  static bool isOnApp(RenderObject root, Offset globalPosition) =>
+      globalRectOf(root)?.contains(globalPosition) ?? false;
+
   /// The paint bounds of [renderObject] in global logical pixels, or null
   /// when it is detached, not laid out, or under a singular transform.
   static Rect? globalRectOf(RenderObject renderObject) {

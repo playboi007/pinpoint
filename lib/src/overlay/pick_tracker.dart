@@ -125,6 +125,7 @@ class PickTracker {
     final context = appKey.currentContext;
     final root = context?.findRenderObject();
     if (context is! Element || root == null) return null;
+    if (!RenderSearch.isOnApp(root, position)) return null;
     debugPickCount++;
     final stopwatch = Stopwatch()..start();
     final search = RenderSearch.find(root, position);

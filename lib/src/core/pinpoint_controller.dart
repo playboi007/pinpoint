@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
+import '../env/environment_controller.dart';
 import '../model/annotation.dart';
 import '../search/pick_result.dart';
 import 'note_book.dart';
@@ -105,6 +106,10 @@ class PinPointController extends ChangeNotifier {
 
   /// Drafts and sent notes, shown as pins.
   final NoteBook notes = NoteBook();
+
+  /// The what-if overrides: viewport, text scale, theme, platform and the
+  /// rest. Independent of [mode]: they stay when picking stops.
+  final EnvironmentController environment = EnvironmentController();
 
   final ValueNotifier<String?> _openNote = ValueNotifier<String?>(null);
 
@@ -329,6 +334,7 @@ class PinPointController extends ChangeNotifier {
     _openNote.dispose();
     notes.dispose();
     draft.dispose();
+    environment.dispose();
     super.dispose();
   }
 }

@@ -25,6 +25,7 @@ bool scrollPassthrough(
       : Axis.horizontal;
   final amount = axis == Axis.vertical ? delta.dy : delta.dx;
   if (amount == 0) return false;
+  if (!RenderSearch.isOnApp(root, event.position)) return false;
 
   final candidates = RenderSearch.find(root, event.position).candidates;
   final tried = <ScrollableState>{};
