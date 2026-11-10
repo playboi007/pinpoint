@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:pinpoint/pinpoint.dart';
 
+import 'debug_print_sink.dart';
 import 'screens/counter_screen.dart';
 import 'screens/custom_paint_screen.dart';
 import 'screens/dialog_sheet_screen.dart';
@@ -24,7 +25,10 @@ class ExampleApp extends StatelessWidget {
         brightness: Brightness.dark,
       ),
       // Above the Navigator, so dialogs and routes render beneath Pinpoint.
-      builder: (context, child) => PinPointWrapper(child: child),
+      builder: (context, child) => PinPointWrapper(
+        config: const PinPointConfig(sinks: [DebugPrintSink()]),
+        child: child,
+      ),
       home: const HomeScreen(),
     );
   }
@@ -53,9 +57,9 @@ class HomeScreen extends StatelessWidget {
             ListTile(
               title: Text(screen.title),
               trailing: const Icon(Icons.chevron_right),
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(builder: (_) => screen.build()),
-              ),
+              onTap: () => Navigator.of(
+                context,
+              ).push(MaterialPageRoute<void>(builder: (_) => screen.build())),
             ),
         ],
       ),

@@ -124,21 +124,29 @@ enum KeyAction {
 /// Key down and repeat events can match; key up never does. Only keys that
 /// Pinpoint uses in the current mode match, so everything else stays with the
 /// app (plain Esc in idle, for example, still closes the app's dialogs).
+///
+/// [editingText] is true while one of Pinpoint's text fields (the comment
+/// field) has focus, and [composing] while an input method composes text in
+/// it.
 KeyAction? keyActionFor(
   KeyEvent event, {
   required PinPointMode mode,
   required PinPointShortcut shortcut,
   required KeyModifiers modifiers,
+  bool editingText = false,
+  bool composing = false,
 }) {
   if (event is KeyUpEvent) return null;
   if (shortcut.matches(event, modifiers)) return KeyAction.toggle;
 
   // Chain navigation needs a selection, which exists only while picking or
-  // commenting. Milestone 5: while the comment field has focus, arrow keys
-  // must edit its text, so navigation in commenting uses the breadcrumb
-  // only. Turn these off there when the field exists.
+  // commenting. Arrow keys belong to the comment field while it has focus,
+  // and brackets and P are characters there: navigation must not also fire.
+  // In commenting, the breadcrumb navigates instead, or the Info tab, which
+  // takes focus out of the field.
   final selecting =
-      mode == PinPointMode.picking || mode == PinPointMode.commenting;
+      !editingText &&
+      (mode == PinPointMode.picking || mode == PinPointMode.commenting);
   final altOnly =
       modifiers.alt &&
       !modifiers.shift &&
@@ -160,12 +168,16 @@ KeyAction? keyActionFor(
       !modifiers.meta;
   if (!plain) return null;
 
+  // While an input method composes, Esc cancels the composition and must
+  // reach it.
   if (mode != PinPointMode.idle &&
+      !composing &&
       event.logicalKey == LogicalKeyboardKey.escape) {
     return KeyAction.back;
   }
-  // Picking only: the comment field (Milestone 5) needs a plain P.
+  // Picking only: the comment field needs a plain P.
   if (mode == PinPointMode.picking &&
+      !editingText &&
       (event.logicalKey == LogicalKeyboardKey.keyP ||
           event.physicalKey == PhysicalKeyboardKey.keyP)) {
     return KeyAction.freeze;

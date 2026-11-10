@@ -88,11 +88,14 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
     // Alt alone is not claimed: it only switches the rulers to measuring
     // the gap between the selection and the hovered widget.
     _controller.setMeasuring(HardwareKeyboard.instance.isAltPressed);
+    final editingText = _editingText();
     final action = keyActionFor(
       event,
       mode: _controller.mode,
       shortcut: widget.config.shortcut,
       modifiers: modifiersOf(HardwareKeyboard.instance),
+      editingText: editingText,
+      composing: editingText && _controller.draft.composing,
     );
     if (action == null) return false;
     // Act once per press, except navigation, which a held key repeats.
@@ -120,6 +123,16 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
     // that). It tells the embedder the key was handled, which on web can
     // stop the browser's default action for it.
     return true;
+  }
+
+  /// Whether primary focus is in a text field. While a mode is active the
+  /// app cannot have focus (InspectorOverlay holds it), so this is
+  /// Pinpoint's own comment field.
+  static bool _editingText() {
+    final context = FocusManager.instance.primaryFocus?.context;
+    if (context == null || !context.mounted) return false;
+    // Not `.of`: nothing here may subscribe an element (engineering rule 3).
+    return context.findAncestorWidgetOfExactType<EditableText>() != null;
   }
 
   @override
@@ -170,6 +183,9 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
             child: KeyedSubtree(key: _contentKey, child: app),
           ),
         ),
+        // Beside the app's TickerMode, not inside it: the comment field's
+        // caret and the panel's animations keep running while the app is
+        // frozen.
         InspectorOverlay(
           controller: _controller,
           appKey: _appKey,

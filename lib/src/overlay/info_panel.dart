@@ -1,5 +1,6 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../core/pinpoint_controller.dart';
 import '../info/widget_info.dart';
@@ -78,6 +79,33 @@ Offset clampPanel(Offset position, Size panel, Size viewport) {
     clampAxis(position.dx, panel.width, viewport.width),
     clampAxis(position.dy, panel.height, viewport.height),
   );
+}
+
+/// Ctrl or Cmd and Enter in the panel.
+class _SendIntent extends Intent {
+  const _SendIntent();
+}
+
+/// Sends the comment. Off unless a comment is typed in commenting mode,
+/// and while an input method composes: then Enter commits the composition,
+/// so the shortcut must not cut it off.
+class _SendAction extends Action<_SendIntent> {
+  _SendAction({required this.controller, required this.onSend});
+
+  final PinPointController controller;
+  final VoidCallback onSend;
+
+  @override
+  bool isEnabled(_SendIntent intent) =>
+      controller.mode == PinPointMode.commenting &&
+      controller.draft.hasText &&
+      !controller.draft.composing;
+
+  @override
+  Object? invoke(_SendIntent intent) {
+    onSend();
+    return null;
+  }
 }
 
 /// Which tab of the [InfoPanel] shows.
@@ -301,6 +329,57 @@ class InfoPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // Its own scope: Tab moves between the panel's controls and wraps
+    // around inside it, never onto an app widget behind it.
+    return FocusScope(
+      child: Focus(
+        canRequestFocus: false,
+        skipTraversal: true,
+        // Keys from the panel stop here, so they never reach the app's
+        // Shortcuts above the wrapper or the focus holder, which would
+        // swallow them. Unlike `handled`, this still lets the platform act
+        // on the key: the browser types the character, an input method
+        // composes.
+        onKeyEvent: (node, event) => KeyEventResult.skipRemainingHandlers,
+        // The same stack WidgetsApp puts above the app, which the barrier
+        // above cuts off: Tab, Enter and Space for the controls, then text
+        // editing keys for the field (which hand Enter and Space to the
+        // input method), plus Ctrl or Cmd and Enter to send.
+        child: Shortcuts(
+          shortcuts: {
+            ...WidgetsApp.defaultShortcuts,
+            for (final key in [
+              LogicalKeyboardKey.enter,
+              LogicalKeyboardKey.numpadEnter,
+            ]) ...{
+              SingleActivator(key, control: true): const _SendIntent(),
+              SingleActivator(key, meta: true): const _SendIntent(),
+            },
+          },
+          child: DefaultTextEditingShortcuts(
+            child: Actions(
+              actions: {
+                ...WidgetsApp.defaultActions,
+                // EditableText passes Esc on when no text menu is open; in
+                // the app a route takes it. Here the HardwareKeyboard
+                // handler already acts on Esc, so nothing else must.
+                DismissIntent: DoNothingAction(consumesKey: false),
+                _SendIntent: _SendAction(
+                  controller: controller,
+                  onSend: onSend,
+                ),
+              },
+              // Text selection handles and the context menu render in the
+              // Overlay that InspectorOverlay provides around this layer.
+              child: FocusTraversalGroup(child: _card(theme)),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _card(ThemeData theme) {
     return Material(
       elevation: 6,
       borderRadius: BorderRadius.circular(8),

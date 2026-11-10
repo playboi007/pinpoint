@@ -23,8 +23,16 @@ void main() {
     PinPointMode mode, {
     KeyModifiers modifiers = none,
     PinPointShortcut shortcut = PinPointShortcut.altShiftC,
-  }) =>
-      keyActionFor(event, mode: mode, shortcut: shortcut, modifiers: modifiers);
+    bool editingText = false,
+    bool composing = false,
+  }) => keyActionFor(
+    event,
+    mode: mode,
+    shortcut: shortcut,
+    modifiers: modifiers,
+    editingText: editingText,
+    composing: composing,
+  );
 
   group('shortcut', () {
     test('Alt+Shift+C toggles in every mode', () {
@@ -220,6 +228,60 @@ void main() {
       expect(action(repeat, PinPointMode.picking), KeyAction.chainUp);
       expect(KeyAction.chainUp.repeats, isTrue);
       expect(KeyAction.toggle.repeats, isFalse);
+    });
+  });
+
+  group('while a Pinpoint text field has focus (Milestone 5)', () {
+    final up = down(LogicalKeyboardKey.arrowUp, PhysicalKeyboardKey.arrowUp);
+    final arrowDown = down(
+      LogicalKeyboardKey.arrowDown,
+      PhysicalKeyboardKey.arrowDown,
+    );
+    final open = down(
+      LogicalKeyboardKey.bracketLeft,
+      PhysicalKeyboardKey.bracketLeft,
+    );
+    const alt = (alt: true, shift: false, control: false, meta: false);
+
+    test('arrows and brackets edit the text, they do not navigate', () {
+      for (final mode in PinPointMode.values) {
+        for (final key in [up, arrowDown, open]) {
+          expect(action(key, mode, editingText: true), isNull);
+          expect(action(key, mode, editingText: true, modifiers: alt), isNull);
+        }
+      }
+    });
+
+    test('P types a P', () {
+      expect(action(keyP, PinPointMode.picking, editingText: true), isNull);
+    });
+
+    test('Esc still goes back, unless an input method is composing', () {
+      expect(
+        action(escape, PinPointMode.commenting, editingText: true),
+        KeyAction.back,
+      );
+      expect(
+        action(
+          escape,
+          PinPointMode.commenting,
+          editingText: true,
+          composing: true,
+        ),
+        isNull,
+      );
+    });
+
+    test('the shortcut still toggles', () {
+      expect(
+        action(
+          keyC,
+          PinPointMode.commenting,
+          modifiers: altShift,
+          editingText: true,
+        ),
+        KeyAction.toggle,
+      );
     });
   });
 

@@ -69,6 +69,12 @@ void main() {
     }
 
     // Arrow Up: the button, then the Row, then SaveBar in the form screen.
+    // A selection puts focus in the comment field, where arrows edit text;
+    // the Info tab gives them back to navigation.
+    await tester.tap(
+      find.byKey(const ValueKey<String>('pinpoint.infoPanel.info')),
+    );
+    await tester.pump();
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
     await tester.pump();
     final buttonLine = lineOf(saveBarFile, 'ElevatedButton(');

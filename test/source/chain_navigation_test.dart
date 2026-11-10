@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pinpoint/pinpoint.dart';
 import 'package:pinpoint/src/overlay/highlight_painter.dart';
+import 'package:pinpoint/src/overlay/info_panel.dart';
 import 'package:pinpoint/src/overlay/inspector_overlay.dart';
 import 'package:pinpoint/src/search/pick_result.dart';
 
@@ -30,6 +31,10 @@ void main() {
     controller.startPicking();
     await tester.pump();
     await tester.tapAt(tester.getCenter(appText('Save')));
+    await tester.pump();
+    // Milestone 5: a selection puts focus in the comment field, where the
+    // arrows edit text. The Info tab gives them back to navigation.
+    await tester.tap(find.byKey(InfoPanel.infoTabKey));
     await tester.pump();
     return controller.selection.value!;
   }

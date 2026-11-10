@@ -10,6 +10,17 @@ import 'package:pinpoint/src/overlay/pick_tracker.dart';
 /// Milestone 2, build step 2: picking through the wrapper, the highlight,
 /// hover coalescing and the outline that follows its widget.
 void main() {
+  /// A selection opens the comment field (Milestone 5). Its focus
+  /// animation draws frames for about 170 ms, and its caret blinks twice a
+  /// second while it has focus. Both are the field's own; wait for the one
+  /// and stop the other, so the frame checks below see only Pinpoint's.
+  Future<void> settleCommentField(WidgetTester tester) async {
+    EditableText.debugDeterministicCursor = true;
+    addTearDown(() => EditableText.debugDeterministicCursor = false);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+  }
+
   late PinPointController controller;
 
   setUp(() => controller = PinPointController());
@@ -82,7 +93,7 @@ void main() {
       await tester.pumpWidget(host(page));
       await startPicking(tester);
       await tester.tapAt(tester.getCenter(target));
-      await tester.pump();
+      await settleCommentField(tester);
       final before = controller.selection.value!.globalRect;
 
       tester.view.physicalSize = tester.view.physicalSize * 0.5;
@@ -93,6 +104,10 @@ void main() {
       expect(after, isNot(before));
       expect(controller.selection.value!.globalRect, after);
       expect(highlight(tester), paints..rect(rect: after));
+      // On a metrics change the focused comment field scrolls its caret
+      // into view, animated over 100 ms. After that, nothing draws.
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump();
       expect(tester.binding.hasScheduledFrame, isFalse);
     });
 
@@ -212,10 +227,16 @@ void main() {
       await startPicking(tester);
       final textCenter = tester.getCenter(target);
       await tester.tapAt(textCenter);
+      await settleCommentField(tester);
       final mouse = await mouseAt(tester, textCenter);
       addTearDown(mouse.removePointer);
       await mouse.moveTo(const Offset(5, 5));
       await tester.pump();
+      await tester.pump();
+      // A mouse that connects starts a short Material animation in the
+      // panel (about 150 ms). It ends by itself; Pinpoint's per-frame work
+      // must not keep frames coming after it.
+      await tester.pump(const Duration(milliseconds: 300));
       await tester.pump();
 
       expect(controller.hovered.value, isNotNull);

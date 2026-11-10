@@ -1,7 +1,6 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pinpoint/pinpoint.dart';
 import 'package:pinpoint/src/info/widget_info.dart';
@@ -55,8 +54,10 @@ void main() {
 
     testWidgets('follows the selection up the chain', (tester) async {
       await selectSave(tester);
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      // As Arrow Up does (with the comment field unfocused, Milestone 5).
+      controller
+        ..stepSelection(up: true)
+        ..stepSelection(up: true);
       await tester.pump();
       expect(
         breadcrumbLabel(controller.selection.value!),

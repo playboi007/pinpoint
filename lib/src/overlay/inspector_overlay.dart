@@ -1,17 +1,21 @@
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
 
 import '../capture/context_collector.dart';
 import '../core/pinpoint_config.dart';
 import '../core/pinpoint_controller.dart';
 import '../model/annotation.dart';
 import '../search/source_resolver.dart';
+import '../sink/markdown_formatter.dart';
 import '../sink/pinpoint_sink.dart';
 import 'highlight_painter.dart';
 import 'info_panel.dart';
 import 'pick_tracker.dart';
 import 'ruler_painter.dart';
+import 'toast_layer.dart';
 import 'toolbar.dart';
 
 /// Pinpoint's own UI layer, painted above the app.
@@ -73,9 +77,10 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
 
   final ContextCollector _collector = ContextCollector();
 
+  final ToastController _toasts = ToastController();
+
   /// The app's focus when the mode became active, restored on return to idle.
   FocusNode? _appFocus;
-  bool _wasActive = false;
   PinPointMode _lastMode = PinPointMode.idle;
 
   late PickTracker _tracker = _newTracker();
@@ -91,6 +96,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
   void initState() {
     super.initState();
     widget.controller.addListener(_onControllerChanged);
+    _tab.addListener(_syncFocus);
   }
 
   @override
@@ -122,41 +128,85 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     _holder.dispose();
     _commentFocus.dispose();
     _tab.dispose();
+    _toasts.dispose();
     super.dispose();
   }
 
   void _onControllerChanged() {
     final mode = widget.controller.mode;
-    if (mode == PinPointMode.commenting && _lastMode == PinPointMode.picking) {
+    final previous = _lastMode;
+    if (mode == previous) return;
+    _lastMode = mode;
+    if (previous == PinPointMode.idle) _saveAppFocus();
+    if (mode == PinPointMode.commenting && previous == PinPointMode.picking) {
+      // Notifies _syncFocus when the tab changes; it runs again below.
       _tab.value = PanelTab.comment;
     }
-    _lastMode = mode;
-    final active = widget.controller.isActive;
-    if (active == _wasActive) return;
-    _wasActive = active;
-    if (active) {
-      _takeFocus();
-    } else {
-      _restoreFocus();
+    _syncFocus();
+  }
+
+  /// Puts focus where the mode and tab want it:
+  ///
+  /// - idle: back to the app's field.
+  /// - picking, or the Info tab: the holder, so keys reach no field and the
+  ///   arrow keys navigate the chain.
+  /// - commenting or sending on the Comment tab: the comment field.
+  void _syncFocus() {
+    switch (widget.controller.mode) {
+      case PinPointMode.idle:
+        _restoreFocus();
+      case PinPointMode.picking:
+        _holder.requestFocus();
+      case PinPointMode.commenting:
+      case PinPointMode.sending:
+        if (_tab.value == PanelTab.comment) {
+          _focusComment();
+        } else {
+          _holder.requestFocus();
+        }
     }
+  }
+
+  // Autofocus by hand: TextField.autofocus acts only on the field's first
+  // build, and the field stays built across Esc and a new selection. This
+  // takes focus from the app, which _restoreFocus gives back.
+  void _focusComment() {
+    if (_commentFocus.context?.mounted ?? false) {
+      _commentFocus.requestFocus();
+      return;
+    }
+    // The panel builds in the frame the mode change already scheduled.
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !(_commentFocus.context?.mounted ?? false)) return;
+      final mode = widget.controller.mode;
+      if (_tab.value == PanelTab.comment &&
+          (mode == PinPointMode.commenting || mode == PinPointMode.sending)) {
+        _commentFocus.requestFocus();
+      }
+    }, debugLabel: 'pinpoint.focusComment');
   }
 
   // A HardwareKeyboard handler sees every key but cannot stop the focused
   // field from getting it (docs/api-notes.md, item 6). Moving primary focus
   // to the holder can. Plain unfocus() is not enough: focus would move to the
   // enclosing scope and the app's Shortcuts (Tab, arrows) would still fire.
-  void _takeFocus() {
+  void _saveAppFocus() {
     final current = FocusManager.instance.primaryFocus;
-    _appFocus = identical(current, _holder) ? null : current;
-    _holder.requestFocus();
+    final ours =
+        identical(current, _holder) || identical(current, _commentFocus);
+    _appFocus = ours ? null : current;
   }
 
   void _restoreFocus() {
     final app = _appFocus;
     _appFocus = null;
+    // The comment field is inside the holder, so this is true while it has
+    // focus too.
     if (!_holder.hasFocus) return; // someone else moved focus; leave it
     // Restore only if the app's field is still in the tree. FocusNode.context
     // stays set after the node detaches, so check that it is still mounted.
+    // On mobile web, focusing a field opens the on-screen keyboard again, so
+    // a field that is gone must not be focused by mistake either.
     if (app != null && (app.context?.mounted ?? false) && app.canRequestFocus) {
       app.requestFocus();
     } else {
@@ -164,33 +214,64 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     }
   }
 
-  /// Collects the note and gives it to every sink, in order. Goes idle and
-  /// clears the comment when all of them took it; otherwise back to
-  /// commenting with the comment kept.
-  Future<void> _send() async {
+  /// The note for the selection with the draft's comment and intent, or null
+  /// after a toast that says why not.
+  Annotation? _collect() {
     final controller = widget.controller;
     final selection = controller.selection.value;
-    final draft = controller.draft;
-    if (selection == null || !draft.hasText) return;
-    if (!controller.submit()) return;
-    final Annotation note;
+    if (selection == null) return null;
     try {
       // Pinpoint's own context: the page is read above the app.
-      note = _collector.collect(
+      return _collector.collect(
         selection,
-        draft.text.text,
-        draft.intent,
+        controller.draft.text.text,
+        controller.draft.intent,
         context: context,
       );
     } catch (error) {
+      _toasts.show('Could not build the note: ${_short(error)}', error: true);
+      return null;
+    }
+  }
+
+  /// Collects the note and gives it to every sink, in order, with a toast
+  /// per sink. Goes idle and clears the comment when all of them took it;
+  /// otherwise back to commenting with the comment kept, where Copy as
+  /// Markdown still works, so the comment is never lost.
+  Future<void> _send() async {
+    final controller = widget.controller;
+    final draft = controller.draft;
+    if (controller.selection.value == null || !draft.hasText) return;
+    if (!controller.submit()) return;
+    final note = _collect();
+    if (note == null) {
       controller.sendFailed();
       return;
     }
     // Milestone 6: capture the screenshot here when
     // draft.includeScreenshot is set.
-    final results = await sendToSinks(note, widget.config.sinks);
+    final sinks = widget.config.sinks;
+    if (sinks.isEmpty) {
+      _toasts.show(
+        'No sink is set up in PinPointConfig.sinks. Use Copy as Markdown.',
+        error: true,
+      );
+      controller.sendFailed();
+      return;
+    }
+    final results = await sendToSinks(note, sinks);
     if (!mounted) return;
-    if (results.isNotEmpty && results.every((result) => result.ok)) {
+    for (final result in results) {
+      if (result.ok) {
+        _toasts.show('Sent to ${result.sink}');
+      } else {
+        _toasts.show(
+          '${result.sink} failed: ${_short(result.error!)}',
+          error: true,
+        );
+      }
+    }
+    if (results.every((result) => result.ok)) {
       draft.text.clear();
       controller.sendSucceeded();
     } else {
@@ -198,7 +279,23 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     }
   }
 
-  void _copy() {}
+  /// Puts the note on the clipboard as Markdown. Keeps the mode and the
+  /// comment.
+  Future<void> _copy() async {
+    final note = _collect();
+    if (note == null) return;
+    try {
+      await Clipboard.setData(ClipboardData(text: markdownFor(note)));
+      if (mounted) _toasts.show('Copied as Markdown');
+    } catch (error) {
+      if (mounted) _toasts.show('Copy failed: ${_short(error)}', error: true);
+    }
+  }
+
+  static String _short(Object error) {
+    final text = error.toString().replaceFirst('Exception: ', '');
+    return text.length <= 160 ? text : '${text.substring(0, 159)}…';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -268,6 +365,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
                       onSend: _send,
                       onCopy: _copy,
                     ),
+                    ToastLayer(toasts: _toasts),
                     // Above the trap, so it can always stop picking. Always
                     // offered by default: some shortcuts never reach Flutter.
                     if (widget.config.showLauncher)
