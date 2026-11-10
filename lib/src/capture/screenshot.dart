@@ -4,6 +4,26 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/widgets.dart';
+
+import '../search/render_search.dart';
+
+/// Prints how long each screenshot took, in debug. Captures over the 300 ms
+/// budget are printed anyway.
+///
+/// For the manual timing check: `flutter run -d chrome
+/// --dart-define=PINPOINT_CAPTURE_TIMINGS=true`.
+bool debugPrintCaptureTimings = const bool.fromEnvironment(
+  'PINPOINT_CAPTURE_TIMINGS',
+);
+
+/// The capture budget on a laptop. PNG encoding takes most of it, so the
+/// width cap is what keeps a capture inside it.
+const Duration captureBudget = Duration(milliseconds: 300);
+
+/// The highest pixel ratio a screenshot uses. More detail than 2x makes the
+/// PNG larger without helping the agent.
+const double maxPixelRatio = 2;
 
 /// Logical pixels kept around the target on each side.
 const double cropMargin = 48;
@@ -146,6 +166,19 @@ class Screenshot {
   final Rect crop;
 }
 
+/// Completes when the app has painted every change made so far.
+///
+/// `toImage` asserts that nothing needs paint. A change since the last frame
+/// has scheduled a frame; this waits for it. With nothing scheduled, it
+/// returns at once and forces no frame (engineering rule 2).
+Future<void> paintSettled() async {
+  final scheduler = SchedulerBinding.instance;
+  if (scheduler.hasScheduledFrame ||
+      scheduler.schedulerPhase != SchedulerPhase.idle) {
+    await scheduler.endOfFrame;
+  }
+}
+
 /// Captures [target] (global logical pixels) from the app's [boundary] at
 /// [pixelRatio], with the outline drawn on. Null when the target is not on
 /// the boundary.
@@ -157,14 +190,7 @@ Future<Screenshot?> captureScreenshot(
   Rect target, {
   required double pixelRatio,
 }) async {
-  // toImage asserts that nothing needs paint. A change since the last frame
-  // has scheduled one; wait for it. With nothing scheduled, no frame is
-  // forced.
-  final scheduler = SchedulerBinding.instance;
-  if (scheduler.hasScheduledFrame ||
-      scheduler.schedulerPhase != SchedulerPhase.idle) {
-    await scheduler.endOfFrame;
-  }
+  await paintSettled();
   if (!boundary.attached || !boundary.hasSize) return null;
 
   // Global to the boundary's own logical pixels. Today the boundary fills
@@ -223,4 +249,66 @@ Future<Screenshot?> captureScreenshot(
   } finally {
     full.dispose();
   }
+}
+
+/// The names of the debug paint flags that are on.
+///
+/// Their marks (size boxes, baselines, rainbows) are painted into the app's
+/// layers, so they show in the screenshot. The note names them rather than
+/// turning them off for one frame: that would repaint the whole app twice.
+List<String> debugPaintFlagsOn() => [
+  if (debugPaintSizeEnabled) 'debugPaintSizeEnabled',
+  if (debugPaintBaselinesEnabled) 'debugPaintBaselinesEnabled',
+  if (debugPaintTextLayoutBoxes) 'debugPaintTextLayoutBoxes',
+  if (debugPaintLayerBordersEnabled) 'debugPaintLayerBordersEnabled',
+  if (debugPaintPointersEnabled) 'debugPaintPointersEnabled',
+  if (debugRepaintRainbowEnabled) 'debugRepaintRainbowEnabled',
+  if (debugRepaintTextRainbowEnabled) 'debugRepaintTextRainbowEnabled',
+];
+
+/// Whether a platform view under [root] overlaps [crop] (global logical
+/// pixels). Null when the walk stopped at [maxNodes] first.
+///
+/// On web, platform views (`HtmlElementView`, embedded maps, iframes) are
+/// DOM elements above the canvas, so the capture shows empty areas there.
+/// Images served without CORS headers are blank too; nothing in the tree
+/// tells them apart, so they are not reported.
+bool? platformViewsIn(Element root, Rect crop, {int maxNodes = 20000}) {
+  var visited = 0;
+  var found = false;
+  var capped = false;
+  void visit(Element element) {
+    if (found || capped) return;
+    if (++visited > maxNodes) {
+      capped = true;
+      return;
+    }
+    // A widget that throws while it is read must not stop the walk
+    // (engineering rule 4).
+    try {
+      final widget = element.widget;
+      if (widget is PlatformViewLink ||
+          widget is HtmlElementView ||
+          widget is AndroidView ||
+          widget is UiKitView ||
+          widget is AppKitView) {
+        final renderObject = element.renderObject;
+        final rect = renderObject == null
+            ? null
+            : RenderSearch.globalRectOf(renderObject);
+        // An unknown rect counts: better "partial" than a silent blank.
+        if (rect == null || rect.overlaps(crop)) {
+          found = true;
+          return;
+        }
+      }
+      element.visitChildElements(visit);
+    } catch (_) {
+      // Skip this node and its subtree.
+    }
+  }
+
+  visit(root);
+  if (found) return true;
+  return capped ? null : false;
 }

@@ -88,6 +88,13 @@ void main() {
       useMaterial3: true,
       textDirection: 'ltr',
     ),
+    screenshot: const ScreenshotInfo(
+      file: 'pp_20261110_143205_a1f3.png',
+      pixelRatio: 2,
+      width: 640,
+      height: 400,
+      crop: PayloadRect(800, 558.5, 320, 200),
+    ),
     errors: const ['target.parentData'],
     truncated: const ['subtree'],
   );

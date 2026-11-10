@@ -3,6 +3,7 @@
 
 import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 /// The payload version. The receiver rejects any other value, so a change
 /// to the shape below needs a new number.
@@ -19,7 +20,8 @@ enum AnnotationIntent { bug, improve, question }
 ///
 /// [toJson] keeps a fixed shape: every key is present, with null for a part
 /// that could not be read, except [errors] and [truncated], which appear
-/// only when not empty. `test/goldens/annotation_schema.json` fixes it.
+/// only when not empty, and [screenshot], which appears only when the note
+/// has one. `test/goldens/annotation_schema.json` fixes it.
 class Annotation {
   const Annotation({
     required this.id,
@@ -34,6 +36,7 @@ class Annotation {
     this.siblings,
     this.subtree,
     this.inherited,
+    this.screenshot,
     this.errors = const <String>[],
     this.truncated = const <String>[],
   });
@@ -61,6 +64,9 @@ class Annotation {
 
   final InheritedInfo? inherited;
 
+  /// Null when "Include screenshot" was off or the capture failed.
+  final ScreenshotInfo? screenshot;
+
   /// Fields that failed to collect, for example `target.parentData`. The
   /// note is sent anyway.
   final List<String> errors;
@@ -75,6 +81,8 @@ class Annotation {
     List<String>? frameworkChain,
     SiblingsInfo? Function()? siblings,
     String? Function()? subtree,
+    ScreenshotInfo? Function()? screenshot,
+    List<String>? errors,
     List<String>? truncated,
   }) => Annotation(
     id: id,
@@ -89,9 +97,18 @@ class Annotation {
     siblings: siblings == null ? this.siblings : siblings(),
     subtree: subtree == null ? this.subtree : subtree(),
     inherited: inherited,
-    errors: errors,
+    screenshot: screenshot == null ? this.screenshot : screenshot(),
+    errors: errors ?? this.errors,
     truncated: truncated ?? this.truncated,
   );
+
+  /// This note with [shot] as its screenshot.
+  Annotation withScreenshot(ScreenshotInfo? shot) =>
+      copyWith(screenshot: () => shot);
+
+  /// This note with [field] named in [errors].
+  Annotation withError(String field) =>
+      errors.contains(field) ? this : copyWith(errors: [...errors, field]);
 
   /// This note cut until its JSON is at most [maxBytes] UTF-8 bytes.
   ///
@@ -211,7 +228,10 @@ class Annotation {
     );
   }
 
-  Map<String, Object?> toJson() => {
+  /// The note as JSON. The screenshot's PNG goes in as base64 only with
+  /// [includeScreenshotData], for a sink that wants the image (the HTTP
+  /// sink). Without it, and in the size budget, the image is left out.
+  Map<String, Object?> toJson({bool includeScreenshotData = false}) => {
     'schema': annotationSchema,
     'id': id,
     'createdAt': formatTimestamp(createdAt),
@@ -225,6 +245,8 @@ class Annotation {
     'siblings': siblings?.toJson(),
     'subtree': subtree,
     'inherited': inherited?.toJson(),
+    if (screenshot case final shot?)
+      'screenshot': shot.toJson(includeData: includeScreenshotData),
     if (errors.isNotEmpty) 'errors': errors,
     if (truncated.isNotEmpty) 'truncated': truncated,
   };
@@ -510,6 +532,55 @@ class InheritedInfo {
     'themeBrightness': themeBrightness,
     'useMaterial3': useMaterial3,
     'textDirection': textDirection,
+  };
+}
+
+/// A PNG crop of the app around the target, with the target outlined.
+class ScreenshotInfo {
+  const ScreenshotInfo({
+    required this.file,
+    required this.pixelRatio,
+    required this.width,
+    required this.height,
+    this.crop,
+    this.hasPlatformViews = false,
+    this.debugPaint = const <String>[],
+    this.png,
+  });
+
+  /// The file name the receiver writes the image to: `<id>.png`.
+  final String file;
+
+  /// Image pixels per logical pixel.
+  final double pixelRatio;
+
+  /// In image pixels.
+  final int width;
+  final int height;
+
+  /// The captured part of the screen, in global logical pixels.
+  final PayloadRect? crop;
+
+  /// True when a platform view (`HtmlElementView`, a map, an iframe) is in
+  /// the crop. On web those render as empty areas, so the image is partial.
+  final bool hasPlatformViews;
+
+  /// The debug paint flags that were on, for example
+  /// `debugPaintSizeEnabled`. Their marks are in the image.
+  final List<String> debugPaint;
+
+  /// The PNG bytes. Never in [toJson] unless asked for.
+  final Uint8List? png;
+
+  Map<String, Object?> toJson({bool includeData = false}) => {
+    'file': file,
+    'pixelRatio': jsonNumber(pixelRatio),
+    'width': width,
+    'height': height,
+    'crop': crop?.toJson(),
+    'hasPlatformViews': hasPlatformViews,
+    'debugPaint': debugPaint,
+    if (includeData && png != null) 'data': base64Encode(png!),
   };
 }
 

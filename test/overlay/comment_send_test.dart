@@ -7,6 +7,7 @@ import 'package:pinpoint/src/overlay/toast_layer.dart';
 
 import '../fixtures/save_bar_fixture.dart';
 import '../support/fake_sink.dart';
+import '../support/finish_send.dart';
 
 /// Milestone 5, build step 3: the send flow with a toast per sink.
 void main() {
@@ -57,6 +58,7 @@ void main() {
     for (var i = 0; i < 3; i++) {
       await tester.pump();
     }
+    await finishSend(tester, controller);
   }
 
   testWidgets('acceptance: with the receiver stopped, the toast reports the '

@@ -1,13 +1,18 @@
-import 'package:flutter/foundation.dart' show listEquals;
+import 'dart:math' as math;
+
+import 'package:flutter/foundation.dart' show kDebugMode, listEquals;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
 import '../capture/context_collector.dart';
+import '../capture/screenshot.dart';
 import '../core/pinpoint_config.dart';
 import '../core/pinpoint_controller.dart';
 import '../model/annotation.dart';
+import '../search/render_search.dart';
 import '../search/source_resolver.dart';
 import '../sink/markdown_formatter.dart';
 import '../sink/pinpoint_sink.dart';
@@ -243,13 +248,12 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     final draft = controller.draft;
     if (controller.selection.value == null || !draft.hasText) return;
     if (!controller.submit()) return;
-    final note = _collect();
+    var note = _collect();
     if (note == null) {
       controller.sendFailed();
       return;
     }
-    // Milestone 6: capture the screenshot here when
-    // draft.includeScreenshot is set.
+    // Before the capture: with no sink, nothing would take the image.
     final sinks = widget.config.sinks;
     if (sinks.isEmpty) {
       _toasts.show(
@@ -258,6 +262,10 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
       );
       controller.sendFailed();
       return;
+    }
+    if (draft.includeScreenshot) {
+      note = await _withScreenshot(note);
+      if (!mounted) return;
     }
     final results = await sendToSinks(note, sinks);
     if (!mounted) return;
@@ -277,6 +285,82 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     } else {
       controller.sendFailed();
     }
+  }
+
+  /// [note] with a screenshot of the selection. When the capture fails, the
+  /// note goes without one, names `screenshot` in its errors, and a toast
+  /// says why: the comment matters more than the image.
+  Future<Annotation> _withScreenshot(Annotation note) async {
+    final watch = Stopwatch()..start();
+    try {
+      final boundary = widget.appKey.currentContext?.findRenderObject();
+      if (boundary is! RenderRepaintBoundary) {
+        throw StateError('the app boundary is missing');
+      }
+      // Read the rect from the frame that is captured.
+      await paintSettled();
+      if (!mounted) return note;
+      final selection = widget.controller.selection.value;
+      final rect = selection == null
+          ? null
+          : RenderSearch.globalRectOf(selection.renderObject);
+      final ratio = math.min(
+        MediaQuery.devicePixelRatioOf(context),
+        maxPixelRatio,
+      );
+      final shot = rect == null
+          ? null
+          : await captureScreenshot(
+              boundary,
+              rect,
+              pixelRatio: ratio,
+            ).timeout(const Duration(seconds: 5));
+      if (shot == null) {
+        if (mounted) {
+          _toasts.show('No screenshot: the widget is off screen', error: true);
+        }
+        return note.withError('screenshot');
+      }
+      // Read after the capture's awaits, so it is the tree just captured.
+      final content = widget.contentKey.currentContext;
+      bool? views;
+      if (content != null && content.mounted) {
+        views = platformViewsIn(content as Element, shot.crop);
+      }
+      final crop = shot.crop;
+      var result = note.withScreenshot(
+        ScreenshotInfo(
+          file: '${note.id}.png',
+          pixelRatio: shot.plan.pixelRatio,
+          width: shot.plan.width,
+          height: shot.plan.height,
+          crop: PayloadRect(crop.left, crop.top, crop.width, crop.height),
+          hasPlatformViews: views ?? false,
+          debugPaint: debugPaintFlagsOn(),
+          png: shot.png,
+        ),
+      );
+      if (views == null) {
+        result = result.withError('screenshot.hasPlatformViews');
+      }
+      _printTiming(watch.elapsed, shot);
+      return result;
+    } catch (error) {
+      if (mounted) {
+        _toasts.show('No screenshot: ${_short(error)}', error: true);
+      }
+      return note.withError('screenshot');
+    }
+  }
+
+  static void _printTiming(Duration elapsed, Screenshot shot) {
+    if (!kDebugMode) return;
+    if (!debugPrintCaptureTimings && elapsed <= captureBudget) return;
+    debugPrint(
+      'pinpoint: screenshot ${shot.plan.width}x${shot.plan.height} '
+      '(${(shot.png.length / 1024).toStringAsFixed(0)} KB) in '
+      '${elapsed.inMilliseconds} ms',
+    );
   }
 
   /// Puts the note on the clipboard as Markdown. Keeps the mode and the

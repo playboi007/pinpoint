@@ -62,6 +62,15 @@
     "useMaterial3": true,
     "textDirection": "ltr"
   },
+  "screenshot": {
+    "file": "pp_20261110_143205_a1f3.png",
+    "pixelRatio": 2,
+    "width": 640,
+    "height": 400,
+    "crop": { "x": 800, "y": 558.5, "w": 320, "h": 200 },
+    "hasPlatformViews": false,
+    "debugPaint": []
+  },
   "errors": ["target.parentData"],
   "truncated": ["subtree"]
 }

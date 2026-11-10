@@ -20,6 +20,7 @@ export 'src/model/annotation.dart'
         PageInfo,
         PayloadRect,
         PayloadSize,
+        ScreenshotInfo,
         SiblingsInfo,
         SourceRef,
         TargetInfo;

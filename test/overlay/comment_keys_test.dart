@@ -7,6 +7,7 @@ import 'package:pinpoint/src/overlay/comment_form.dart';
 import 'package:pinpoint/src/overlay/info_panel.dart';
 
 import '../support/fake_sink.dart';
+import '../support/finish_send.dart';
 
 /// Milestone 5, build step 3: keyboard and focus in the comment panel.
 void main() {
@@ -78,6 +79,7 @@ void main() {
     await tester.sendKeyUpEvent(modifier);
     await tester.pump();
     await tester.pump();
+    await finishSend(tester, controller);
   }
 
   testWidgets('a new selection puts focus in the comment field', (
@@ -230,6 +232,7 @@ void main() {
       await tester.tap(find.byKey(CommentForm.sendKey));
       await tester.pump();
       await tester.pump();
+      await finishSend(tester, controller);
       expect(controller.mode, PinPointMode.idle);
       expect(appField.hasPrimaryFocus, isTrue);
     });
@@ -258,6 +261,7 @@ void main() {
       await tester.tap(find.byKey(CommentForm.sendKey));
       await tester.pump();
       await tester.pump();
+      await finishSend(tester, controller);
       expect(controller.mode, PinPointMode.idle);
       expect(appField.hasFocus, isFalse);
       expect(tester.takeException(), isNull);

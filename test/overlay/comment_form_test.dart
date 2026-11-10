@@ -9,6 +9,7 @@ import 'package:pinpoint/src/overlay/info_panel.dart';
 
 import '../fixtures/save_bar_fixture.dart';
 import '../support/fake_sink.dart';
+import '../support/finish_send.dart';
 
 /// Milestone 5, build step 2: the comment form as a tab of the info panel,
 /// driven by a fake sink.
@@ -60,6 +61,7 @@ void main() {
     for (var i = 0; i < 3; i++) {
       await tester.pump();
     }
+    await finishSend(tester, controller);
   }
 
   testWidgets('a click opens the Comment tab with the plan contents in order', (
