@@ -23,12 +23,8 @@ void main() {
     PinPointMode mode, {
     KeyModifiers modifiers = none,
     PinPointShortcut shortcut = PinPointShortcut.altShiftC,
-  }) => keyActionFor(
-    event,
-    mode: mode,
-    shortcut: shortcut,
-    modifiers: modifiers,
-  );
+  }) =>
+      keyActionFor(event, mode: mode, shortcut: shortcut, modifiers: modifiers);
 
   group('shortcut', () {
     test('Alt+Shift+C toggles in every mode', () {
@@ -145,6 +141,85 @@ void main() {
         ),
         isNull,
       );
+    });
+  });
+
+  group('chain navigation (Milestone 3)', () {
+    const alt = (alt: true, shift: false, control: false, meta: false);
+    final up = down(LogicalKeyboardKey.arrowUp, PhysicalKeyboardKey.arrowUp);
+    final arrowDown = down(
+      LogicalKeyboardKey.arrowDown,
+      PhysicalKeyboardKey.arrowDown,
+    );
+    final open = down(
+      LogicalKeyboardKey.bracketLeft,
+      PhysicalKeyboardKey.bracketLeft,
+    );
+    final close = down(
+      LogicalKeyboardKey.bracketRight,
+      PhysicalKeyboardKey.bracketRight,
+    );
+    const selecting = [PinPointMode.picking, PinPointMode.commenting];
+
+    test('Arrow Up and [ go to the next local ancestor', () {
+      for (final mode in selecting) {
+        expect(action(up, mode), KeyAction.chainUp);
+        expect(action(open, mode), KeyAction.chainUp);
+      }
+    });
+
+    test('Arrow Down and ] go back toward the picked widget', () {
+      for (final mode in selecting) {
+        expect(action(arrowDown, mode), KeyAction.chainDown);
+        expect(action(close, mode), KeyAction.chainDown);
+      }
+    });
+
+    test('Alt plus an arrow steps through the full chain', () {
+      for (final mode in selecting) {
+        expect(action(up, mode, modifiers: alt), KeyAction.chainUpAll);
+        expect(action(arrowDown, mode, modifiers: alt), KeyAction.chainDownAll);
+      }
+    });
+
+    test('brackets match the physical key on other layouts', () {
+      // On a German layout the key right of P types "ü".
+      final umlaut = down(
+        const LogicalKeyboardKey(0x000000fc),
+        PhysicalKeyboardKey.bracketLeft,
+      );
+      expect(action(umlaut, PinPointMode.picking), KeyAction.chainUp);
+    });
+
+    test('left to the app in idle and while sending', () {
+      for (final mode in [PinPointMode.idle, PinPointMode.sending]) {
+        expect(action(up, mode), isNull);
+        expect(action(open, mode), isNull);
+        expect(action(up, mode, modifiers: alt), isNull);
+      }
+    });
+
+    test('other modifiers do not match', () {
+      expect(
+        action(
+          up,
+          PinPointMode.picking,
+          modifiers: (alt: false, shift: true, control: false, meta: false),
+        ),
+        isNull,
+      );
+      expect(action(open, PinPointMode.picking, modifiers: alt), isNull);
+    });
+
+    test('repeats match, so holding a key keeps moving', () {
+      final repeat = KeyRepeatEvent(
+        logicalKey: LogicalKeyboardKey.arrowUp,
+        physicalKey: PhysicalKeyboardKey.arrowUp,
+        timeStamp: Duration.zero,
+      );
+      expect(action(repeat, PinPointMode.picking), KeyAction.chainUp);
+      expect(KeyAction.chainUp.repeats, isTrue);
+      expect(KeyAction.toggle.repeats, isFalse);
     });
   });
 

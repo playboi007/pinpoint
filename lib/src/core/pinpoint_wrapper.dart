@@ -95,8 +95,9 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
       modifiers: modifiersOf(HardwareKeyboard.instance),
     );
     if (action == null) return false;
-    // Act once per press; repeats are still claimed below.
-    if (event is KeyDownEvent) {
+    // Act once per press, except navigation, which a held key repeats.
+    // Repeats are claimed either way, below.
+    if (event is KeyDownEvent || (event is KeyRepeatEvent && action.repeats)) {
       switch (action) {
         case KeyAction.toggle:
           _controller.toggle();
@@ -104,6 +105,14 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
           _controller.back();
         case KeyAction.freeze:
           _controller.toggleFreeze();
+        case KeyAction.chainUp:
+          _controller.stepSelection(up: true);
+        case KeyAction.chainDown:
+          _controller.stepSelection(up: false);
+        case KeyAction.chainUpAll:
+          _controller.stepSelection(up: true, localOnly: false);
+        case KeyAction.chainDownAll:
+          _controller.stepSelection(up: false, localOnly: false);
       }
     }
     // True only for Pinpoint's own keys. It does not stop the app's focused

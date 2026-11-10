@@ -167,6 +167,21 @@ class PinPointController extends ChangeNotifier {
     }
   }
 
+  /// Moves the selection along its chain: to the next local widget above
+  /// it when [up], else back toward the picked widget. With [localOnly]
+  /// false, one step in the full chain, framework widgets included.
+  ///
+  /// Returns whether the selection changed. Does nothing without a
+  /// selection, or at the end of the chain.
+  bool stepSelection({required bool up, bool localOnly = true}) {
+    final current = _selection.value;
+    if (current == null) return false;
+    final next = current.stepped(up: up, localOnly: localOnly);
+    if (identical(next, current)) return false;
+    _selection.value = next;
+    return true;
+  }
+
   /// Pauses or resumes the app's tickers.
   void toggleFreeze() {
     _frozen = !_frozen;

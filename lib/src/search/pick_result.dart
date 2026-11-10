@@ -28,6 +28,7 @@ class PickResult {
     required this.ancestor,
     required this.ancestorRect,
     required this.sourceUnavailable,
+    required this._root,
   });
 
   /// A result built by hand, for tests that need no render tree. The chain
@@ -52,6 +53,7 @@ class PickResult {
     ancestor: ancestor,
     ancestorRect: ancestorRect,
     sourceUnavailable: true,
+    root: null,
   );
 
   /// Builds a result from [search] at [position].
@@ -135,6 +137,7 @@ class PickResult {
       ancestor: ancestor?.$1,
       ancestorRect: ancestor?.$2,
       sourceUnavailable: sourceUnavailable,
+      root: root,
     );
   }
 
@@ -174,6 +177,10 @@ class PickResult {
   /// debug, or for a widget built entirely by the framework. The selection
   /// is then the picked element itself.
   final bool sourceUnavailable;
+
+  /// The app's root render object, where the rulers' render-ancestor walk
+  /// stops.
+  final RenderObject? _root;
 
   /// The selected entry of [chain].
   ChainEntry get entry => chain[chainIndex];
@@ -218,6 +225,29 @@ class PickResult {
       ancestor: parent,
       ancestorRect: parentRect,
       sourceUnavailable: sourceUnavailable,
+      root: _root,
+    );
+  }
+
+  /// This result with another entry of [chain] selected: the next local
+  /// one above when [up], else the next local one below. With [localOnly]
+  /// false, the next entry either way, framework widgets included.
+  ///
+  /// The same instance when there is none, or its element is gone.
+  PickResult stepped({required bool up, bool localOnly = true}) {
+    final target = localOnly
+        ? chain.nextLocal(chainIndex, up: up)
+        : chainIndex + (up ? 1 : -1);
+    if (target == null || target < 0 || target >= chain.length) return this;
+    if (!chain.elements[target].mounted) return this;
+    return _build(
+      position: position,
+      candidates: candidates,
+      index: index,
+      chain: chain,
+      chainIndex: target,
+      sourceUnavailable: sourceUnavailable,
+      root: _root,
     );
   }
 

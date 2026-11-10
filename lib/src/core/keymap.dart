@@ -96,6 +96,27 @@ enum KeyAction {
 
   /// Pause or resume the app's tickers (P).
   freeze,
+
+  /// Select the next local ancestor (Arrow Up or `[`).
+  chainUp,
+
+  /// Select the next local widget back toward the picked one (Arrow Down or
+  /// `]`).
+  chainDown,
+
+  /// Select the parent in the full chain, framework widgets included
+  /// (Alt+Arrow Up).
+  chainUpAll,
+
+  /// Select the child in the full chain (Alt+Arrow Down).
+  chainDownAll;
+
+  /// Whether a held key repeats the action. Navigation does; toggling,
+  /// going back and freezing act once per press.
+  bool get repeats => switch (this) {
+    chainUp || chainDown || chainUpAll || chainDownAll => true,
+    toggle || back || freeze => false,
+  };
 }
 
 /// The action for [event] in [mode], or null when the key is not Pinpoint's.
@@ -112,8 +133,31 @@ KeyAction? keyActionFor(
   if (event is KeyUpEvent) return null;
   if (shortcut.matches(event, modifiers)) return KeyAction.toggle;
 
+  // Chain navigation needs a selection, which exists only while picking or
+  // commenting. Milestone 5: while the comment field has focus, arrow keys
+  // must edit its text, so navigation in commenting uses the breadcrumb
+  // only. Turn these off there when the field exists.
+  final selecting =
+      mode == PinPointMode.picking || mode == PinPointMode.commenting;
+  final altOnly =
+      modifiers.alt &&
+      !modifiers.shift &&
+      !modifiers.control &&
+      !modifiers.meta;
+  if (selecting && altOnly) {
+    if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+      return KeyAction.chainUpAll;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+      return KeyAction.chainDownAll;
+    }
+  }
+
   final plain =
-      !modifiers.alt && !modifiers.shift && !modifiers.control && !modifiers.meta;
+      !modifiers.alt &&
+      !modifiers.shift &&
+      !modifiers.control &&
+      !modifiers.meta;
   if (!plain) return null;
 
   if (mode != PinPointMode.idle &&
@@ -125,6 +169,20 @@ KeyAction? keyActionFor(
       (event.logicalKey == LogicalKeyboardKey.keyP ||
           event.physicalKey == PhysicalKeyboardKey.keyP)) {
     return KeyAction.freeze;
+  }
+  if (selecting) {
+    // Brackets also by physical key: on other layouts the key types
+    // another character.
+    if (event.logicalKey == LogicalKeyboardKey.arrowUp ||
+        event.logicalKey == LogicalKeyboardKey.bracketLeft ||
+        event.physicalKey == PhysicalKeyboardKey.bracketLeft) {
+      return KeyAction.chainUp;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowDown ||
+        event.logicalKey == LogicalKeyboardKey.bracketRight ||
+        event.physicalKey == PhysicalKeyboardKey.bracketRight) {
+      return KeyAction.chainDown;
+    }
   }
   return null;
 }
