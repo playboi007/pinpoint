@@ -43,7 +43,7 @@ class BridgeStartException implements Exception {
 /// server-sent events) with the tools of [McpServer].
 class PinPointBridge {
   PinPointBridge._(this._server, this.store, this._allowedOrigins, this._log)
-    : _mcp = McpServer(store) {
+    : _mcp = McpServer(store, log: _log) {
     _subscription = _server.listen(_handle);
   }
 

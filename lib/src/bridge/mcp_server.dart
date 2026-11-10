@@ -31,9 +31,10 @@ const int mcpMaxListed = 50;
 /// Drafts are invisible here: no tool lists, reads or changes one, so
 /// half-written feedback never triggers an edit.
 class McpServer {
-  McpServer(this.store, {this.version = '0.0.1'});
+  McpServer(this.store, {this.version = '0.0.1', this._log = _noLog});
 
   final NoteStore store;
+  final void Function(String line) _log;
 
   /// Reported as `serverInfo.version`.
   final String version;
@@ -278,6 +279,10 @@ class McpServer {
       message: message as String?,
       from: 'agent',
     );
+    _log(
+      'pinpoint: the agent set $id to ${note['status']}'
+      '${message == null ? '' : ': $message'}',
+    );
     return _text(
       'Note $id is ${note['status']}.\n\n'
       '${noteText(note, NoteDetail.compact)}',
@@ -327,6 +332,8 @@ class McpServer {
     'error': {'code': code, 'message': message},
   };
 }
+
+void _noLog(String line) {}
 
 class _InvalidParams implements Exception {
   const _InvalidParams(this.message);

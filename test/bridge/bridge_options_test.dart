@@ -75,7 +75,7 @@ void main() {
   test('nothing bin/ imports uses dart:ui or package:flutter', () {
     // A plain Dart process (`dart run pinpoint:bridge`) cannot load them.
     final seen = <String>{};
-    final pending = <String>['bin/bridge.dart'];
+    final pending = <String>['bin/bridge.dart', 'bin/setup.dart'];
     final bad = <String>[];
     final import = RegExp(
       r'''^(?:import|export)\s+['"]([^'"]+)['"]''',
@@ -99,5 +99,7 @@ void main() {
     expect(bad, isEmpty);
     expect(seen, contains('lib/src/bridge/bridge_server.dart'));
     expect(seen, contains('lib/src/sink/markdown_formatter.dart'));
+    expect(seen, contains('lib/src/bridge/mcp_server.dart'));
+    expect(seen, contains('lib/src/bridge/setup.dart'));
   });
 }
