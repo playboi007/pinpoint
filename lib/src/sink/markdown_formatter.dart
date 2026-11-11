@@ -85,6 +85,7 @@ String markdownFromJson(Map<String, Object?> json) {
   if (pageParts.isNotEmpty) out.writeln('Page: ${_line(pageParts.join('  '))}');
   if (whatIfLine(json['environment']) case final whatIf?) out.writeln(whatIf);
   findingLines(json).forEach(out.writeln);
+  tweakLines(json).forEach(out.writeln);
 
   final rect = _map(target['rect']);
   final x = _number(rect['x']);
@@ -122,6 +123,7 @@ String markdownFromJson(Map<String, Object?> json) {
     ];
     out.writeln(
       'Screenshot: ${_line(file)}'
+      '${shot['beforeAfter'] == true ? ' (left: before the tweaks, right: after)' : ''}'
       '${shot['hasPlatformViews'] == true ? ' (platform views show blank)' : ''}'
       '${debugPaint.isEmpty ? '' : ' (debug paint on: ${_line(debugPaint.join(', '))})'}',
     );
@@ -209,6 +211,42 @@ List<String> findingLines(Map<String, Object?> json) {
       _line('Found: $kind${severity == null ? '' : ' ($severity)'}: $summary'),
     if (checks.isNotEmpty) _line('Checks: ${checks.join(', ')}'),
   ];
+}
+
+/// What the agent is to do with a note's tweaks (plan Milestone 11, step
+/// 10).
+const String tweakInstruction =
+    'Apply these as source changes. A value may come from a theme or design '
+    'token; change the token only if every use should change.';
+
+/// A note's tweaks: the instruction, then one line per edit, for example
+/// `- padding: EdgeInsets.all(8.0) -> EdgeInsets.all(16.0) (RenderPadding
+/// from Padding, in Container at lib/widgets/save_bar.dart:31:12)`. Empty
+/// without tweaks; a malformed one is skipped.
+List<String> tweakLines(Map<String, Object?> json) {
+  final lines = <String>[];
+  for (final item in _list(json['tweaks'])) {
+    final tweak = _map(item);
+    final property = _string(tweak['property']);
+    final from = _string(tweak['from']);
+    final to = _string(tweak['to']);
+    if (property == null || from == null || to == null) continue;
+    final local = _map(tweak['nearestLocal']);
+    final widget = _string(local['widget']);
+    final where = _where(local['source'], column: true);
+    final maker = [
+      ?_string(tweak['renderType']),
+      if (_string(tweak['createdBy']) case final by?) 'from $by',
+    ].join(' ');
+    final made = [
+      if (maker.isNotEmpty) maker,
+      if (widget != null) where == null ? 'in $widget' : 'in $widget at $where',
+    ].join(', ');
+    lines.add(
+      _line('- $property: $from -> $to${made.isEmpty ? '' : ' ($made)'}'),
+    );
+  }
+  return lines.isEmpty ? lines : ['Tweaks: $tweakInstruction', ...lines];
 }
 
 /// `tap_target_min (min 48)`: the type, then its other fields.

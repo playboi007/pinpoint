@@ -1,5 +1,5 @@
 {
-  "schema": 4,
+  "schema": 5,
   "id": "pp_20261110_143205_a1f3",
   "createdAt": "2026-11-10T14:32:05Z",
   "status": "submitted",
@@ -109,6 +109,7 @@
     "crop": null,
     "hasPlatformViews": false,
     "debugPaint": [],
+    "beforeAfter": false,
     "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4b23wHwAGEQJq+GwfDQAAAABJRU5ErkJggg=="
   }
 }

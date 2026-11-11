@@ -13,7 +13,8 @@ import '../sink/markdown_formatter.dart';
 /// 2 (Milestone 8): `status`, `anchor`, `messages` and `app.origin`.
 /// 3 (Milestone 9): `environment`, the what-if overrides.
 /// 4 (Milestone 10): `finding` and `checks`, for a note made from a finding.
-const int annotationSchema = 4;
+/// 5 (Milestone 11): `tweaks`, the live edits, and `screenshot.beforeAfter`.
+const int annotationSchema = 5;
 
 /// Largest JSON for a note, without the screenshot, in UTF-8 bytes.
 const int maxPayloadBytes = 8 * 1024;
@@ -101,8 +102,9 @@ class NoteMessage {
 /// that could not be read, except [errors] and [truncated], which appear
 /// only when not empty, [screenshot], which appears only when the note
 /// has one, [environment], which appears only while a what-if override
-/// is active, and [finding] and [checks], which appear only on a note made
-/// from a finding. `test/goldens/annotation_schema.json` fixes it.
+/// is active, [finding] and [checks], which appear only on a note made
+/// from a finding, and [tweaks], which appear only while a tweak is active.
+/// `test/goldens/annotation_schema.json` fixes it.
 class Annotation {
   const Annotation({
     required this.id,
@@ -123,6 +125,7 @@ class Annotation {
     this.environment,
     this.finding,
     this.checks = const <Map<String, Object?>>[],
+    this.tweaks = const <Map<String, Object?>>[],
     this.screenshot,
     this.errors = const <String>[],
     this.truncated = const <String>[],
@@ -175,6 +178,11 @@ class Annotation {
   /// example `{type: no_overflow}`. Empty for a note written by hand.
   final List<Map<String, Object?>> checks;
 
+  /// The live edits on screen when the note was filed (`Tweak.toJson`):
+  /// `renderType`, `property`, `from`, `to`, `createdBy` and
+  /// `nearestLocal`, for the agent to apply in source. Empty without any.
+  final List<Map<String, Object?>> tweaks;
+
   /// Null when "Include screenshot" was off or the capture failed.
   final ScreenshotInfo? screenshot;
 
@@ -200,6 +208,7 @@ class Annotation {
     Map<String, Object?>? Function()? environment,
     Map<String, Object?>? Function()? finding,
     List<Map<String, Object?>>? checks,
+    List<Map<String, Object?>>? tweaks,
     List<String>? errors,
     List<String>? truncated,
   }) => Annotation(
@@ -221,6 +230,7 @@ class Annotation {
     environment: environment == null ? this.environment : environment(),
     finding: finding == null ? this.finding : finding(),
     checks: checks ?? this.checks,
+    tweaks: tweaks ?? this.tweaks,
     screenshot: screenshot == null ? this.screenshot : screenshot(),
     errors: errors ?? this.errors,
     truncated: truncated ?? this.truncated,
@@ -392,6 +402,14 @@ class Annotation {
         for (final check in _listOrEmpty(json['checks']))
           if (check is Map<String, Object?> && check['type'] is String) check,
       ],
+      tweaks: [
+        for (final tweak in _listOrEmpty(json['tweaks']))
+          if (tweak is Map<String, Object?> &&
+              tweak['property'] is String &&
+              tweak['from'] is String &&
+              tweak['to'] is String)
+            tweak,
+      ],
       target: TargetInfo._fromJson(target),
       anchor: json['anchor'] is Map<String, Object?>
           ? NoteAnchor.fromJson(json['anchor']! as Map<String, Object?>)
@@ -443,6 +461,7 @@ class Annotation {
     if (environment case final env? when env.isNotEmpty) 'environment': env,
     'finding': ?finding,
     if (checks.isNotEmpty) 'checks': checks,
+    if (tweaks.isNotEmpty) 'tweaks': tweaks,
     'target': target.toJson(),
     'anchor': anchor?.toJson(),
     'messages': [for (final m in messages) m.toJson()],
@@ -829,6 +848,7 @@ class ScreenshotInfo {
     this.crop,
     this.hasPlatformViews = false,
     this.debugPaint = const <String>[],
+    this.beforeAfter = false,
     this.png,
   });
 
@@ -840,6 +860,7 @@ class ScreenshotInfo {
     crop: PayloadRect._fromJson(json['crop']),
     hasPlatformViews: json['hasPlatformViews'] == true,
     debugPaint: _strings(json['debugPaint']),
+    beforeAfter: json['beforeAfter'] == true,
   );
 
   /// The file name the receiver writes the image to: `<id>.png`.
@@ -863,6 +884,10 @@ class ScreenshotInfo {
   /// `debugPaintSizeEnabled`. Their marks are in the image.
   final List<String> debugPaint;
 
+  /// True when the image is two crops side by side: on the left the screen
+  /// without the note's tweaks, on the right with them.
+  final bool beforeAfter;
+
   /// The PNG bytes. Never in [toJson] unless asked for.
   final Uint8List? png;
 
@@ -874,6 +899,7 @@ class ScreenshotInfo {
     'crop': crop?.toJson(),
     'hasPlatformViews': hasPlatformViews,
     'debugPaint': debugPaint,
+    'beforeAfter': beforeAfter,
     if (includeData && png != null) 'data': base64Encode(png!),
   };
 }

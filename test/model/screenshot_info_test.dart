@@ -53,6 +53,7 @@ void main() {
       'crop': {'x': 10, 'y': 20, 'w': 320, 'h': 200},
       'hasPlatformViews': false,
       'debugPaint': ['debugPaintSizeEnabled'],
+      'beforeAfter': false,
     });
   });
 

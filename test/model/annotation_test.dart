@@ -123,9 +123,9 @@ void main() {
     expect(actual, expected);
   });
 
-  test('schema is version 4 and keys come in a fixed order', () {
+  test('schema is version 5 and keys come in a fixed order', () {
     final json = example().toJson();
-    expect(json['schema'], 4);
+    expect(json['schema'], 5);
     expect(json.keys.take(6), [
       'schema',
       'id',

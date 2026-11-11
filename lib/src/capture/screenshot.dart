@@ -296,6 +296,89 @@ Future<Screenshot?> captureScreenshot(
   }
 }
 
+/// Logical pixels between the two halves of a before and after image.
+const double pairGap = 8;
+
+/// [before] and [after] (PNGs of the same crop) side by side, [gap] image
+/// pixels apart, each with a small label at its top-left: one image for a
+/// note with tweaks. The agent reads "left: before, right: after" in the
+/// note's text as well.
+///
+/// Returns the PNG and its size, or null when an image cannot be read.
+Future<(Uint8List, int, int)?> sideBySide(
+  Uint8List before,
+  Uint8List after, {
+  required double gap,
+}) async {
+  final images = <ui.Image>[];
+  // Every image and picture made here is disposed, on every path.
+  try {
+    for (final png in [before, after]) {
+      final codec = await ui.instantiateImageCodec(png);
+      try {
+        images.add((await codec.getNextFrame()).image);
+      } finally {
+        codec.dispose();
+      }
+    }
+    final width = (images[0].width + gap + images[1].width).round();
+    final height = math.max(images[0].height, images[1].height);
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder)
+      ..drawRect(
+        Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble()),
+        Paint()..color = const Color(0xFFFFFFFF),
+      );
+    final scale = math.max(images[0].height / 200, 1).toDouble();
+    var left = 0.0;
+    for (final (i, image) in images.indexed) {
+      canvas.drawImage(image, Offset(left, 0), Paint());
+      _label(canvas, i == 0 ? 'before' : 'after', Offset(left, 0), scale);
+      left += image.width + gap;
+    }
+    final picture = recorder.endRecording();
+    final ui.Image out;
+    try {
+      out = await picture.toImage(width, height);
+    } finally {
+      picture.dispose();
+    }
+    try {
+      final bytes = await out.toByteData(format: ui.ImageByteFormat.png);
+      if (bytes == null) return null;
+      return (
+        bytes.buffer.asUint8List(bytes.offsetInBytes, bytes.lengthInBytes),
+        width,
+        height,
+      );
+    } finally {
+      out.dispose();
+    }
+  } finally {
+    for (final image in images) {
+      image.dispose();
+    }
+  }
+}
+
+void _label(Canvas canvas, String text, Offset at, double scale) {
+  final painter = TextPainter(
+    text: TextSpan(
+      text: text,
+      style: TextStyle(color: const Color(0xFFFFFFFF), fontSize: 11 * scale),
+    ),
+    textDirection: TextDirection.ltr,
+  )..layout();
+  final pad = 3 * scale;
+  canvas.drawRect(
+    Rect.fromLTWH(at.dx, at.dy, painter.width + 2 * pad, painter.height + pad),
+    Paint()..color = const Color(0xCC000000),
+  );
+  painter
+    ..paint(canvas, at + Offset(pad, pad / 2))
+    ..dispose();
+}
+
 /// The names of the debug paint flags that are on.
 ///
 /// Their marks (size boxes, baselines, rainbows) are painted into the app's

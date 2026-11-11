@@ -81,6 +81,9 @@ class TweakSession extends ChangeNotifier {
   /// More resets than this in a second mark an edit as animating.
   static const int maxResetsPerSecond = 5;
 
+  /// The most edits a note lists; more are named in its `truncated`.
+  static const int maxInNote = 20;
+
   final List<Tweak> _tweaks = <Tweak>[];
   final ValueNotifier<List<Rect>> _outlines = ValueNotifier<List<Rect>>(
     const <Rect>[],
@@ -222,7 +225,7 @@ class TweakSession extends ChangeNotifier {
   }
 
   /// The notes' diff: one from-and-to pair per edit, at most [max].
-  List<Map<String, Object?>> toJson({int max = 20}) => [
+  List<Map<String, Object?>> toJson({int max = maxInNote}) => [
     for (final tweak in _tweaks.take(max)) tweak.toJson(),
   ];
 

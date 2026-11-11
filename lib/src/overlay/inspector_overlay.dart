@@ -27,6 +27,7 @@ import '../sink/http_sink.dart';
 import '../sink/markdown_formatter.dart';
 import '../sink/pinpoint_sink.dart';
 import '../tweak/tweak_scope.dart';
+import '../tweak/tweak_session.dart';
 import 'environment_panel.dart';
 import 'findings_panel.dart';
 import 'highlight_painter.dart';
@@ -405,13 +406,22 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     if (selection == null) return null;
     try {
       // Pinpoint's own context: the page is read above the app.
-      return _collector.collect(
+      final note = _collector.collect(
         selection,
         controller.draft.text.text,
         controller.draft.intent,
         context: context,
         environment: controller.environment.toJson(),
       );
+      // Every edit on screen, not only the selected widget's: the note says
+      // how the screen should look.
+      final tweaks = controller.tweaks;
+      if (tweaks.isEmpty) return note;
+      final cut = tweaks.length > TweakSession.maxInNote;
+      final withTweaks = note.copyWith(tweaks: tweaks.toJson());
+      return cut
+          ? withTweaks.copyWith(truncated: [...withTweaks.truncated, 'tweaks'])
+          : withTweaks;
     } catch (error) {
       _toasts.show('Could not build the note: ${_short(error)}', error: true);
       return null;
@@ -444,7 +454,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
       return;
     }
     if (draft.includeScreenshot) {
-      note = await _withScreenshot(note);
+      note = await _withScreenshot(note, pair: note.tweaks.isNotEmpty);
       if (!mounted) return;
     }
     final results = await sendToSinks(note, sinks);
@@ -485,7 +495,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
       return;
     }
     if (draft.includeScreenshot) {
-      note = await _withScreenshot(note);
+      note = await _withScreenshot(note, pair: note.tweaks.isNotEmpty);
       if (!mounted) return;
     }
     _pin(note, selection);
@@ -726,9 +736,13 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
   /// [note] with a screenshot of the selection. When the capture fails, the
   /// note goes without one, names `screenshot` in its errors, and a toast
   /// says why: the comment matters more than the image.
+  ///
+  /// With [pair], the image is the crop without the tweaks on the left and
+  /// with them on the right (plan Milestone 11, step 11).
   Future<Annotation> _withScreenshot(
     Annotation note, {
     RenderObject? target,
+    bool pair = false,
   }) async {
     final watch = Stopwatch()..start();
     try {
@@ -742,12 +756,18 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
       final selection = widget.controller.selection.value;
       final shown = target ?? selection?.renderObject;
       final rect = shown == null ? null : RenderSearch.globalRectOf(shown);
+      final ratio = MediaQuery.devicePixelRatioOf(context);
+      if (pair && rect != null && shown != null) {
+        final paired = await _captureTweakPair(boundary, shown, rect, ratio);
+        if (!mounted) return note;
+        if (paired != null) return _noteWithShot(note, paired, watch);
+      }
       final shot = rect == null
           ? null
           : await captureScreenshot(
               boundary,
               rect,
-              pixelRatio: MediaQuery.devicePixelRatioOf(context),
+              pixelRatio: ratio,
               maxWidth: widget.config.maxScreenshotWidth,
             ).timeout(const Duration(seconds: 5));
       if (shot == null) {
@@ -756,36 +776,110 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
         }
         return note.withError('screenshot');
       }
-      // Read after the capture's awaits, so it is the tree just captured.
-      final content = widget.contentKey.currentContext;
-      bool? views;
-      if (content != null && content.mounted) {
-        views = platformViewsIn(content as Element, shot.crop);
-      }
-      final crop = shot.crop;
-      var result = note.withScreenshot(
-        ScreenshotInfo(
-          file: '${note.id}.png',
-          pixelRatio: shot.plan.pixelRatio,
-          width: shot.plan.width,
-          height: shot.plan.height,
-          crop: PayloadRect(crop.left, crop.top, crop.width, crop.height),
-          hasPlatformViews: views ?? false,
-          debugPaint: debugPaintFlagsOn(),
-          png: shot.png,
-        ),
-      );
-      if (views == null) {
-        result = result.withError('screenshot.hasPlatformViews');
-      }
-      _printTiming(watch.elapsed, shot);
-      return result;
+      return _noteWithShot(note, (
+        shot,
+        shot.png,
+        shot.plan.width,
+        shot.plan.height,
+        false,
+      ), watch);
     } catch (error) {
       if (mounted) {
         _toasts.show('No screenshot: ${_short(error)}', error: true);
       }
       return note.withError('screenshot');
     }
+  }
+
+  /// [note] with [taken] as its screenshot: the capture, the PNG to send,
+  /// its size, and whether it is a before and after pair.
+  Annotation _noteWithShot(
+    Annotation note,
+    (Screenshot, Uint8List, int, int, bool) taken,
+    Stopwatch watch,
+  ) {
+    final (shot, png, width, height, beforeAfter) = taken;
+    // Read after the capture's awaits, so it is the tree just captured.
+    final content = widget.contentKey.currentContext;
+    bool? views;
+    if (content != null && content.mounted) {
+      views = platformViewsIn(content as Element, shot.crop);
+    }
+    final crop = shot.crop;
+    var result = note.withScreenshot(
+      ScreenshotInfo(
+        file: '${note.id}.png',
+        pixelRatio: shot.plan.pixelRatio,
+        width: width,
+        height: height,
+        crop: PayloadRect(crop.left, crop.top, crop.width, crop.height),
+        hasPlatformViews: views ?? false,
+        debugPaint: debugPaintFlagsOn(),
+        beforeAfter: beforeAfter,
+        png: png,
+      ),
+    );
+    if (views == null) {
+      result = result.withError('screenshot.hasPlatformViews');
+    }
+    _printTiming(watch.elapsed, shot);
+    return result;
+  }
+
+  /// The crop around [shown] without the tweaks, then with them, side by
+  /// side. Null when either capture fails; the caller then takes one
+  /// image as usual.
+  ///
+  /// The tweaks come off for one frame and go back on whatever happens.
+  /// Both halves use one crop: the union of the widget's rect before and
+  /// after, so a tweak that moves it keeps both in view.
+  Future<(Screenshot, Uint8List, int, int, bool)?> _captureTweakPair(
+    RenderRepaintBoundary boundary,
+    RenderObject shown,
+    Rect after,
+    double ratio,
+  ) async {
+    final tweaks = widget.controller.tweaks;
+    final maxHalf =
+        ((widget.config.maxScreenshotWidth - pairGap * maxPixelRatio) / 2)
+            .floor();
+    if (maxHalf < 1) return null;
+    Screenshot? before;
+    Rect crop = after;
+    // Changes render objects: from this async handler, never during a
+    // frame (the session asserts it).
+    tweaks.suspend();
+    try {
+      await SchedulerBinding.instance.endOfFrame;
+      if (!mounted) return null;
+      crop = after.expandToInclude(RenderSearch.globalRectOf(shown) ?? after);
+      before = await captureScreenshot(
+        boundary,
+        crop,
+        pixelRatio: ratio,
+        maxWidth: maxHalf,
+      ).timeout(const Duration(seconds: 5));
+    } finally {
+      tweaks.resume();
+    }
+    if (before == null || !mounted) return null;
+    await SchedulerBinding.instance.endOfFrame;
+    if (!mounted) return null;
+    final now = await captureScreenshot(
+      boundary,
+      crop,
+      pixelRatio: ratio,
+      maxWidth: maxHalf,
+    ).timeout(const Duration(seconds: 5));
+    if (now == null) return null;
+    final joined = await sideBySide(
+      before.png,
+      now.png,
+      gap: pairGap * now.plan.pixelRatio,
+    );
+    if (joined == null) return null;
+    final (png, width, height) = joined;
+    return (now, png, width, height, true);
   }
 
   static void _printTiming(Duration elapsed, Screenshot shot) {

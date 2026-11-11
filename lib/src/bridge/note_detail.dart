@@ -113,8 +113,12 @@ String _standard(Map<String, Object?> note) {
   // 360 wide means nothing to an agent that thinks it was 1280.
   if (whatIfLine(note['environment']) case final whatIf?) lines.add(whatIf);
   lines.addAll(findingLines(note));
+  lines.addAll(tweakLines(note));
   if (_string(shot['file']) case final file?) {
-    lines.add('Screenshot: $file (attached, at most 800 px wide)');
+    lines.add(
+      'Screenshot: $file (attached, at most 800 px wide)'
+      '${shot['beforeAfter'] == true ? ' (left: before the tweaks, right: after)' : ''}',
+    );
   }
   final replies = _replies(note);
   if (replies.isNotEmpty) lines.addAll(['Replies:', ...replies]);
