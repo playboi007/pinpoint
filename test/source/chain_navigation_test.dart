@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pinpoint/pinpoint.dart';
-import 'package:pinpoint/src/overlay/highlight_painter.dart';
 import 'package:pinpoint/src/overlay/info_panel.dart';
 import 'package:pinpoint/src/overlay/inspector_overlay.dart';
 import 'package:pinpoint/src/search/pick_result.dart';
+import 'package:pinpoint/src/theme/pinpoint_tokens.dart';
 
 import '../fixtures/save_bar_fixture.dart';
 import '../support/fake_pick.dart';
@@ -91,10 +91,14 @@ void main() {
         // The outline is drawn on the new rect.
         expect(
           tester.renderObject(find.byKey(InspectorOverlay.highlightKey)),
-          paints..rect(
-            rect: selection().globalRect,
-            color: HighlightColors.selected.withValues(alpha: 0.12),
-          ),
+          paints
+            ..rect(rect: selection().globalRect.inflate(1.5))
+            ..rect(rect: selection().globalRect.inflate(0.5))
+            ..rect(
+              rect: selection().globalRect.deflate(1),
+              color: PinPointTokens.redline.accent,
+              strokeWidth: 2,
+            ),
         );
       },
     );

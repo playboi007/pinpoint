@@ -9,8 +9,8 @@ import 'package:pinpoint/pinpoint.dart';
 import 'package:pinpoint/src/capture/screenshot.dart';
 import 'package:pinpoint/src/env/device_presets.dart';
 import 'package:pinpoint/src/env/environment_host.dart';
-import 'package:pinpoint/src/overlay/highlight_painter.dart';
 import 'package:pinpoint/src/overlay/inspector_overlay.dart';
+import 'package:pinpoint/src/theme/pinpoint_tokens.dart';
 
 /// Milestone 9, build step 1: the wrapper keeps the app in a viewport
 /// frame and an environment host that are always present.
@@ -216,7 +216,9 @@ void main() {
         expect(hovered.globalRect.width, closeTo(textRect.width, 1e-6));
         expect(
           tester.renderObject(find.byKey(InspectorOverlay.highlightKey)),
-          paints..rect(color: HighlightColors.hover.withValues(alpha: 0.12)),
+          paints
+            ..path(color: PinPointTokens.redline.paper, strokeWidth: 3)
+            ..path(color: PinPointTokens.redline.ink, strokeWidth: 1),
         );
       });
 
