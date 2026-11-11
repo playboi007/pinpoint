@@ -3,6 +3,8 @@ import 'package:flutter/widgets.dart';
 
 import '../info/widget_info.dart';
 import '../search/pick_result.dart';
+import '../theme/marks.dart';
+import '../theme/pinpoint_tokens.dart';
 
 /// Which edge a ruler measures from.
 enum RulerSide { left, top, right, bottom }
@@ -112,8 +114,13 @@ RulerSegment _gap(RulerSide side, Offset start, Offset end) => RulerSegment(
   distance: (end - start).distance,
 );
 
-/// Draws dashed rulers from the selection to its ancestor, or, with Alt
-/// held and another widget hovered, the gaps between the two.
+/// Draws the rulers of the Drafting design from the selection to its
+/// ancestor, or, with Alt held and another widget hovered, the gaps between
+/// the two.
+///
+/// Each ruler is a 1 px line that alternates `ink` 3 px and `paper` 3 px over
+/// a `paper` halo, with a 13 px `ink` tick at each end and the distance in a
+/// small `paper` box at the middle.
 ///
 /// Must sit inside an `IgnorePointer`, like the highlight.
 class RulerPainter extends CustomPainter {
@@ -122,6 +129,7 @@ class RulerPainter extends CustomPainter {
     required this.hovered,
     required this.measuring,
     required this.origin,
+    this.tokens = PinPointTokens.redline,
   }) : super(repaint: Listenable.merge([selected, hovered, measuring]));
 
   final ValueListenable<PickResult?> selected;
@@ -131,9 +139,14 @@ class RulerPainter extends CustomPainter {
   /// This layer's top-left in global logical pixels; see `HighlightPainter`.
   final ValueGetter<Offset> origin;
 
-  static const Color color = Color(0xFFD50000);
-  static const double dash = 4;
-  static const double gap = 3;
+  /// The colours of the current palette.
+  final PinPointTokens tokens;
+
+  /// Length of the `ink` and of the `paper` part of the line.
+  static const List<double> dash = [3, 3];
+
+  /// Length of the tick at each end of a ruler.
+  static const double tick = 13;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -153,47 +166,79 @@ class RulerPainter extends CustomPainter {
 
     canvas.save();
     canvas.translate(-origin().dx, -origin().dy);
-    final line = Paint()
-      ..color = color
-      ..strokeWidth = 1;
+    final ink = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1
+      ..color = tokens.ink;
     for (final segment in segments) {
       if ((segment.end - segment.start).distance < 0.5) continue;
-      _dashed(canvas, segment.start, segment.end, line);
+      strokeHalo(
+        canvas,
+        Path()
+          ..moveTo(segment.start.dx, segment.start.dy)
+          ..lineTo(segment.end.dx, segment.end.dy),
+        ink,
+        tokens,
+        dash: dash,
+      );
+      _ticks(canvas, segment, ink);
       _label(canvas, segment);
     }
     canvas.restore();
   }
 
-  // Canvas has no dashed stroke, so draw short segments in a loop.
-  static void _dashed(Canvas canvas, Offset from, Offset to, Paint paint) {
-    final total = (to - from).distance;
-    final step = (to - from) / total;
-    for (var at = 0.0; at < total; at += dash + gap) {
-      final end = at + dash < total ? at + dash : total;
-      canvas.drawLine(from + step * at, from + step * end, paint);
+  /// The end caps: a [tick] long line across each end of [segment].
+  void _ticks(Canvas canvas, RulerSegment segment, Paint ink) {
+    final horizontal = segment.start.dy == segment.end.dy;
+    final cap = horizontal
+        ? const Offset(0, tick / 2)
+        : const Offset(tick / 2, 0);
+    for (final end in [segment.start, segment.end]) {
+      strokeHalo(
+        canvas,
+        Path()
+          ..moveTo(end.dx - cap.dx, end.dy - cap.dy)
+          ..lineTo(end.dx + cap.dx, end.dy + cap.dy),
+        ink,
+        tokens,
+      );
     }
   }
 
-  static void _label(Canvas canvas, RulerSegment segment) {
+  /// The distance, in a `paper` box with a 1 px `ink` border, centred on the
+  /// line.
+  void _label(Canvas canvas, RulerSegment segment) {
     final text = TextPainter(
       text: TextSpan(
         text: segment.label,
-        style: const TextStyle(color: Color(0xFFFFFFFF), fontSize: 10),
+        style: tokens.micro.copyWith(color: tokens.ink),
       ),
       textDirection: TextDirection.ltr,
     )..layout();
     final mid = Offset.lerp(segment.start, segment.end, 0.5)!;
-    final pill = Rect.fromCenter(
+    final box = Rect.fromCenter(
       center: mid,
-      width: text.width + 6,
-      height: text.height + 2,
+      width: text.width + 2 * 5 + 2,
+      height: 16,
     );
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(pill, const Radius.circular(3)),
-      Paint()..color = color,
-    );
+    canvas
+      ..drawRect(
+        box.inflate(0.5),
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1
+          ..color = tokens.halo,
+      )
+      ..drawRect(box, Paint()..color = tokens.paper)
+      ..drawRect(
+        box.deflate(0.5),
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1
+          ..color = tokens.ink,
+      );
     text
-      ..paint(canvas, pill.topLeft + const Offset(3, 1))
+      ..paint(canvas, box.topLeft + const Offset(1 + 5, 1))
       ..dispose();
   }
 
@@ -201,5 +246,6 @@ class RulerPainter extends CustomPainter {
   bool shouldRepaint(RulerPainter oldDelegate) =>
       oldDelegate.selected != selected ||
       oldDelegate.hovered != hovered ||
-      oldDelegate.measuring != measuring;
+      oldDelegate.measuring != measuring ||
+      oldDelegate.tokens != tokens;
 }

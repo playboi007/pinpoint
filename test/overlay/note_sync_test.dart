@@ -115,7 +115,7 @@ void main() {
     final clock = Stopwatch();
     var elapsed = Duration.zero;
     while (find
-        .descendant(of: pins(), matching: find.byIcon(Icons.check))
+        .descendant(of: pins(), matching: find.byIcon(Icons.done_all))
         .evaluate()
         .isEmpty) {
       await tester.pump(const Duration(milliseconds: 100));

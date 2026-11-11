@@ -7,6 +7,8 @@ import 'package:pinpoint/src/overlay/note_view.dart';
 import 'package:pinpoint/src/overlay/pin_marker.dart';
 import 'package:pinpoint/src/overlay/pin_tracker.dart';
 import 'package:pinpoint/src/search/source_index.dart';
+import 'package:pinpoint/src/theme/controls.dart';
+import 'package:pinpoint/src/theme/pinpoint_tokens.dart';
 
 import '../fixtures/pin_fixture.dart';
 import '../support/fake_sink.dart';
@@ -79,6 +81,307 @@ void main() {
       ),
     );
   }
+
+  group('a pin by state', () {
+    const tokens = PinPointTokens.redline;
+
+    Future<void> show(
+      WidgetTester tester,
+      NoteStatus status, {
+      bool? checks,
+      bool selected = false,
+    }) => tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: PinMarker(
+              number: 4,
+              status: status,
+              checksPassed: checks,
+              selected: selected,
+              onTap: () {},
+            ),
+          ),
+        ),
+      ),
+    );
+
+    BoxDecoration body(WidgetTester tester) =>
+        tester.widget<DecoratedBox>(find.byKey(PinMarker.bodyKey)).decoration
+            as BoxDecoration;
+
+    /// The hard shadows under the pin: the ones with an offset.
+    List<BoxShadow> hardShadows(WidgetTester tester) => [
+      for (final shadow in body(tester).boxShadow ?? const <BoxShadow>[])
+        if (shadow.offset != Offset.zero) shadow,
+    ];
+
+    Finder dashes() => find.descendant(
+      of: find.byType(PinMarker),
+      matching: find.byType(DashedBox),
+    );
+
+    Positioned badgeBox(WidgetTester tester, Key key) =>
+        tester.widget<Positioned>(
+          find
+              .ancestor(of: find.byKey(key), matching: find.byType(Positioned))
+              .first,
+        );
+
+    testWidgets('a draft has a dotted muted border, no shadow, no badge', (
+      tester,
+    ) async {
+      await show(tester, NoteStatus.draft);
+      final border = tester.widget<DashedBox>(dashes());
+      expect(border.dash, PinMarker.dotted);
+      expect(border.strokeWidth, 1.5);
+      expect(border.color, tokens.muted);
+      expect(body(tester).color, tokens.paper);
+      expect(hardShadows(tester), isEmpty);
+      expect(find.byKey(PinMarker.badgeKey), findsNothing);
+      expect(tester.getSize(find.byType(PinMarker)), const Size(22, 22));
+    });
+
+    testWidgets('a sent pin has a solid ink border and a 2,2 hard shadow', (
+      tester,
+    ) async {
+      await show(tester, NoteStatus.submitted);
+      expect(dashes(), findsNothing);
+      final shadow = hardShadows(tester).single;
+      expect(shadow.offset, const Offset(2, 2));
+      expect(shadow.blurRadius, 0);
+      expect(shadow.color, tokens.shadow);
+      expect(body(tester).color, tokens.paper);
+      expect(find.byKey(PinMarker.badgeKey), findsNothing);
+    });
+
+    testWidgets('an in-progress pin is dashed and has a top-right badge', (
+      tester,
+    ) async {
+      await show(tester, NoteStatus.inProgress);
+      expect(tester.widget<DashedBox>(dashes()).dash, PinMarker.dashed);
+      expect(hardShadows(tester), hasLength(1));
+      expect(
+        find.descendant(
+          of: find.byKey(PinMarker.badgeKey),
+          matching: find.byIcon(Icons.more_horiz),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        tester.getSize(find.byKey(PinMarker.badgeKey)),
+        const Size(13, 13),
+      );
+      final place = badgeBox(tester, PinMarker.badgeKey);
+      expect(place.top, isNotNull);
+      expect(place.bottom, isNull);
+      final badge = tester.widget<DecoratedBox>(find.byKey(PinMarker.badgeKey));
+      expect((badge.decoration as BoxDecoration).color, tokens.accent);
+    });
+
+    testWidgets('a fixed pin is filled with ink and has a check at the '
+        'bottom right', (tester) async {
+      await show(tester, NoteStatus.fixed);
+      expect(body(tester).color, tokens.ink);
+      expect(hardShadows(tester), hasLength(1));
+      expect(
+        find.descendant(
+          of: find.byKey(PinMarker.badgeKey),
+          matching: find.byIcon(Icons.check),
+        ),
+        findsOneWidget,
+      );
+      final place = badgeBox(tester, PinMarker.badgeKey);
+      expect(place.bottom, isNotNull);
+      expect(place.top, isNull);
+      final icon = tester.widget<Icon>(
+        find.descendant(
+          of: find.byKey(PinMarker.badgeKey),
+          matching: find.byType(Icon),
+        ),
+      );
+      expect(icon.color, tokens.ok);
+      final number = tester.widget<Text>(find.text('4'));
+      expect(number.style!.color, tokens.paper);
+    });
+
+    testWidgets('a resolved pin is a faded fixed pin with a done_all badge', (
+      tester,
+    ) async {
+      await show(tester, NoteStatus.resolved);
+      expect(body(tester).color, tokens.ink);
+      expect(
+        find.descendant(
+          of: find.byKey(PinMarker.badgeKey),
+          matching: find.byIcon(Icons.done_all),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        tester.widget<AnimatedOpacity>(find.byType(AnimatedOpacity)).opacity,
+        0.4,
+      );
+    });
+
+    testWidgets('a rejected pin is faded, struck through, has a cross and '
+        'no shadow', (tester) async {
+      await show(tester, NoteStatus.rejected);
+      expect(body(tester).color, tokens.paper);
+      expect(hardShadows(tester), isEmpty);
+      expect(
+        find.descendant(
+          of: find.byKey(PinMarker.badgeKey),
+          matching: find.byIcon(Icons.close),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        tester.widget<Text>(find.text('4')).style!.decoration,
+        TextDecoration.lineThrough,
+      );
+      expect(
+        tester.widget<AnimatedOpacity>(find.byType(AnimatedOpacity)).opacity,
+        0.4,
+      );
+    });
+
+    testWidgets('a passed check adds a round green badge with a check', (
+      tester,
+    ) async {
+      await show(tester, NoteStatus.fixed, checks: true);
+      final badge = tester.widget<DecoratedBox>(
+        find.byKey(PinMarker.checksKey),
+      );
+      final decoration = badge.decoration as BoxDecoration;
+      expect(decoration.shape, BoxShape.circle);
+      expect(decoration.color, tokens.ok);
+      expect(
+        tester.getSize(find.byKey(PinMarker.checksKey)),
+        const Size(15, 15),
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(PinMarker.checksKey),
+          matching: find.byIcon(Icons.check),
+        ),
+        findsOneWidget,
+      );
+      expect(badgeBox(tester, PinMarker.checksKey).top, isNotNull);
+    });
+
+    testWidgets('a failed check adds a square red badge with "!"', (
+      tester,
+    ) async {
+      await show(tester, NoteStatus.fixed, checks: false);
+      final badge = tester.widget<DecoratedBox>(
+        find.byKey(PinMarker.checksKey),
+      );
+      final decoration = badge.decoration as BoxDecoration;
+      expect(decoration.shape, BoxShape.rectangle);
+      expect(decoration.color, tokens.err);
+      expect(
+        find.descendant(
+          of: find.byKey(PinMarker.checksKey),
+          matching: find.text('!'),
+        ),
+        findsOneWidget,
+      );
+      expect(badgeBox(tester, PinMarker.checksKey).top, isNotNull);
+    });
+
+    testWidgets('no check, no verification badge', (tester) async {
+      await show(tester, NoteStatus.fixed);
+      expect(find.byKey(PinMarker.checksKey), findsNothing);
+    });
+
+    testWidgets('a selected pin gets the canvas selected outline', (
+      tester,
+    ) async {
+      Finder outlined() => find.descendant(
+        of: find.byType(PinMarker),
+        matching: find.byWidgetPredicate(
+          (w) => w is CustomPaint && w.foregroundPainter != null,
+        ),
+      );
+      // Just outside the 22 px pin, so its own border stays visible.
+      const pin = Rect.fromLTWH(0, 0, 22, 22);
+      await show(tester, NoteStatus.submitted, selected: true);
+      expect(
+        tester.renderObject(outlined()),
+        paints
+          ..rect(rect: pin.inflate(3.5), color: tokens.ink)
+          ..rect(rect: pin.inflate(2.5), color: tokens.paper)
+          ..rect(rect: pin.inflate(1), color: tokens.accent, strokeWidth: 2),
+      );
+      await show(tester, NoteStatus.submitted);
+      expect(
+        tester.renderObject(outlined()),
+        isNot(paints..rect(color: tokens.accent)),
+      );
+    });
+
+    testWidgets('the layer selects the pin of the open note', (tester) async {
+      final placements = ValueNotifier<List<PinPlacement>>([
+        const PinPlacement(
+          id: 'a',
+          number: 1,
+          status: NoteStatus.submitted,
+          rect: Rect.fromLTWH(100, 100, 50, 20),
+        ),
+        const PinPlacement(
+          id: 'b',
+          number: 2,
+          status: NoteStatus.submitted,
+          rect: Rect.fromLTWH(300, 100, 50, 20),
+        ),
+      ]);
+      final open = ValueNotifier<String?>(null);
+      addTearDown(placements.dispose);
+      addTearDown(open.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: PinLayer(
+              placements: placements,
+              openNote: open,
+              onOpen: (_) {},
+            ),
+          ),
+        ),
+      );
+      List<bool> selected() => [
+        for (final pin in tester.widgetList<PinMarker>(find.byType(PinMarker)))
+          pin.selected,
+      ];
+      expect(selected(), [false, false]);
+      open.value = 'b';
+      await tester.pump();
+      expect(selected(), [false, true]);
+    });
+
+    testWidgets('a tap anywhere on the 22 px box reaches onTap', (
+      tester,
+    ) async {
+      var taps = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Center(
+              child: PinMarker(
+                number: 1,
+                status: NoteStatus.draft,
+                onTap: () => taps++,
+              ),
+            ),
+          ),
+        ),
+      );
+      final rect = tester.getRect(find.byType(PinMarker));
+      await tester.tapAt(rect.topLeft + const Offset(1, 1));
+      await tester.tapAt(rect.bottomRight - const Offset(1, 1));
+      expect(taps, 2);
+    });
+  });
 
   group('drafts', () {
     testWidgets('Save draft makes a numbered draft pin and goes back to '
@@ -354,7 +657,7 @@ void main() {
     testWidgets('shows a tick and fades, but stays', (tester) async {
       await resolvedPin(tester);
       expect(
-        find.descendant(of: pins(), matching: find.byIcon(Icons.check)),
+        find.descendant(of: pins(), matching: find.byIcon(Icons.done_all)),
         findsOneWidget,
       );
       await tester.pump(PinMarker.fadeDuration);

@@ -3,9 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pinpoint/pinpoint.dart';
+import 'package:pinpoint/src/info/widget_info.dart';
 import 'package:pinpoint/src/overlay/highlight_painter.dart';
 import 'package:pinpoint/src/overlay/inspector_overlay.dart';
 import 'package:pinpoint/src/overlay/pick_tracker.dart';
+import 'package:pinpoint/src/theme/pinpoint_tokens.dart';
 
 /// Milestone 2, build step 2: picking through the wrapper, the highlight,
 /// hover coalescing and the outline that follows its widget.
@@ -46,6 +48,31 @@ void main() {
   RenderObject highlight(WidgetTester tester) =>
       tester.renderObject(find.byKey(InspectorOverlay.highlightKey));
 
+  /// The tokens the overlay paints with until the wrapper passes its own.
+  const tokens = PinPointTokens.redline;
+
+  /// Matches a `drawPath` of [bounds]: the halo under a hover outline runs
+  /// along the whole edge, half a pixel inside the widget's rect.
+  bool Function(Symbol, List<dynamic>) pathOf(Rect bounds) =>
+      (method, args) =>
+          method == #drawPath &&
+          ((args[0] as Path).getBounds().left - bounds.left).abs() < 0.01 &&
+          ((args[0] as Path).getBounds().top - bounds.top).abs() < 0.01 &&
+          ((args[0] as Path).getBounds().right - bounds.right).abs() < 0.01 &&
+          ((args[0] as Path).getBounds().bottom - bounds.bottom).abs() < 0.01;
+
+  /// Matches the label pill: the one `drawRect` filled with `paper`.
+  bool Function(Symbol, List<dynamic>) pill(void Function(Rect) check) =>
+      (method, args) {
+        if (method != #drawRect) return false;
+        final paint = args[1] as Paint;
+        if (paint.style != PaintingStyle.fill || paint.color != tokens.paper) {
+          return false;
+        }
+        check(args[0] as Rect);
+        return true;
+      };
+
   const page = Scaffold(body: Center(child: Text('target')));
 
   // The info panel shows the text too, so look for the app's copy only.
@@ -70,20 +97,15 @@ void main() {
       final hovered = controller.hovered.value!;
       expect(hovered.renderObject, isA<RenderParagraph>());
       expect(hovered.globalRect, textRect);
-      // Fill, then border, both exactly on the text rect.
+      // A paper halo, then the dashed ink line, both on the text rect: no
+      // fill.
       expect(
         highlight(tester),
         paints
-          ..rect(
-            rect: textRect,
-            color: HighlightColors.hover.withValues(alpha: 0.12),
-          )
-          ..rect(
-            rect: textRect,
-            color: HighlightColors.hover,
-            strokeWidth: 1.5,
-          ),
+          ..something(pathOf(textRect.deflate(0.5)))
+          ..path(color: tokens.ink, strokeWidth: 1),
       );
+      expect(highlight(tester), isNot(paints..rect()));
     });
 
     testWidgets('the outline follows the widget on window resize', (
@@ -103,7 +125,13 @@ void main() {
       final after = tester.getRect(target);
       expect(after, isNot(before));
       expect(controller.selection.value!.globalRect, after);
-      expect(highlight(tester), paints..rect(rect: after));
+      expect(
+        highlight(tester),
+        paints
+          ..rect(rect: after.inflate(1.5))
+          ..rect(rect: after.inflate(0.5))
+          ..rect(rect: after.deflate(1)),
+      );
       // On a metrics change the focused comment field scrolls its caret
       // into view, animated over 100 ms. After that, nothing draws.
       await tester.pump(const Duration(milliseconds: 300));
@@ -159,8 +187,13 @@ void main() {
       expect(
         highlight(tester),
         paints
-          ..rect(rect: selection.globalRect)
-          ..rect(rect: selection.globalRect, color: HighlightColors.selected),
+          ..rect(rect: selection.globalRect.inflate(1.5), color: tokens.ink)
+          ..rect(rect: selection.globalRect.inflate(0.5), color: tokens.paper)
+          ..rect(
+            rect: selection.globalRect.deflate(1),
+            color: tokens.accent,
+            strokeWidth: 2,
+          ),
       );
     });
 
@@ -255,7 +288,7 @@ void main() {
       await mouse.removePointer();
       await tester.pump();
       expect(controller.hovered.value, isNull);
-      expect(highlight(tester), isNot(paints..rect()));
+      expect(highlight(tester), isNot(paints..path()));
     });
 
     testWidgets('hovering the selected widget draws one outline', (
@@ -270,29 +303,96 @@ void main() {
       await mouse.moveTo(at + const Offset(1, 0));
       await tester.pump();
 
+      expect(highlight(tester), isNot(paints..path()));
+    });
+  });
+
+  group('the selected label pill', () {
+    /// Selects the text and returns its rect and the pill's rect, as the
+    /// painter draws it.
+    Future<(Rect, Rect)> selectedPill(WidgetTester tester, Widget page) async {
+      await tester.pumpWidget(host(page));
+      await startPicking(tester);
+      await tester.tapAt(tester.getCenter(target));
+      await tester.pump();
+      final textRect = tester.getRect(target);
+      Rect? drawn;
       expect(
         highlight(tester),
-        isNot(paints..rect(color: HighlightColors.hover)),
+        paints..something(pill((rect) => drawn = rect)),
       );
+      return (textRect, drawn!);
+    }
+
+    testWidgets('sits 3 px below the selection, 18 px high', (tester) async {
+      final (text, drawn) = await selectedPill(tester, page);
+      expect(drawn.top, text.bottom + 3);
+      expect(drawn.height, 18);
+      expect(drawn.left, text.left);
+    });
+
+    testWidgets('goes above when there is no room below', (tester) async {
+      final (text, drawn) = await selectedPill(
+        tester,
+        const Scaffold(
+          body: Align(alignment: Alignment.bottomCenter, child: Text('target')),
+        ),
+      );
+      expect(drawn.bottom, text.top - 3);
+      expect(drawn.height, 18);
+    });
+
+    testWidgets('is clamped to the viewport', (tester) async {
+      final (text, drawn) = await selectedPill(
+        tester,
+        const Scaffold(
+          body: Align(alignment: Alignment.centerRight, child: Text('target')),
+        ),
+      );
+      final screen = tester.view.physicalSize / tester.view.devicePixelRatio;
+      expect(text.right, screen.width);
+      expect(drawn.right, screen.width);
+      expect(drawn.left, greaterThanOrEqualTo(0));
+    });
+
+    testWidgets('names the widget, its size and its file and line', (
+      tester,
+    ) async {
+      await tester.pumpWidget(host(page));
+      await startPicking(tester);
+      await tester.tapAt(tester.getCenter(target));
+      await tester.pump();
+      final pick = controller.selection.value!;
+      final size = tester.getSize(target);
+
+      expect(pillName(pick), 'Text');
+      // Whole numbers without a decimal, others with one.
+      expect(pillSize(pick), '${formatNumber(size.width)} × 20');
+      // File name and line only, never the directory.
+      expect(pillLocation(pick), matches(RegExp(r'^[^/]+\.dart:\d+$')));
     });
   });
 
   group('labelRect', () {
     const canvas = Size(400, 300);
-    const label = Size(80, 16);
+    const label = Size(80, 18);
 
-    test('goes above the target when there is room', () {
+    test('goes below the target when there is room', () {
       final rect = labelRect(
         const Rect.fromLTWH(50, 100, 40, 40),
         label,
         canvas,
       );
-      expect(rect, const Rect.fromLTWH(50, 80, 80, 16));
+      expect(rect, const Rect.fromLTWH(50, 143, 80, 18));
     });
 
-    test('goes below when there is no room above', () {
-      final rect = labelRect(const Rect.fromLTWH(50, 5, 40, 40), label, canvas);
-      expect(rect.top, 49);
+    test('goes above when there is no room below', () {
+      final rect = labelRect(
+        const Rect.fromLTWH(50, 250, 40, 40),
+        label,
+        canvas,
+      );
+      expect(rect.bottom, 247);
     });
 
     test('goes inside when there is no room above or below', () {
@@ -301,7 +401,16 @@ void main() {
         label,
         canvas,
       );
-      expect(rect.top, 4);
+      expect(rect.bottom, 297);
+    });
+
+    test('starts at the left edge when it is wider than the canvas', () {
+      final rect = labelRect(
+        const Rect.fromLTWH(30, 100, 20, 20),
+        const Size(500, 18),
+        canvas,
+      );
+      expect(rect.left, 0);
     });
 
     test('stays inside the canvas horizontally', () {

@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pinpoint/pinpoint.dart';
 import 'package:pinpoint/src/overlay/inspector_overlay.dart';
 import 'package:pinpoint/src/overlay/ruler_painter.dart';
+import 'package:pinpoint/src/theme/pinpoint_tokens.dart';
 
 /// Milestone 2, build step 3: rulers to the ancestor, and gaps with Alt.
 void main() {
@@ -121,6 +122,22 @@ void main() {
     RenderObject rulerLayer(WidgetTester tester) =>
         tester.renderObject(find.byKey(InspectorOverlay.rulerKey));
 
+    const tokens = PinPointTokens.redline;
+
+    /// Matches a `drawPath` painted with [color] and [width] whose bounds
+    /// satisfy [bounds].
+    bool Function(Symbol, List<dynamic>) pathWhere(
+      Color color,
+      double width,
+      bool Function(Rect) bounds,
+    ) => (method, args) {
+      if (method != #drawPath) return false;
+      final paint = args[1] as Paint;
+      return paint.color.toARGB32() == color.toARGB32() &&
+          paint.strokeWidth == width &&
+          bounds((args[0] as Path).getBounds());
+    };
+
     testWidgets('a selection measures to its nearest differing ancestor', (
       tester,
     ) async {
@@ -139,7 +156,76 @@ void main() {
         selection.ancestorRect!,
       );
       expect(distance(rulers, RulerSide.right), 60);
-      expect(rulerLayer(tester), paints..line());
+      expect(rulerLayer(tester), paints..path());
+    });
+
+    testWidgets('a ruler is an ink line over a paper halo, with end ticks '
+        'and a paper label box', (tester) async {
+      await tester.pumpWidget(host());
+      controller.startPicking();
+      await tester.pump();
+      await tester.tapAt(tester.getCenter(find.byKey(inner)));
+      await tester.pump();
+
+      final selection = controller.selection.value!;
+      final right = ancestorRulers(
+        selection.globalRect,
+        selection.ancestorRect!,
+      ).firstWhere((s) => s.side == RulerSide.right);
+      final y = right.start.dy;
+      final layer = rulerLayer(tester);
+
+      // The line: a 3 px paper halo, then 1 px ink dashes on the same run.
+      bool onLine(Rect b) =>
+          (b.left - right.start.dx).abs() < 0.01 &&
+          (b.top - y).abs() < 0.01 &&
+          b.height < 0.01;
+      expect(
+        layer,
+        paints
+          ..something(pathWhere(tokens.paper, 3, onLine))
+          ..something(pathWhere(tokens.ink, 1, onLine)),
+      );
+      // A 13 px tick across each end, with its own halo.
+      expect(
+        layer,
+        paints
+          ..something(
+            pathWhere(
+              tokens.ink,
+              1,
+              (b) => (b.left - right.start.dx).abs() < 0.01 && b.height == 13,
+            ),
+          )
+          ..something(
+            pathWhere(
+              tokens.ink,
+              1,
+              (b) => (b.left - right.end.dx).abs() < 0.01 && b.height == 13,
+            ),
+          ),
+      );
+      // The label: a paper box with a 1 px ink border, centred on the line.
+      Rect? box;
+      expect(
+        layer,
+        paints..something((method, args) {
+          if (method != #drawRect) return false;
+          final paint = args[1] as Paint;
+          if (paint.style != PaintingStyle.fill ||
+              paint.color != tokens.paper) {
+            return false;
+          }
+          box = args[0] as Rect;
+          return true;
+        }),
+      );
+      expect(box!.height, 16);
+      expect(box!.center.dy, closeTo(y, 0.01));
+      expect(
+        box!.center.dx,
+        closeTo((right.start.dx + right.end.dx) / 2, 0.01),
+      );
     });
 
     testWidgets('Alt with a second widget hovered measures the gap', (
@@ -163,11 +249,19 @@ void main() {
           tester.getRect(find.byKey(other)).left -
           tester.getRect(find.byKey(inner)).right;
       expect(gap, 40);
-      // One gap: the first dash starts at the selection's right edge.
+      // One gap: the line starts at the selection's right edge.
       final innerRect = tester.getRect(find.byKey(inner));
       expect(
         rulerLayer(tester),
-        paints..line(p1: Offset(innerRect.right, innerRect.center.dy)),
+        paints..something(
+          pathWhere(
+            tokens.ink,
+            1,
+            (b) =>
+                (b.left - innerRect.right).abs() < 0.01 &&
+                (b.top - innerRect.center.dy).abs() < 0.01,
+          ),
+        ),
       );
 
       await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
@@ -179,7 +273,7 @@ void main() {
       await tester.pumpWidget(host());
       controller.startPicking();
       await tester.pump();
-      expect(rulerLayer(tester), isNot(paints..line()));
+      expect(rulerLayer(tester), isNot(paints..path()));
     });
   });
 }
