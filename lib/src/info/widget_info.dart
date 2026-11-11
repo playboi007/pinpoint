@@ -8,6 +8,7 @@ import 'extractors/clip_extractor.dart';
 import 'extractors/constrained_box_extractor.dart';
 import 'extractors/decoration_extractor.dart';
 import 'extractors/flex_extractor.dart';
+import 'extractors/image_extractor.dart';
 import 'extractors/opacity_extractor.dart';
 import 'extractors/padding_extractor.dart';
 import 'extractors/paragraph_extractor.dart';
@@ -206,6 +207,7 @@ class WidgetInfo {
     clipSection,
     aspectRatioSection,
     wrapSection,
+    imageSection,
   ];
 
   /// Values a parent keeps on its child, read from the child.
