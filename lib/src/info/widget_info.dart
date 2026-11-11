@@ -3,6 +3,7 @@ import 'package:flutter/rendering.dart';
 
 import '../search/render_search.dart';
 import 'extractors/align_extractor.dart';
+import 'extractors/aspect_ratio_extractor.dart';
 import 'extractors/clip_extractor.dart';
 import 'extractors/constrained_box_extractor.dart';
 import 'extractors/decoration_extractor.dart';
@@ -202,6 +203,7 @@ class WidgetInfo {
     stackSection,
     opacitySection,
     clipSection,
+    aspectRatioSection,
   ];
 
   /// Values a parent keeps on its child, read from the child.
