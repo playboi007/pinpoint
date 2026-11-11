@@ -5,6 +5,8 @@ import 'package:pinpoint/pinpoint.dart';
 import 'package:pinpoint/src/overlay/comment_form.dart';
 import 'package:pinpoint/src/overlay/note_view.dart';
 import 'package:pinpoint/src/overlay/pin_marker.dart';
+import 'package:pinpoint/src/overlay/pin_tracker.dart';
+import 'package:pinpoint/src/search/source_index.dart';
 
 import '../fixtures/pin_fixture.dart';
 import '../support/fake_sink.dart';
@@ -385,6 +387,68 @@ void main() {
       await tester.pump();
       expect(controller.notes.byId(id)!.status, NoteStatus.verified);
       expect(pins(), findsNothing);
+    });
+  });
+
+  group('a pin whose widget is not on this page', () {
+    tearDown(() => PinTracker.debugUrl = null);
+
+    /// Saves a note on the title, then shows a page without it.
+    Future<void> leavePage(WidgetTester tester) async {
+      await tester.pumpWidget(host(const PinFixture()));
+      await saveDraft(tester, 'Title');
+      controller.stop();
+      await tester.pumpWidget(host(const Scaffold(body: Text('another page'))));
+      await tester.pump();
+      expect(pins(), findsNothing);
+    }
+
+    /// Draws a frame every 100 ms for [seconds], as hovering does.
+    Future<void> drawFrames(WidgetTester tester, int seconds) async {
+      for (var i = 0; i < seconds * 10; i++) {
+        // A pump draws only a frame that something asked for.
+        SchedulerBinding.instance.scheduleFrame();
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+    }
+
+    testWidgets('is looked up less and less often while frames are drawn', (
+      tester,
+    ) async {
+      await leavePage(tester);
+      SourceIndex.debugWalks = 0;
+      await drawFrames(tester, 10);
+      // Every 500 ms would be 20 walks of the whole app.
+      expect(SourceIndex.debugWalks, lessThanOrEqualTo(6));
+      SourceIndex.debugWalks = 0;
+      await drawFrames(tester, 8);
+      expect(SourceIndex.debugWalks, lessThanOrEqualTo(2));
+    });
+
+    testWidgets('is looked up at once when the page URL changes', (
+      tester,
+    ) async {
+      var url = Uri.parse('http://localhost/other');
+      PinTracker.debugUrl = () => url;
+      await leavePage(tester);
+      await drawFrames(tester, 10);
+
+      // A navigation changes the URL, then draws the new page.
+      url = Uri.parse('http://localhost/');
+      await tester.pumpWidget(host(const PinFixture()));
+      await tester.pump();
+      expect(pins(), findsOneWidget);
+    });
+
+    testWidgets('comes back within the longest wait without a URL change', (
+      tester,
+    ) async {
+      await leavePage(tester);
+      await drawFrames(tester, 10);
+      await tester.pumpWidget(host(const PinFixture()));
+      await tester.pump(PinTracker.maxRetryInterval);
+      await tester.pump();
+      expect(pins(), findsOneWidget);
     });
   });
 

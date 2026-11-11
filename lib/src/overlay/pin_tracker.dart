@@ -58,6 +58,13 @@ class PinPlacement {
 /// after the interval, so a pin whose widget came back in the last frame
 /// still shows when the app stops drawing.
 ///
+/// Each lookup that finds nothing doubles the interval, up to
+/// [maxRetryInterval]: a note on another page would otherwise walk the
+/// whole app twice a second for as long as frames are drawn (hovering
+/// draws them), and in a debug web build one walk takes 20 to 60 ms. A
+/// change of the page URL, of the notes, or a hot reload looks again at
+/// once.
+///
 /// Like `PickTracker`, it never schedules a frame on its own while nothing
 /// changes (engineering rule 2).
 class PinTracker {
@@ -75,6 +82,13 @@ class PinTracker {
 
   /// Frame time between lookups of a pin that matched nothing.
   static const Duration retryInterval = Duration(milliseconds: 500);
+
+  /// The longest wait between lookups that keep finding nothing.
+  static const Duration maxRetryInterval = Duration(seconds: 4);
+
+  /// The page URL, read after each frame to see a navigation. Tests set it.
+  @visibleForTesting
+  static Uri Function()? debugUrl;
 
   final NoteBook notes;
 
@@ -104,6 +118,15 @@ class PinTracker {
   Duration? _lastRetry;
   Timer? _retryTimer;
 
+  /// Lookups in a row that found none of the lost pins.
+  int _misses = 0;
+  String? _url;
+
+  Duration get _retryWait {
+    final wait = retryInterval * (1 << _misses);
+    return wait < maxRetryInterval ? wait : maxRetryInterval;
+  }
+
   /// The live element of the note [id]'s pin, or null when it shows none.
   Element? elementOf(String id) {
     final element = _elements[id];
@@ -121,6 +144,7 @@ class PinTracker {
   void reset() {
     _elements.clear();
     _lastRetry = null;
+    _misses = 0;
   }
 
   /// One lookup after the throttle, from a timer: no frame is drawn for it
@@ -138,6 +162,7 @@ class PinTracker {
   void _onNotes() {
     // A new, changed or deleted note: place the pins in the next frame the
     // app draws. Adding a pin repaints Pinpoint's layer, which draws one.
+    _misses = 0;
     _arm();
   }
 
@@ -168,6 +193,15 @@ class PinTracker {
     }
     _elements.removeWhere((id, _) => !pinned.any((n) => n.id == id));
 
+    // A new page: its widgets may be the lost ones, so look now. On web
+    // this reads `window.location`, which costs no walk.
+    final url = (debugUrl ?? () => Uri.base)().toString();
+    if (url != _url) {
+      _url = url;
+      _misses = 0;
+      _lastRetry = null;
+    }
+
     final lost = <Annotation>[];
     for (final note in pinned) {
       final anchor = note.anchor;
@@ -180,16 +214,26 @@ class PinTracker {
     }
     final retry = _lastRetry;
     final waited = retry == null ? null : _frameTime - retry;
-    if (lost.isNotEmpty && waited != null && waited < retryInterval) {
-      if (!fromTimer) _scheduleRetry(retryInterval - waited);
+    final wait = _retryWait;
+    if (lost.isNotEmpty && waited != null && waited < wait) {
+      if (!fromTimer) _scheduleRetry(wait - waited);
     } else if (lost.isNotEmpty) {
       _lastRetry = _frameTime;
       final found = _index.resolveAll([
         for (final note in lost) note.anchor!,
       ], root: root);
+      var any = false;
       for (final note in lost) {
         final element = found[note.anchor!];
-        if (element != null) _elements[note.id] = element;
+        if (element != null) {
+          _elements[note.id] = element;
+          any = true;
+        }
+      }
+      if (any) {
+        _misses = 0;
+      } else if (_retryWait < maxRetryInterval) {
+        _misses++;
       }
     }
 

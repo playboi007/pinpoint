@@ -32,6 +32,10 @@ class SourceIndex {
   @visibleForTesting
   static int debugWalks = 0;
 
+  // The slow-walk log's rate limit.
+  static Stopwatch? _lastSlowLog;
+  static int _slowWalks = 0;
+
   /// [element] as an anchor, with its [NoteAnchor.ordinal] among the
   /// elements under [root] that match the rest of it.
   ///
@@ -319,10 +323,19 @@ class SourceIndex {
     final result = {for (final s in searches) s.anchor: s.matches()};
     assert(() {
       if (watch.elapsedMilliseconds > 16) {
-        debugPrint(
-          'pinpoint: source index walk took ${watch.elapsedMilliseconds} ms '
-          '($visited elements).',
-        );
+        _slowWalks++;
+        // One line per 10 s at most: hovering draws frames, and the log
+        // must not flood the console.
+        final last = _lastSlowLog;
+        if (last == null || last.elapsed >= const Duration(seconds: 10)) {
+          final more = _slowWalks > 1 ? ', ${_slowWalks - 1} more since' : '';
+          debugPrint(
+            'pinpoint: source index walk took ${watch.elapsedMilliseconds} '
+            'ms ($visited elements$more).',
+          );
+          _lastSlowLog = Stopwatch()..start();
+          _slowWalks = 0;
+        }
       }
       return true;
     }());
