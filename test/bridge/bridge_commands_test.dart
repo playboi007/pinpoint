@@ -308,7 +308,11 @@ void main() {
     await app;
 
     final note = sent['note']! as Map<String, Object?>;
-    expect(note['anchor'], {'file': 'lib/zoo.dart', 'line': 20, 'widget': 'Row'});
+    expect(note['anchor'], {
+      'file': 'lib/zoo.dart',
+      'line': 20,
+      'widget': 'Row',
+    });
     expect(note['checks'], [
       {'type': 'no_overflow'},
     ]);
@@ -344,11 +348,65 @@ void main() {
     expect(File('${open.path}/pp_v.after.png').existsSync(), isFalse);
   });
 
-  test('verify_note of a draft or an unknown note never reaches the app', () async {
-    final result = await tool('verify_note', {'id': 'pp_nope'});
-    expect(result['isError'], isTrue);
-    expect(textOf(result), startsWith('No note pp_nope'));
-  });
+  test(
+    'verify_note of a draft or an unknown note never reaches the app',
+    () async {
+      final result = await tool('verify_note', {'id': 'pp_nope'});
+      expect(result['isError'], isTrue);
+      expect(textOf(result), startsWith('No note pp_nope'));
+    },
+  );
+
+  test(
+    'stress_matrix thumbnails are written as files, not sent as images',
+    () async {
+      final app = appTakesOne(
+        (command) => {
+          'ok': true,
+          'result': {
+            'runs': [
+              {
+                'run': 1,
+                'label': 'width 320',
+                'findings': 1,
+                'png': _onePixelPng,
+              },
+              {
+                'run': 2,
+                'label': 'width 768',
+                'findings': 0,
+                'png': _onePixelPng,
+              },
+            ],
+            'findings': [
+              {
+                'kind': 'overflow',
+                'summary': 'Row overflows by 92 px on the right',
+                'runs': [1],
+              },
+            ],
+            'drafts': ['pp_draft'],
+          },
+        },
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      final result = await tool('stress_matrix');
+      await app;
+      final content = result['content']! as List<Object?>;
+      expect([for (final c in content) (c! as Map)['type']], ['text']);
+      final text = textOf(result);
+      expect(text, isNot(contains('iVBOR')));
+      final json = jsonDecode(text) as Map<String, Object?>;
+      final runs = (json['runs']! as List<Object?>)
+          .cast<Map<String, Object?>>();
+      expect(runs.first['thumbnail'], '.pinpoint/stress/run_1.png');
+      final stress = Directory('${root.path}/.pinpoint/stress');
+      expect(
+        [for (final f in stress.listSync()) f.uri.pathSegments.last]..sort(),
+        ['run_1.png', 'run_2.png'],
+      );
+    },
+  );
 }
 
 /// A 1 x 1 PNG.

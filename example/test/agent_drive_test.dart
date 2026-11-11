@@ -80,6 +80,38 @@ void main() {
     await bridge.shutdown(tester);
   });
 
+  testWidgets('acceptance: stress_matrix on the bug zoo screen reports the '
+      'planted width-dependent overflow only at the narrow widths', (
+    tester,
+  ) async {
+    await start(tester, ExampleApp(controller: controller));
+    await run(tester, 'navigate', {'path': HomeScreen.bugZooRoute});
+    final result = await run(tester, 'stress_matrix', {
+      'kinds': ['overflow', 'truncated_text'],
+      'thumbnails': false,
+    });
+    // The planted build error, and Flutter's own overflow reports.
+    while (tester.takeException() != null) {}
+    final runs = (result['runs']! as List<Object?>)
+        .cast<Map<String, Object?>>();
+    expect(runs.take(4).map((r) => r['label']), [
+      'width 320',
+      'width 360',
+      'width 414',
+      'width 768',
+    ]);
+    final findings = (result['findings']! as List<Object?>)
+        .cast<Map<String, Object?>>();
+    final overflow = findings.where((f) => f['kind'] == 'overflow').toList();
+    // The Row overflows below 432 px wide: the first three widths only,
+    // and no text scale, direction or brightness run at the window width.
+    expect(overflow.single['runs'], [1, 2, 3]);
+    expect(overflow.single['source'], contains('bug_zoo_screen.dart'));
+    expect(result['drafts'], hasLength(1));
+    expect(controller.environment.isActive, isFalse, reason: 'restored');
+    await bridge.shutdown(tester);
+  });
+
   testWidgets('a scripted MCP client drives the example: navigate, find, '
       'tap, enter text, verify', (tester) async {
     final root = (await tester.runAsync(

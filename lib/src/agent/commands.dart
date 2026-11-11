@@ -11,7 +11,11 @@ import 'package:flutter/widgets.dart';
 import '../capture/context_collector.dart';
 import '../capture/screenshot.dart';
 import '../core/pinpoint_controller.dart';
+import '../detect/a11y_audit.dart';
 import '../detect/detector.dart';
+import '../detect/image_detector.dart';
+import '../detect/overflow_detector.dart';
+import '../detect/truncation_detector.dart';
 import '../env/environment_controller.dart';
 import '../model/annotation.dart';
 import '../search/pick_result.dart';
@@ -20,6 +24,7 @@ import '../search/source_index.dart';
 import '../search/source_resolver.dart';
 import 'agent_control.dart';
 import 'checks.dart';
+import 'stress_matrix.dart';
 import 'synthetic_input.dart';
 
 /// A command failed for a reason the agent should read, for example
@@ -164,7 +169,12 @@ class AgentCommands {
     required this.contentKey,
     required this.resolver,
     required this.pageContext,
+    this.onDraft,
   });
+
+  /// Keeps a draft note the stress matrix filed: pins it and stores it on
+  /// the bridge. Null: the note only goes into the controller's book.
+  final void Function(Annotation note, PickResult pick)? onDraft;
 
   /// Pinpoint's own context, above the app: the collector describes the
   /// page from it, so no app element is touched for that.
@@ -204,6 +214,11 @@ class AgentCommands {
         'scroll_to' => await scrollTo(args, limits, cancel),
         'navigate' => await navigate(args, cancel),
         'back' => await back(cancel),
+        'set_environment' => await setEnvironment(args, cancel),
+        'reset_environment' => await resetEnvironment(cancel),
+        'scan' => await scan(args, limits),
+        'screenshot' => await screenshot(args),
+        'stress_matrix' => await stressMatrix(args, limits, cancel),
         'get_screen' => getScreen(limits),
         'find_widgets' => findWidgets(args, limits),
         'inspect' => inspect(args),
@@ -521,6 +536,278 @@ class AgentCommands {
     } catch (_) {
       return null;
     }
+  }
+
+  /// `set_environment`: changes only the switches given (keys as in a
+  /// note's `environment`); null clears one.
+  Future<Map<String, Object?>> setEnvironment(
+    Map<String, Object?> args,
+    AgentCancel cancel,
+  ) async {
+    final changes = {
+      for (final MapEntry(:key, :value) in args.entries)
+        if (key != 'limit' && key != 'max_chars') key: value,
+    };
+    final Environment next;
+    try {
+      next = controller.environment.value.applyJson(changes);
+    } on FormatException catch (error) {
+      throw AgentError(error.message);
+    }
+    await prepareToDrive();
+    controller.environment.value = next;
+    await waitIdle(settleTimeout, cancel);
+    return {'environment': next.toJson(), 'summary': next.summary};
+  }
+
+  /// `reset_environment`: removes every what-if override.
+  Future<Map<String, Object?>> resetEnvironment(AgentCancel cancel) async {
+    await prepareToDrive();
+    controller.environment.reset();
+    await waitIdle(settleTimeout, cancel);
+    return {'environment': const <String, Object?>{}};
+  }
+
+  /// The kinds `scan` and `stress_matrix` know.
+  static const Set<String> scanKinds = {
+    'overflow',
+    'truncated_text',
+    'oversized_image',
+    'accessibility',
+  };
+
+  /// The Milestone 10 detectors of [kinds] on the screen as it is now.
+  /// `accessibility` runs the audit: semantics for one frame, and a
+  /// capture for contrast.
+  Future<List<Finding>> findingsFor(Set<String> kinds) async {
+    final root = appRoot;
+    final locator = this.locator();
+    final detectors = <Detector>[
+      if (kinds.contains('overflow')) const OverflowDetector(),
+      if (kinds.contains('truncated_text')) const TruncationDetector(),
+      if (kinds.contains('oversized_image'))
+        ImageDetector(devicePixelRatio: devicePixelRatio),
+    ];
+    final found = <Finding>[
+      if (detectors.isNotEmpty)
+        ...scanTree(root, detectors, locator: locator).findings,
+    ];
+    if (kinds.contains('accessibility')) {
+      found.addAll(
+        await runAccessibilityAudit(
+          root,
+          locator: locator,
+          devicePixelRatio: devicePixelRatio,
+        ),
+      );
+    }
+    return dedupeFindings(found);
+  }
+
+  static Set<String> _kinds(Object? value, Set<String> fallback) {
+    if (value == null) return fallback;
+    if (value is! List<Object?>) {
+      throw const AgentError('kinds must be a list');
+    }
+    final kinds = <String>{};
+    for (final kind in value) {
+      if (kind is! String || !scanKinds.contains(kind)) {
+        throw AgentError('unknown kind: $kind; use ${scanKinds.join(', ')}');
+      }
+      kinds.add(kind);
+    }
+    return kinds;
+  }
+
+  /// [finding] as the agent sees it.
+  Map<String, Object?> findingJson(Finding finding, OutputLimits limits) {
+    final source = finding.source;
+    final rect = finding.rect;
+    return {
+      'kind': finding.kind,
+      'severity': finding.severity.name,
+      'summary': limits.clip(finding.summary),
+      if (source != null)
+        'source': '${resolver().paths.relativePath(source.uri)}:${source.line}',
+      'route': ?finding.route,
+      if (rect != null) 'rect': rectList(rect),
+      'key': finding.key,
+    };
+  }
+
+  /// `scan`: the detectors on the current screen.
+  Future<Map<String, Object?>> scan(
+    Map<String, Object?> args,
+    OutputLimits limits,
+  ) async {
+    final kinds = _kinds(args['kinds'], const {
+      'overflow',
+      'truncated_text',
+      'oversized_image',
+    });
+    final found = await findingsFor(kinds);
+    final shown = found.take(limits.items).toList();
+    return {
+      'findings': [for (final f in shown) findingJson(f, limits)],
+      if (found.length > shown.length) 'more': found.length - shown.length,
+    };
+  }
+
+  /// `screenshot`: the whole app, or the handle's widget outlined, at most
+  /// `max_width` wide (default 800).
+  Future<Map<String, Object?>> screenshot(Map<String, Object?> args) async {
+    final target = args['handle'] is String ? element(args) : null;
+    final width = args['max_width'] is num
+        ? (args['max_width']! as num).round().clamp(100, 1600)
+        : 800;
+    final png = await capturePng(
+      target == null ? null : renderObjectOf(target),
+      maxWidth: width,
+    );
+    if (png == null) throw const AgentError('the capture failed');
+    return {'handle': ?args['handle'], 'png': png};
+  }
+
+  /// `stress_matrix` (plan Milestone 12, step 8): each run sets its
+  /// environment, waits for idle, scans, and takes a 400 px thumbnail.
+  /// Each distinct problem that a check can measure becomes a draft note
+  /// with the environment of the first run that showed it. Truncation is
+  /// often intended: an `info` finding is listed, never filed alone.
+  ///
+  /// The environment and every scroll position are put back afterwards,
+  /// so a second run starts from the same state and reports the same
+  /// findings; a draft already filed for a finding and environment is not
+  /// filed again.
+  Future<Map<String, Object?>> stressMatrix(
+    Map<String, Object?> args,
+    OutputLimits limits,
+    AgentCancel cancel,
+  ) async {
+    final kinds = _kinds(args['kinds'], const {
+      'overflow',
+      'truncated_text',
+      'accessibility',
+    });
+    List<T>? listOf<T>(String key, T? Function(Object? value) read) {
+      final value = args[key];
+      if (value == null) return null;
+      if (value is! List<Object?>) throw AgentError('$key must be a list');
+      return [
+        for (final item in value)
+          read(item) ?? (throw AgentError('$key: cannot read $item')),
+      ];
+    }
+
+    double? positive(Object? v) => v is num && v > 0 ? v.toDouble() : null;
+    T? byName<T extends Enum>(List<T> values, Object? v) {
+      for (final value in values) {
+        if (value.name == v) return value;
+      }
+      return null;
+    }
+
+    final base = controller.environment.value;
+    final root = appRoot;
+    final runs = stressRuns(
+      base: base,
+      height: base.viewport?.height ?? root.paintBounds.height,
+      widths: listOf('widths', positive),
+      textScales: listOf('textScales', positive),
+      directions: listOf('directions', (v) => byName(TextDirection.values, v)),
+      brightness: listOf('brightness', (v) => byName(Brightness.values, v)),
+      full: args['full'] == true,
+    );
+    final thumbnails = args['thumbnails'] != false;
+
+    await prepareToDrive();
+    final scroll = scrollSnapshot();
+    final runResults = <Map<String, Object?>>[];
+    final distinct = <String, Map<String, Object?>>{};
+    final drafts = <String>[];
+    final existing = <String>[];
+    try {
+      for (final (i, run) in runs.indexed) {
+        cancel.check();
+        controller.environment.value = run.environment;
+        await waitIdle(settleTimeout, cancel);
+        final found = await findingsFor(kinds);
+        cancel.check();
+        for (final finding in found) {
+          final seen = distinct[finding.key];
+          if (seen != null) {
+            (seen['runs']! as List<int>).add(i + 1);
+            continue;
+          }
+          distinct[finding.key] = {
+            ...findingJson(finding, limits),
+            'runs': <int>[i + 1],
+          };
+          final filed = _fileDraft(finding, run);
+          if (filed == null) continue;
+          (filed.$2 ? existing : drafts).add(filed.$1);
+        }
+        final png = thumbnails ? await capturePng(null, maxWidth: 400) : null;
+        runResults.add({
+          'run': i + 1,
+          'label': run.label,
+          'environment': run.environment.toJson(),
+          'findings': found.length,
+          'png': ?png,
+        });
+      }
+    } finally {
+      controller.environment.value = base;
+      await _frame();
+      restoreScroll(scroll);
+      await waitIdle(settleTimeout, AgentCancel());
+    }
+    return {
+      'runs': runResults,
+      'findings': distinct.values.toList(),
+      'drafts': drafts,
+      if (existing.isNotEmpty) 'existing': existing,
+      if (args['full'] == true && runs.length >= stressMaxRuns)
+        'truncated': 'at most $stressMaxRuns runs',
+    };
+  }
+
+  /// Files [finding] from [run] as a draft note on its nearest local
+  /// widget: `(id, false)` for a new draft, `(id, true)` when one for the
+  /// same finding and environment exists, null when not filed.
+  (String, bool)? _fileDraft(Finding finding, StressRun run) {
+    if (finding.severity == Severity.info) return null;
+    final checks = checksFor(finding);
+    if (checks.isEmpty) return null;
+    final environment = run.environment.toJson();
+    final envKey = jsonEncode(environment);
+    for (final note in controller.notes.notes) {
+      if (note.finding?['key'] == finding.key &&
+          jsonEncode(note.environment ?? const {}) == envKey) {
+        return (note.id, true);
+      }
+    }
+    final element = finding.element;
+    if (element == null || !element.mounted) return null;
+    var pick = pickFor(element);
+    // The widget written in this project, not the framework's inside it.
+    final local = pick.chain.defaultIndex;
+    if (local != null) pick = pick.selecting(local);
+    final note = _collector
+        .collect(
+          pick,
+          'Stress matrix (${run.label}): ${finding.summary}',
+          AnnotationIntent.bug,
+          context: pageContext(),
+          environment: environment,
+        )
+        .copyWith(finding: () => finding.toJson(), checks: checks);
+    final keep = onDraft;
+    if (keep == null) {
+      controller.notes.put(note);
+    } else {
+      keep(note, pick);
+    }
+    return (note.id, false);
   }
 
   /// Drops every handle: after a hot reload lines have moved, and a

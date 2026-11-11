@@ -5,6 +5,7 @@
 // serves MCP over HTTP on its own port. No dependency is added.
 
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import '../model/annotation.dart' show NoteStatus;
@@ -336,9 +337,53 @@ class McpServer {
         );
       }
     }
+    if (tool == 'stress_matrix' && result is Map<String, Object?>) {
+      return _text(jsonEncode(await _stressThumbnails({...result})));
+    }
     return _resultContent(
       result is Map<String, Object?> ? {...result} : result,
     );
+  }
+
+  /// Writes each run's thumbnail to `<dir>/stress/run_<n>.png` and puts
+  /// the path in its place: nine images in the tool result would cost the
+  /// agent's context, and it can open the ones it needs.
+  Future<Map<String, Object?>> _stressThumbnails(
+    Map<String, Object?> result,
+  ) async {
+    final runs = result['runs'];
+    if (runs is! List<Object?>) return result;
+    final folder = Directory('${store.root.path}/stress');
+    // Only this matrix's images: an older one may have had more runs.
+    if (folder.existsSync()) await folder.delete(recursive: true);
+    await folder.create(recursive: true);
+    final dir = store.root.uri.pathSegments.lastWhere((s) => s.isNotEmpty);
+    result['runs'] = [
+      for (final (i, run) in runs.indexed)
+        if (run is Map<String, Object?>)
+          await _thumbnail({...run}, folder, dir, i + 1)
+        else
+          run,
+    ];
+    return result;
+  }
+
+  Future<Map<String, Object?>> _thumbnail(
+    Map<String, Object?> run,
+    Directory folder,
+    String dir,
+    int number,
+  ) async {
+    final data = run.remove('png');
+    if (data is! String) return run;
+    try {
+      final name = 'run_$number.png';
+      await File('${folder.path}/$name').writeAsBytes(base64Decode(data));
+      run['thumbnail'] = '$dir/stress/$name';
+    } on FormatException {
+      run['thumbnail'] = null;
+    }
+    return run;
   }
 
   /// Runs the note's checks in the app (`verify_note`), then stores the

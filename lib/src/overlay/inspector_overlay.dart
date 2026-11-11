@@ -167,6 +167,12 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     contentKey: widget.contentKey,
     resolver: () => _tracker.resolver,
     pageContext: () => context,
+    // A stress matrix draft is pinned and kept on the bridge, like a note
+    // made from a finding.
+    onDraft: (note, pick) {
+      _pin(note, pick);
+      unawaited(_sync?.save(note));
+    },
   );
 
   /// Takes the agent's commands from the bridge while control is on; null
