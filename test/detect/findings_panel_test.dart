@@ -1,6 +1,7 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pinpoint/pinpoint.dart';
 import 'package:pinpoint/src/detect/debug_paint.dart';
@@ -267,6 +268,77 @@ void main() {
       find.byKey(FindingsPanel.noteKey(finding)),
     );
     expect(button.onPressed, isNull);
+  });
+
+  testWidgets('a finding with no widget says why, and Copy puts the full '
+      'error on the clipboard', (tester) async {
+    final copied = <String>[];
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == 'Clipboard.setData') {
+        copied.add((call.arguments as Map)['text'] as String);
+      }
+      return null;
+    });
+    addTearDown(
+      () => messenger.setMockMethodCallHandler(SystemChannels.platform, null),
+    );
+    await pumpHost(tester);
+    await openPanel(tester);
+    controller.findings.addCaptured([
+      const Finding(
+        kind: 'exception',
+        severity: Severity.error,
+        summary: 'AssertionErrorImpl: Assertion failed: text_editing',
+        data: {
+          'exception': 'Assertion failed: text_editing.dart:42\nsecond line',
+          'stack': ['#0 frame one', '#1 frame two'],
+          'library': 'services library',
+        },
+      ),
+    ]);
+    await tester.pump();
+    final finding = controller.findings.findings.single;
+
+    final tooltip = tester.widget<Tooltip>(
+      find.ancestor(
+        of: find.byKey(FindingsPanel.noteKey(finding)),
+        matching: find.byType(Tooltip),
+      ),
+    );
+    expect(tooltip.message, contains('No widget'));
+
+    await tester.tap(find.byKey(FindingsPanel.copyKey(finding)));
+    await tester.pump();
+    expect(copied, hasLength(1));
+    expect(
+      copied.single,
+      'AssertionErrorImpl: Assertion failed: text_editing\n'
+      '\n'
+      'Assertion failed: text_editing.dart:42\n'
+      'second line\n'
+      '\n'
+      'Library: services library\n'
+      '\n'
+      'Stack:\n'
+      '#0 frame one\n'
+      '#1 frame two',
+    );
+    expect(find.text('Error copied'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 5));
+  });
+
+  testWidgets('a finding with a widget has no Copy button', (tester) async {
+    await pumpHost(tester);
+    await narrow(tester);
+    await openPanel(tester);
+    await scan(tester);
+    final finding = controller.findings.findings.firstWhere(
+      (f) => f.element != null,
+    );
+    expect(find.byKey(FindingsPanel.noteKey(finding)), findsOneWidget);
+    expect(find.byKey(FindingsPanel.copyKey(finding)), findsNothing);
   });
 
   testWidgets('Clear empties the list', (tester) async {

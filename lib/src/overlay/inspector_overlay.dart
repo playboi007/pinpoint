@@ -1027,6 +1027,18 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     }
   }
 
+  /// Puts a finding with no widget on the clipboard as plain text.
+  Future<void> _copyFinding(Finding finding) async {
+    try {
+      await Clipboard.setData(
+        ClipboardData(text: FindingsPanel.copyText(finding)),
+      );
+      if (mounted) _toasts.show('Error copied');
+    } catch (error) {
+      if (mounted) _toasts.show('Copy failed: ${_short(error)}', error: true);
+    }
+  }
+
   static String _short(Object error) {
     final text = error.toString().replaceFirst('Exception: ', '');
     return text.length <= 160 ? text : '${text.substring(0, 159)}…';
@@ -1139,6 +1151,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
                       onAudit: () => unawaited(_auditAccessibility()),
                       onMakeNote: (finding) =>
                           unawaited(_noteFromFinding(finding)),
+                      onCopy: (finding) => unawaited(_copyFinding(finding)),
                     ),
                     FindingsButton(
                       controller: widget.controller,

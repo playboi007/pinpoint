@@ -93,7 +93,8 @@ class FindingsButton extends StatelessWidget {
 
 /// The findings list: "Scan this screen", the detector switches, and every
 /// finding grouped by kind. Hovering a finding outlines it on the app;
-/// "Make note" turns it into a draft note.
+/// "Make note" turns it into a draft note. A finding with no widget (an
+/// error from the engine or an uncaught error) has "Copy" instead.
 class FindingsPanel extends StatelessWidget {
   const FindingsPanel({
     super.key,
@@ -102,6 +103,7 @@ class FindingsPanel extends StatelessWidget {
     required this.onScan,
     required this.onAudit,
     required this.onMakeNote,
+    required this.onCopy,
     required this.onClose,
   });
 
@@ -131,6 +133,32 @@ class FindingsPanel extends StatelessWidget {
   static Key noteKey(Finding finding) =>
       ValueKey<String>('pinpoint.findings.note.${finding.key}');
 
+  /// The "Copy" button of [finding], shown when it has no widget.
+  static Key copyKey(Finding finding) =>
+      ValueKey<String>('pinpoint.findings.copy.${finding.key}');
+
+  /// Why a finding with no widget has no note.
+  static const String noWidgetMessage =
+      'No widget: this error comes from outside your widgets (the engine, '
+      'or code nothing caught), so there is nothing to pin a note on. '
+      'Copy it instead.';
+
+  /// [finding] as plain text for the clipboard: the summary, the full
+  /// message, the library and context when known, and the stack.
+  static String copyText(Finding finding) {
+    final data = finding.data;
+    final stack = data['stack'];
+    return [
+      finding.summary,
+      if (data['exception'] case final String exception) exception,
+      [
+        if (data['library'] case final String library) 'Library: $library',
+        if (data['context'] case final String context) 'Context: $context',
+      ].join('\n'),
+      if (stack is List && stack.isNotEmpty) ['Stack:', ...stack].join('\n'),
+    ].where((part) => part.isNotEmpty).join('\n\n');
+  }
+
   static const double width = 360;
 
   final FindingsController findings;
@@ -144,6 +172,9 @@ class FindingsPanel extends StatelessWidget {
   final VoidCallback onAudit;
 
   final void Function(Finding finding) onMakeNote;
+
+  /// Puts [copyText] of a finding with no widget on the clipboard.
+  final void Function(Finding finding) onCopy;
   final VoidCallback onClose;
 
   @override
@@ -385,14 +416,30 @@ class FindingsPanel extends StatelessWidget {
                 padding: const EdgeInsets.fromLTRB(8, 2, 8, 0),
                 child: Text(number, style: theme.textTheme.labelMedium),
               )
-            else
+            else if (finding.element == null) ...[
+              // A finding with no widget (an engine assertion, an uncaught
+              // error) has nothing to pin a note on: say why, and offer the
+              // full error as text.
+              Tooltip(
+                message: noWidgetMessage,
+                child: TextButton(
+                  key: noteKey(finding),
+                  onPressed: null,
+                  child: const Text('Make note'),
+                ),
+              ),
+              IconButton(
+                key: copyKey(finding),
+                tooltip: 'Copy error',
+                iconSize: 18,
+                visualDensity: VisualDensity.compact,
+                onPressed: () => onCopy(finding),
+                icon: const Icon(Icons.copy),
+              ),
+            ] else
               TextButton(
                 key: noteKey(finding),
-                // A finding with no widget (an uncaught error) has nothing
-                // to pin a note on.
-                onPressed: finding.element == null
-                    ? null
-                    : () => onMakeNote(finding),
+                onPressed: () => onMakeNote(finding),
                 child: const Text('Make note'),
               ),
           ],
@@ -441,6 +488,7 @@ class FindingsPanelLayer extends StatelessWidget {
     required this.onScan,
     required this.onAudit,
     required this.onMakeNote,
+    required this.onCopy,
   });
 
   final PinPointController controller;
@@ -448,6 +496,7 @@ class FindingsPanelLayer extends StatelessWidget {
   final VoidCallback onScan;
   final VoidCallback onAudit;
   final void Function(Finding finding) onMakeNote;
+  final void Function(Finding finding) onCopy;
 
   @override
   Widget build(BuildContext context) {
@@ -467,6 +516,7 @@ class FindingsPanelLayer extends StatelessWidget {
                 onScan: onScan,
                 onAudit: onAudit,
                 onMakeNote: onMakeNote,
+                onCopy: onCopy,
                 onClose: () => panelOpen.value = false,
               ),
             ),
