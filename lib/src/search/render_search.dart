@@ -268,6 +268,40 @@ class RenderWalk {
   final Duration elapsed;
 }
 
+/// The children of [node] that the walks go into, in diagnostics order.
+///
+/// The diagnostics mark offstage children, which keep stale geometry:
+/// routes beneath an opaque route, IndexedStack's hidden children,
+/// Offstage, kept-alive slivers. Those are skipped.
+///
+/// But a custom render object that keeps children in its own fields often
+/// overrides only `visitChildren`, and its `debugDescribeChildren` is the
+/// default empty list (material_table_view's `RenderTableScaffold` holds
+/// the whole table body that way). `visitChildren` is always complete,
+/// because attach and layout depend on it, so a child it reaches that the
+/// diagnostics leave out is walked too.
+List<RenderObject> _onstageChildren(RenderObject node) {
+  final children = <RenderObject>[];
+  final described = <RenderObject>[];
+  for (final child in node.debugDescribeChildren()) {
+    final value = child.value;
+    // The theater also lists plain messages ("no offstage children").
+    if (value is! RenderObject) continue;
+    described.add(value);
+    if (child.style == DiagnosticsTreeStyle.offstage) continue;
+    children.add(value);
+  }
+  final visited = <RenderObject>[];
+  node.visitChildren(visited.add);
+  // The usual case: the diagnostics list every child.
+  if (visited.length <= described.length) return children;
+  final known = Set<RenderObject>.identity()..addAll(described);
+  for (final child in visited) {
+    if (!known.contains(child)) children.add(child);
+  }
+  return children;
+}
+
 class _VisibleWalk {
   _VisibleWalk(
     this.onVisit, {
@@ -296,7 +330,7 @@ class _VisibleWalk {
     }
     visited++;
 
-    final List<DiagnosticsNode> children;
+    final List<RenderObject> children;
     try {
       if (!node.attached) return;
       if (depth > 0 || includeRoot) {
@@ -313,18 +347,13 @@ class _VisibleWalk {
           }
         }
       }
-      children = node.debugDescribeChildren();
+      children = _onstageChildren(node);
     } catch (_) {
       errors++;
       return;
     }
 
-    for (final child in children) {
-      // Offstage children keep stale geometry, as in the pick walk.
-      if (child.style == DiagnosticsTreeStyle.offstage) continue;
-      final value = child.value;
-      if (value is! RenderObject) continue;
-
+    for (final value in children) {
       final Matrix4 childTransform;
       var childClip = clip;
       try {
@@ -376,7 +405,7 @@ class _Walk {
     visited++;
 
     final Offset local;
-    final List<DiagnosticsNode> children;
+    final List<RenderObject> children;
     // Each node's read is guarded (engineering rule 4). A render object not
     // laid out yet throws on `paintBounds`; a custom one may throw anywhere.
     try {
@@ -407,21 +436,14 @@ class _Walk {
       }
       // `debugDescribeChildren()` allocates a diagnostics node per child. If
       // the walk is over budget, replace this first, but the replacement
-      // must still skip offstage children (see below).
-      children = node.debugDescribeChildren();
+      // must still skip offstage children (see [_onstageChildren]).
+      children = _onstageChildren(node);
     } catch (_) {
       errors++;
       return;
     }
 
-    for (final child in children) {
-      // Offstage children keep stale geometry: routes beneath an opaque
-      // route, IndexedStack's hidden children, Offstage, kept-alive slivers.
-      if (child.style == DiagnosticsTreeStyle.offstage) continue;
-      final value = child.value;
-      // The theater also lists plain messages ("no offstage children").
-      if (value is! RenderObject) continue;
-
+    for (final value in children) {
       final Matrix4 childTransform;
       try {
         // Prune only on clips, never on the parent's own bounds: children can

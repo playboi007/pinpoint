@@ -672,6 +672,78 @@ void main() {
       expect(RenderSearch.globalRectOf(detached), isNull);
     });
   });
+
+  group('children the diagnostics leave out', () {
+    // material_table_view's RenderTableScaffold keeps its header, body and
+    // footer in its own fields and overrides visitChildren only. Its
+    // debugDescribeChildren is the default empty list, so the walk stopped
+    // at the whole table.
+    testWidgets('the pick walk reaches them through visitChildren', (
+      tester,
+    ) async {
+      const cell = Key('cell');
+      final root = await pumpFixture(
+        tester,
+        const _Undescribed(
+          child: Padding(
+            padding: EdgeInsets.all(20),
+            child: SizedBox(key: cell, width: 40, height: 30),
+          ),
+        ),
+      );
+      final picked = pick(root, const Offset(30, 30));
+      expect(picked.first, same(ro(tester, cell)));
+    });
+
+    testWidgets('visitVisible visits them', (tester) async {
+      const cell = Key('cell');
+      final root = await pumpFixture(
+        tester,
+        const _Undescribed(
+          child: Align(
+            alignment: Alignment.topLeft,
+            child: SizedBox(key: cell, width: 40, height: 30),
+          ),
+        ),
+      );
+      final seen = <RenderObject, Rect>{};
+      RenderSearch.visitVisible(root, (node, rect, _) => seen[node] = rect);
+      expect(seen[ro(tester, cell)], const Rect.fromLTWH(0, 0, 40, 30));
+    });
+
+    testWidgets('a child the diagnostics mark offstage stays skipped', (
+      tester,
+    ) async {
+      const shown = Key('shown');
+      const hidden = Key('hidden');
+      final root = await pumpFixture(
+        tester,
+        const IndexedStack(
+          children: [
+            SizedBox(key: shown, width: 50, height: 50),
+            SizedBox(key: hidden, width: 50, height: 50),
+          ],
+        ),
+      );
+      final picked = pick(root, const Offset(10, 10));
+      expect(picked, contains(ro(tester, shown)));
+      expect(picked, isNot(contains(ro(tester, hidden, skipOffstage: false))));
+    });
+  });
+}
+
+/// A proxy whose diagnostics list no children, like a custom render object
+/// that overrides only `visitChildren`.
+class _Undescribed extends SingleChildRenderObjectWidget {
+  const _Undescribed({super.child});
+
+  @override
+  RenderObject createRenderObject(BuildContext context) => _RenderUndescribed();
+}
+
+class _RenderUndescribed extends RenderProxyBox {
+  @override
+  List<DiagnosticsNode> debugDescribeChildren() => const [];
 }
 
 /// A leaf whose paint bounds throw, like a render object read before layout.
