@@ -71,9 +71,8 @@ class AgentBridge {
   Future<void> shutdown(WidgetTester tester) async {
     await tester.pumpWidget(const SizedBox.shrink());
     queue.close();
-    for (var i = 0; i < 3; i++) {
-      await tester.pump(const Duration(milliseconds: 10));
-    }
+    // Past the tap dots and the flash outline.
+    await tester.pump(const Duration(seconds: 2));
     BridgeClient.debugClient = null;
   }
 

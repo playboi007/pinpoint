@@ -147,6 +147,101 @@ class SourceIndex {
     }
   }
 
+  /// Whether [element] is the very constructor call [anchor] names:
+  /// [stillMatches], and the same line and column. Handles use this:
+  /// within one run a widget does not move, so another line is another
+  /// widget.
+  bool matchesExactly(Element element, NoteAnchor anchor) {
+    if (!stillMatches(element, anchor)) return false;
+    final location = resolver.locationOf(element);
+    return location != null &&
+        location.line == anchor.line &&
+        location.column == anchor.column;
+  }
+
+  /// The element for [anchor] with no nearest-line fallback: entry
+  /// [NoteAnchor.ordinal] of the elements at its exact line and column, or
+  /// null.
+  Element? resolveExact(NoteAnchor anchor, {required Element root}) {
+    final exact = [
+      for (final element in find(anchor, root: root))
+        if (resolver.locationOf(element) case final location?
+            when location.line == anchor.line &&
+                location.column == anchor.column)
+          element,
+    ];
+    return _pick(anchor, exact);
+  }
+
+  /// Every element under [root] that fits the query, in tree order: of
+  /// [type] (a type name), passing [where], created in [file] and at
+  /// [line]. Only the filters given apply.
+  ///
+  /// [file] is a path as [SourcePaths.relativePath] gives it, an absolute
+  /// path, or its tail (`lib/home.dart`): an agent names files from the
+  /// project folder even when no project root is set. With a [line] and a
+  /// [type], an edit that moved the widget is followed to the nearest line
+  /// of that type, as for a note's anchor.
+  List<Element> query({
+    required Element root,
+    String? file,
+    int? line,
+    String? type,
+    bool Function(Element element)? where,
+  }) {
+    debugWalks++;
+    final found = <(Element, int?)>[];
+    var visited = 0;
+    final stack = <Element>[root];
+    while (stack.isNotEmpty) {
+      final element = stack.removeLast();
+      if (++visited > maxNodes) break;
+      // Each element's read is guarded (engineering rule 4).
+      try {
+        final children = <Element>[];
+        element.visitChildren(children.add);
+        stack.addAll(children.reversed);
+        if (type != null && element.widget.runtimeType.toString() != type) {
+          continue;
+        }
+        if (where != null && !where(element)) continue;
+        if (file == null && line == null) {
+          found.add((element, null));
+          continue;
+        }
+        debugLocationReads++;
+        final location = resolver.locationOf(element);
+        if (location == null) continue;
+        if (file != null && !fileMatches(location.uri, file)) continue;
+        found.add((element, location.line));
+      } catch (_) {
+        continue;
+      }
+    }
+    if (line == null) return [for (final f in found) f.$1];
+    var tier = found.where((f) => f.$2 == line);
+    if (tier.isEmpty && type != null && file != null && found.isNotEmpty) {
+      var nearest = (found.first.$2! - line).abs();
+      for (final f in found) {
+        nearest = math.min(nearest, (f.$2! - line).abs());
+      }
+      tier = found.where((f) => (f.$2! - line).abs() == nearest);
+    }
+    return [for (final f in tier) f.$1];
+  }
+
+  /// Whether the creation [location] is [file]: the same file as
+  /// [SourcePaths.sameFile] says, or a relative [file] that is its tail.
+  bool fileMatches(String location, String file) {
+    if (resolver.paths.sameFile(location, file)) return true;
+    final want = normalizeSourcePath(file);
+    if (want.startsWith('/') || want.isEmpty) return false;
+    final path = normalizeSourcePath(location);
+    return resolver.paths.caseSensitive
+        ? path.endsWith('/$want')
+        : path.toLowerCase().endsWith('/${want.toLowerCase()}');
+  }
+
   /// The index of the lazy-list item [element] is in: the nearest render
   /// ancestor that is a child of a sliver list or grid. Null outside one.
   static int? itemIndexOf(Element element) {

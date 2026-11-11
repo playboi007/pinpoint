@@ -216,4 +216,45 @@ void main() {
     expect([for (final c in content) (c! as Map)['type']], ['text', 'image']);
     expect(textOf(result), isNot(contains('iVBOR')));
   });
+
+  test('inspect comes back as note text at the asked detail', () async {
+    final note = {
+      'id': 'pp_inspect',
+      'comment': '',
+      'target': {
+        'widget': 'ElevatedButton',
+        'description': 'ElevatedButton',
+        'source': {'file': 'lib/home.dart', 'line': 12, 'column': 5},
+        'rect': {'x': 10, 'y': 20, 'w': 100, 'h': 40},
+        'constraints': 'BoxConstraints(0.0<=w<=800.0, 0.0<=h<=600.0)',
+        'properties': {'onPressed': 'Closure'},
+      },
+      'ancestors': [
+        {
+          'widget': 'Column',
+          'source': {'file': 'lib/home.dart', 'line': 10, 'column': 3},
+        },
+      ],
+      'subtree': 'ElevatedButton\n  Text "Save"',
+    };
+    for (final (detail, has, hasNot) in [
+      ('compact', 'Source: lib/home.dart:12:5', 'Enclosing:'),
+      ('standard', 'Enclosing: Column (lib/home.dart:10:3)', 'Subtree:'),
+      ('full', 'Subtree:', 'Comment:'),
+    ]) {
+      final app = appTakesOne(
+        (command) => {
+          'ok': true,
+          'result': {'handle': 'h1', 'detail': detail, 'note': note},
+        },
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      final result = await tool('inspect', {'handle': 'h1', 'detail': detail});
+      await app;
+      final text = textOf(result);
+      expect(text, startsWith('h1: ElevatedButton'), reason: detail);
+      expect(text, contains(has), reason: detail);
+      expect(text, isNot(contains(hasNot)), reason: detail);
+    }
+  });
 }

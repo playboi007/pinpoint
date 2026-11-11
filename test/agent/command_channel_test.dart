@@ -239,10 +239,7 @@ class _ManyTexts extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Scaffold(
     body: Wrap(
-      children: [
-        Text('long ' * 100),
-        for (var i = 0; i < 40; i++) Text('t$i'),
-      ],
+      children: [Text('long ' * 100), for (var i = 0; i < 40; i++) Text('t$i')],
     ),
   );
 }

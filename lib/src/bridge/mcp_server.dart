@@ -322,6 +322,17 @@ class McpServer {
       return _text('${answer['error']}', isError: true);
     }
     final result = answer['result'];
+    if (tool == 'inspect' && result is Map<String, Object?>) {
+      if (result['note'] case final Map<String, Object?> note) {
+        return _text(
+          inspectText(
+            '${result['handle']}',
+            note,
+            NoteDetail.byName(input['detail']) ?? NoteDetail.standard,
+          ),
+        );
+      }
+    }
     return _resultContent(
       result is Map<String, Object?> ? {...result} : result,
     );

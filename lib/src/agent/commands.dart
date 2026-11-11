@@ -5,6 +5,7 @@ import '../capture/context_collector.dart';
 import '../core/pinpoint_controller.dart';
 import '../detect/detector.dart';
 import '../model/annotation.dart';
+import '../search/pick_result.dart';
 import '../search/render_search.dart';
 import '../search/source_index.dart';
 import '../search/source_resolver.dart';
@@ -118,14 +119,17 @@ class HandleTable {
     }
     final anchor = handle.anchor;
     final element = handle.element;
+    // Exact, not the nearest line: within one run a widget does not move,
+    // so a widget on another line is another widget. After a hot reload
+    // the handles are dropped (AgentCommands.reassemble).
     if (element.mounted &&
         (anchor == null ||
             !anchor.resolvable ||
-            index.stillMatches(element, anchor))) {
+            index.matchesExactly(element, anchor))) {
       return element;
     }
     if (anchor != null && anchor.resolvable) {
-      final again = index.resolve(anchor, root: root);
+      final again = index.resolveExact(anchor, root: root);
       if (again != null) return handle.element = again;
     }
     throw AgentError(
@@ -148,7 +152,14 @@ class AgentCommands {
     required this.appKey,
     required this.contentKey,
     required this.resolver,
+    required this.pageContext,
   });
+
+  /// Pinpoint's own context, above the app: the collector describes the
+  /// page from it, so no app element is touched for that.
+  final BuildContext Function() pageContext;
+
+  final ContextCollector _collector = ContextCollector();
 
   final PinPointController controller;
 
@@ -174,6 +185,9 @@ class AgentCommands {
     try {
       final Object result = switch (tool) {
         'get_screen' => getScreen(limits),
+        'find_widgets' => findWidgets(args, limits),
+        'inspect' => inspect(args),
+        'flash' => flash(args),
         _ => throw AgentError('unknown tool: $tool'),
       };
       return AgentControl.ok(result);
@@ -181,6 +195,142 @@ class AgentCommands {
       return AgentControl.error(failure.message);
     }
   }
+
+  /// Drops every handle: after a hot reload lines have moved, and a
+  /// handle must never land on another widget.
+  void reassemble() => handles.clear();
+
+  /// The live element of the handle in `args['handle']`.
+  Element element(Map<String, Object?> args) {
+    final id = args['handle'];
+    if (id is! String || id.isEmpty) {
+      throw const AgentError('handle is required');
+    }
+    return handles.resolve(id, root: contentRoot, index: sourceIndex());
+  }
+
+  /// Live widgets by source line, type, text or key: the reverse lookup.
+  /// Visible ones first, then the rest (offstage routes, scrolled away).
+  Map<String, Object?> findWidgets(
+    Map<String, Object?> args,
+    OutputLimits limits,
+  ) {
+    final file = _string(args['file']);
+    final line = args['line'];
+    final type = _string(args['type']);
+    final text = _string(args['text'])?.toLowerCase();
+    final key = _string(args['key']);
+    if (file == null && type == null && text == null && key == null) {
+      throw const AgentError('give at least one of file, type, text or key');
+    }
+    if (line != null && (line is! int || file == null)) {
+      throw const AgentError('line must be an integer, with a file');
+    }
+    final matches = sourceIndex().query(
+      root: contentRoot,
+      file: file,
+      line: line as int?,
+      type: type,
+      where: text == null && key == null
+          ? null
+          : (element) {
+              if (key != null &&
+                  !(element.widget.key?.toString().contains(key) ?? false)) {
+                return false;
+              }
+              if (text != null) {
+                if (_isTextTwin(element)) return false;
+                final shown = textOf(element);
+                if (shown == null || !shown.toLowerCase().contains(text)) {
+                  return false;
+                }
+              }
+              return true;
+            },
+    );
+    bool visible(Element e) {
+      final renderObject = renderObjectOf(e);
+      return renderObject != null &&
+          RenderSearch.visibleRectOf(renderObject) != null;
+    }
+
+    final ordered = [
+      ...matches.where(visible),
+      ...matches.where((e) => !visible(e)),
+    ];
+    final shown = ordered.take(limits.items).toList();
+    return {
+      'widgets': describeAll(shown, limits),
+      if (ordered.length > shown.length) 'more': ordered.length - shown.length,
+    };
+  }
+
+  /// The Milestone 4 payload for the handle's widget, without a
+  /// screenshot.
+  Map<String, Object?> inspect(Map<String, Object?> args) {
+    final target = element(args);
+    final pick = pickFor(target);
+    final note = _collector.collect(
+      pick,
+      '',
+      AnnotationIntent.improve,
+      context: pageContext(),
+      environment: controller.environment.toJson(),
+    );
+    return {
+      'handle': args['handle'],
+      if (args['detail'] case final String detail) 'detail': detail,
+      'note': note.toJson(),
+    };
+  }
+
+  /// Outlines the handle's widget for 1.5 seconds, so the user sees what
+  /// the agent means.
+  Map<String, Object?> flash(Map<String, Object?> args) {
+    final target = element(args);
+    final renderObject = renderObjectOf(target);
+    if (renderObject == null) {
+      throw const AgentError('the widget has no layout to show');
+    }
+    controller.agent.flashOn(renderObject);
+    final rect = RenderSearch.globalRectOf(renderObject);
+    return {
+      'handle': args['handle'],
+      if (rect != null) 'rect': rectList(rect),
+      'visible': RenderSearch.visibleRectOf(renderObject) != null,
+    };
+  }
+
+  /// A pick of [element] itself, as a pin or a finding makes one.
+  PickResult pickFor(Element element) {
+    final root = appKey.currentContext;
+    if (root is! Element) throw const AgentError('the app is not on screen');
+    final pick = PickResult.forElement(
+      element,
+      rootElement: root,
+      chainBoundary: contentRoot,
+      resolver: resolver(),
+    );
+    if (pick == null) {
+      throw const AgentError('the widget is not laid out (off screen?)');
+    }
+    return pick;
+  }
+
+  /// A `RichText` that a `Text` built: the `Text` already stands for it.
+  static bool _isTextTwin(Element element) {
+    if (element.widget is! RichText) return false;
+    var twin = false;
+    var steps = 0;
+    element.visitAncestorElements((ancestor) {
+      twin = ancestor.widget is Text;
+      return !twin && ++steps < 3;
+    });
+    return twin;
+  }
+
+  static String? _string(Object? value) =>
+      value is String && value.isNotEmpty ? value : null;
 
   /// The app's boundary render object. Throws when the app is not on
   /// screen.

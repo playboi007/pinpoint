@@ -37,6 +37,32 @@ String noteText(Map<String, Object?> note, NoteDetail detail) =>
       NoteDetail.full => _full(note),
     };
 
+/// The widget of [note] (a note payload from `inspect`) as text at
+/// [detail], headed by its [handle]: the note's text without the note's
+/// own parts (id, comment, status, replies).
+String inspectText(
+  String handle,
+  Map<String, Object?> note,
+  NoteDetail detail,
+) {
+  final target = _map(note['target']);
+  final name = _string(target['widget']) ?? '?';
+  final body = switch (detail) {
+    NoteDetail.compact => _location(note),
+    NoteDetail.standard => _standard(note).split('\n').skip(2).toList(),
+    NoteDetail.full => [
+      ..._standard(note).split('\n').skip(2),
+      for (final MapEntry(:key, :value) in _map(target['properties']).entries)
+        if (value is String) '  $key: ${_line(value)}',
+      if (_string(note['subtree']) case final subtree?) ...[
+        'Subtree:',
+        for (final line in subtree.split('\n')) '  $line',
+      ],
+    ],
+  };
+  return ['$handle: $name', ...body.where((l) => l.isNotEmpty)].join('\n');
+}
+
 String _header(Map<String, Object?> note) {
   final id = _string(note['id']) ?? '?';
   final parts = [?_string(note['intent']), ?_string(note['status'])];

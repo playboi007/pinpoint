@@ -166,6 +166,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     appKey: widget.appKey,
     contentKey: widget.contentKey,
     resolver: () => _tracker.resolver,
+    pageContext: () => context,
   );
 
   /// Takes the agent's commands from the bridge while control is on; null
@@ -363,9 +364,9 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
   void reassemble() {
     super.reassemble();
     // After a hot reload held elements may be stale and lines may have
-    // moved: every pin is looked up again. Handles re-resolve from their
-    // anchors on use.
+    // moved: every pin is looked up again, and the agent's handles go.
     _pins.reset();
+    _agentCommands.reassemble();
   }
 
   @override
