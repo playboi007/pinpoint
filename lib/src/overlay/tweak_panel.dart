@@ -4,8 +4,12 @@ import 'package:flutter/services.dart';
 
 import '../info/widget_info.dart';
 import '../search/pick_result.dart';
+import '../theme/controls.dart';
+import '../theme/marks.dart';
+import '../theme/pinpoint_tokens.dart';
 import '../tweak/tweak_scope.dart';
 import '../tweak/tweak_session.dart';
+import 'panel_parts.dart';
 
 /// Sets [property] of [target] to [value]; returns whether it took.
 typedef TweakApply = bool Function(
@@ -20,6 +24,9 @@ typedef TweakApply = bool Function(
 /// It edits values the widget already has. Wrapping the widget in another
 /// one (for example a `Padding`) has no render object to edit, so that
 /// stays a written request in the comment.
+///
+/// The tab's footer ([TweakFooter]) is a separate widget: the info panel
+/// keeps it under the scrolling body.
 class TweakTab extends StatefulWidget {
   const TweakTab({
     super.key,
@@ -46,9 +53,16 @@ class TweakTab extends StatefulWidget {
   /// The key of the step button for [step] (1, 4 or 8).
   static Key stepKey(int step) => ValueKey<String>('pinpoint.tweak.step.$step');
 
-  /// The key of the button that resets [property] in [section].
+  /// The key of the button that resets [property] in [section]. It shows
+  /// beside the editor in a section with several editable properties; with
+  /// one, the section's own button ([sectionResetKey]) does the same.
   static Key resetKey(String section, String property) =>
       ValueKey<String>('pinpoint.tweak.$section.$property.reset');
+
+  /// The key of the button in the heading of [section] that resets every
+  /// tweak in it.
+  static Key sectionResetKey(String section) =>
+      ValueKey<String>('pinpoint.tweak.$section.reset');
 
   static const Key resetAllKey = ValueKey<String>('pinpoint.tweak.resetAll');
   static const Key emptyKey = ValueKey<String>('pinpoint.tweak.empty');
@@ -73,10 +87,7 @@ class _TweakTabState extends State<TweakTab> {
   }
 
   Widget _build(BuildContext context) {
-    final theme = Theme.of(context);
-    final muted = theme.textTheme.bodySmall?.copyWith(
-      color: theme.colorScheme.onSurfaceVariant,
-    );
+    final tokens = PinPointTokens.of(context);
     List<TweakTarget> targets;
     try {
       targets = tweakTargetsFor(widget.selection);
@@ -85,160 +96,191 @@ class _TweakTabState extends State<TweakTab> {
       // next frame; until then there is nothing to read.
       targets = const <TweakTarget>[];
     }
+    final chain = constraintChain(widget.selection.renderObject);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Row(
           children: [
-            Text('Step', style: muted),
-            const SizedBox(width: 8),
-            for (final step in const [1, 4, 8])
-              Padding(
-                padding: const EdgeInsets.only(right: 4),
-                child: ChoiceChip(
-                  key: TweakTab.stepKey(step),
-                  label: Text('$step'),
-                  selected: _step == step,
-                  visualDensity: VisualDensity.compact,
-                  onSelected: (_) => setState(() => _step = step),
-                ),
-              ),
+            SizedBox(width: panelLabelWidth, child: const CapsText('STEP')),
+            DraftSegmented<int>(
+              items: const [(1, '1'), (4, '4'), (8, '8')],
+              value: _step,
+              onChanged: (step) => setState(() => _step = step),
+              cellKey: TweakTab.stepKey,
+            ),
           ],
         ),
-        if (targets.isEmpty)
-          Padding(
+        if (targets.isEmpty) ...[
+          const SizedBox(height: PinPointSizes.sectionGap),
+          Container(
             key: TweakTab.emptyKey,
-            padding: const EdgeInsets.symmetric(vertical: 8),
+            padding: const EdgeInsets.only(top: 10),
+            decoration: BoxDecoration(
+              border: Border(top: BorderSide(color: tokens.rule)),
+            ),
             child: Text(
               'Nothing to tweak on this widget. Tweak edits padding, size, '
               'flex, alignment, text style and decoration it already has.',
-              style: muted,
+              style: tokens.label,
             ),
           ),
-        for (final target in targets) _section(theme, target),
-        if (!widget.session.isEmpty)
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              key: TweakTab.resetAllKey,
-              onPressed: widget.session.resetAll,
-              icon: const Icon(Icons.restart_alt, size: 16),
-              label: Text('Reset all ${widget.session.length}'),
-            ),
-          ),
-        Padding(
-          padding: const EdgeInsets.only(top: 8),
-          child: Text(
-            'To add a widget (for example wrap this in a Padding), write it '
-            'in the comment.',
-            style: muted,
-          ),
-        ),
-        TextButton(
+        ],
+        for (final (n, target) in targets.indexed) ...[
+          const SizedBox(height: PinPointSizes.sectionGap),
+          _section(tokens, target, n + 1),
+        ],
+        const SizedBox(height: PinPointSizes.sectionGap),
+        _ChainSection(
           key: TweakTab.chainKey,
-          style: TextButton.styleFrom(alignment: Alignment.centerLeft),
-          onPressed: () => setState(() => _showChain = !_showChain),
-          child: Text(
-            _showChain
-                ? 'Hide constraints from above'
-                : 'Constraints from above',
-          ),
+          heading: sectionHeading(targets.length + 1, 'Constraint chain'),
+          rows: chain,
+          expanded: _showChain,
+          onToggle: () => setState(() => _showChain = !_showChain),
         ),
-        if (_showChain)
-          for (final row in constraintChain(widget.selection.renderObject))
-            _Row(
-              name: row.$1,
-              child: Text(row.$2, style: theme.textTheme.bodySmall),
-            ),
+        const SizedBox(height: PinPointSizes.sectionGap),
+        Text(
+          'To add a widget (for example wrap this in a Padding), write it '
+          'in the comment.',
+          style: tokens.label.copyWith(fontSize: 11, height: 14 / 11),
+        ),
       ],
     );
   }
 
-  Widget _section(ThemeData theme, TweakTarget target) {
-    final title = theme.textTheme.labelMedium?.copyWith(
-      color: theme.colorScheme.primary,
-    );
-    final muted = theme.textTheme.bodySmall?.copyWith(
-      color: theme.colorScheme.onSurfaceVariant,
-    );
+  Widget _section(PinPointTokens tokens, TweakTarget target, int number) {
     final section = target.section;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    final tweaks = <Tweak>[
+      for (final property in section.properties)
+        ?widget.session.tweakOf(target, property.name),
+    ];
+    final editable = section.properties.where((p) => p.editable).length;
+    final created = target.createdBy;
+    return PanelSection(
+      heading: sectionHeading(number, section.title),
+      detail:
+          '${target.renderObject.runtimeType}'
+          '${created == null ? '' : ' from $created'}',
+      modified: tweaks.isNotEmpty,
+      onReset: tweaks.isEmpty
+          ? null
+          : () {
+              for (final tweak in tweaks) {
+                widget.session.reset(tweak);
+              }
+            },
+      resetKey: TweakTab.sectionResetKey(section.title),
+      resetTooltip: 'Reset ${section.title}',
       children: [
-        Padding(
-          padding: const EdgeInsets.only(top: 12, bottom: 4),
-          child: Text.rich(
-            TextSpan(
-              children: [
-                TextSpan(text: section.title, style: title),
-                TextSpan(
-                  text:
-                      '  ${target.renderObject.runtimeType}'
-                      '${target.createdBy == null ? '' : ' from ${target.createdBy}'}',
-                  style: muted,
-                ),
-              ],
-            ),
-          ),
-        ),
         for (final property in section.properties)
-          _property(theme, target, property),
+          _property(tokens, target, property, rowReset: editable > 1),
       ],
     );
   }
 
   Widget _property(
-    ThemeData theme,
+    PinPointTokens tokens,
     TweakTarget target,
-    InfoProperty<Object?> property,
-  ) {
+    InfoProperty<Object?> property, {
+    required bool rowReset,
+  }) {
     final tweak = widget.session.tweakOf(target, property.name);
+    final tweaked = tweak != null;
     final note = property.note;
-    final small = theme.textTheme.bodySmall;
-    final muted = small?.copyWith(color: theme.colorScheme.onSurfaceVariant);
-    final editor = property.editable
-        ? _editorFor(target, property)
-        : Text(property.label, style: small);
-    return _Row(
+    final small = tokens.label.copyWith(fontSize: 11, height: 14 / 11);
+    final Widget row;
+    if (!property.editable) {
+      row = Row(
+        children: [
+          Flexible(
+            child: Text(
+              property.label,
+              style: tokens.value,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: 6),
+          Tooltip(
+            message: note ?? 'Not editable here. Change it in source.',
+            triggerMode: TooltipTriggerMode.tap,
+            child: Opacity(
+              opacity: 0.6,
+              child: Icon(PinPointIcons.lock, size: 14, color: tokens.ink),
+            ),
+          ),
+        ],
+      );
+    } else {
+      final editor = property.editor!;
+      final grows = editor is! NumberEditor && editor is! RadiusEditor;
+      final built = _editorFor(target, property, tweak);
+      // A colour field carries its own reset; an inset is reset by its
+      // section's button.
+      final trailing = tweaked && rowReset && editor is! ColorEditor;
+      row = Row(
+        children: [
+          if (grows) Expanded(child: built) else built,
+          if (trailing) ...[
+            const SizedBox(width: 6),
+            DraftIconButton(
+              key: TweakTab.resetKey(target.section.title, property.name),
+              icon: PinPointIcons.restartAlt,
+              iconSize: 14,
+              extent: 20,
+              tooltip: 'Reset ${property.name}',
+              onPressed: () => widget.session.reset(tweak),
+            ),
+          ],
+        ],
+      );
+    }
+    return PanelRow(
       name: property.name,
-      highlighted: tweak != null,
+      nameColor: tweaked ? tokens.editInk : null,
+      nameWeight: tweaked ? FontWeight.w500 : null,
+      nameInset: property.editable ? 4 : 0,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          editor,
-          if (tweak != null)
-            Row(
-              children: [
-                Expanded(child: Text('was ${tweak.fromLabel}', style: muted)),
-                TextButton(
-                  key: TweakTab.resetKey(target.section.title, property.name),
-                  style: TextButton.styleFrom(
-                    visualDensity: VisualDensity.compact,
-                  ),
-                  onPressed: () => widget.session.reset(tweak),
-                  child: const Text('Reset'),
-                ),
-              ],
+          row,
+          if (tweaked)
+            Padding(
+              padding: const EdgeInsets.only(top: 3),
+              child: Text(
+                'was ${tweak.fromLabel}',
+                style: tokens.micro,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
           // Watch out (plan): a widget that builds every frame resets the
           // value every frame; the session stops fighting it.
-          if (tweak != null && tweak.animating)
-            Text(
-              'This widget is animating; tweak cannot hold.',
-              style: muted?.copyWith(color: theme.colorScheme.error),
+          if (tweaked && tweak.animating)
+            Padding(
+              padding: const EdgeInsets.only(top: 3),
+              child: Text(
+                'This widget is animating; tweak cannot hold.',
+                style: small.copyWith(color: tokens.err),
+              ),
             ),
-          if (note != null) Text(note, style: muted),
         ],
       ),
     );
   }
 
-  Widget _editorFor(TweakTarget target, InfoProperty<Object?> property) {
+  Widget _editorFor(
+    TweakTarget target,
+    InfoProperty<Object?> property,
+    Tweak? tweak,
+  ) {
     final section = target.section.title;
     final name = property.name;
     Key key([String? part]) => TweakTab.fieldKey(section, name, part);
     void set(Object? value) => widget.onApply(target, name, value);
     final value = property.value;
+    final tweaked = tweak != null;
+    final original = tweak?.original;
     return switch (property.editor!) {
       final NumberEditor e => _NumberField(
         key: key(),
@@ -248,28 +290,37 @@ class _TweakTabState extends State<TweakTab> {
         min: e.min,
         max: e.max,
         step: e.spacing ? _step.toDouble() : e.step,
+        tweaked: tweaked,
         onChanged: (v) => set(e.integer ? v?.round() : v),
       ),
       final ChoiceEditor<Object?> e => _ChoiceField(
         key: key(),
         value: value,
         editor: e,
+        tweaked: tweaked,
         itemKey: (label) => TweakTab.choiceKey(section, name, label),
         onChanged: set,
       ),
       ColorEditor() => _ColorField(
         key: key(),
         value: value is Color ? value : null,
+        tweaked: tweaked,
+        onReset: tweaked ? () => widget.session.reset(tweak) : null,
+        resetKey: TweakTab.resetKey(section, name),
         onChanged: set,
       ),
       InsetsEditor() => _InsetsField(
         value: value is EdgeInsets ? value : EdgeInsets.zero,
+        original: tweaked && original is EdgeInsets ? original : null,
+        tweaked: tweaked,
         keyOf: key,
         step: _step.toDouble(),
         onChanged: set,
       ),
       ConstraintsEditor() => _ConstraintsField(
         value: value is BoxConstraints ? value : const BoxConstraints(),
+        original: tweaked && original is BoxConstraints ? original : null,
+        tweaked: tweaked,
         keyOf: key,
         step: _step.toDouble(),
         onChanged: set,
@@ -279,14 +330,62 @@ class _TweakTabState extends State<TweakTab> {
         value: value is BorderRadius ? value.topLeft.x : 0,
         min: 0,
         step: _step.toDouble(),
+        tweaked: tweaked,
         onChanged: (v) => set(BorderRadius.circular(v ?? 0)),
       ),
       BorderEditor() => _BorderField(
         value: value is Border ? value : const Border(),
+        original: tweaked && original is Border ? original : null,
+        tweaked: tweaked,
         keyOf: key,
         onChanged: set,
       ),
     };
+  }
+}
+
+/// The footer of the Tweak tab: `N tweaks` and `Reset all`. Empty while
+/// there is no tweak.
+class TweakFooter extends StatelessWidget {
+  const TweakFooter({super.key, required this.session});
+
+  final TweakSession session;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: session,
+      builder: (context, _) {
+        final n = session.length;
+        if (n == 0) return const SizedBox.shrink();
+        final tokens = PinPointTokens.of(context);
+        return Container(
+          height: PinPointSizes.footer,
+          padding: const EdgeInsets.only(left: 12, right: 2),
+          decoration: BoxDecoration(
+            border: Border(top: BorderSide(color: tokens.ink)),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  n == 1 ? '1 tweak' : '$n tweaks',
+                  style: tokens.value.copyWith(
+                    fontSize: 11,
+                    color: tokens.muted,
+                  ),
+                ),
+              ),
+              DraftButton.link(
+                key: TweakTab.resetAllKey,
+                label: 'Reset all',
+                onPressed: session.resetAll,
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 }
 
@@ -311,49 +410,116 @@ List<(String, String)> constraintChain(RenderObject from, {int max = 8}) {
   return rows;
 }
 
-class _Row extends StatelessWidget {
-  const _Row({
-    required this.name,
-    required this.child,
-    this.highlighted = false,
+/// `04 CONSTRAINT CHAIN`: a 28 px row with a plus and the count, which opens
+/// to a two-column list of render ancestors and what each gives down.
+class _ChainSection extends StatelessWidget {
+  const _ChainSection({
+    super.key,
+    required this.heading,
+    required this.rows,
+    required this.expanded,
+    required this.onToggle,
   });
 
-  final String name;
-  final Widget child;
-  final bool highlighted;
+  final String heading;
+  final List<(String, String)> rows;
+  final bool expanded;
+  final VoidCallback onToggle;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 96,
-            child: Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Text(
-                name,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: highlighted
-                      ? theme.colorScheme.primary
-                      : theme.colorScheme.onSurfaceVariant,
-                  fontWeight: highlighted ? FontWeight.w700 : null,
+    final tokens = PinPointTokens.of(context);
+    final mono = tokens.value.copyWith(fontSize: 11, height: 14 / 11);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Semantics(
+          button: true,
+          expanded: expanded,
+          label: expanded
+              ? 'Hide constraints from above'
+              : 'Constraints from above',
+          child: MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: onToggle,
+              child: Container(
+                height: PinPointSizes.rowHeight,
+                decoration: BoxDecoration(
+                  border: Border.symmetric(
+                    horizontal: BorderSide(color: tokens.rule),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      expanded ? Icons.remove : PinPointIcons.add,
+                      size: 16,
+                      color: tokens.ink,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(child: CapsText(heading, color: tokens.ink)),
+                    Text(
+                      '${rows.length}',
+                      style: tokens.value.copyWith(
+                        fontSize: 11,
+                        color: tokens.muted,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
           ),
-          Expanded(child: child),
-        ],
-      ),
+        ),
+        if (expanded)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (final (i, row) in rows.indexed) ...[
+                  if (i > 0) const SizedBox(height: 4),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        flex: 2,
+                        child: Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: Text(
+                            row.$1,
+                            style: mono,
+                            maxLines: 1,
+                            softWrap: false,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        flex: 3,
+                        child: Text(
+                          row.$2,
+                          style: mono.copyWith(color: tokens.muted),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+      ],
     );
   }
 }
 
 /// A number with a stepper. Enter or leaving the field applies what was
 /// typed; the arrow keys and the buttons apply one [step] at once.
+///
+/// With [compact] there are no stepper buttons: a field with a small
+/// [prefix] letter, for the four sides of an inset.
 class _NumberField extends StatefulWidget {
   const _NumberField({
     super.key,
@@ -366,6 +532,8 @@ class _NumberField extends StatefulWidget {
     this.max,
     this.step = 1,
     this.compact = false,
+    this.tweaked = false,
+    this.prefix,
   });
 
   final double? value;
@@ -381,6 +549,12 @@ class _NumberField extends StatefulWidget {
 
   /// No stepper buttons: for the four fields of an inset.
   final bool compact;
+
+  /// The value differs from the widget's own.
+  final bool tweaked;
+
+  /// A letter or two before the value, in a [compact] field.
+  final String? prefix;
 
   @override
   State<_NumberField> createState() => _NumberFieldState();
@@ -434,6 +608,8 @@ class _NumberFieldState extends State<_NumberField> {
 
   void _onFocus() {
     if (!_focus.hasFocus) _submit();
+    // The frame shows focus.
+    if (mounted) setState(() {});
   }
 
   double? _parse(String text) {
@@ -475,43 +651,59 @@ class _NumberFieldState extends State<_NumberField> {
 
   @override
   Widget build(BuildContext context) {
-    final field = SizedBox(
-      height: 32,
-      child: TextField(
-        controller: _text,
-        focusNode: _focus,
-        style: Theme.of(context).textTheme.bodySmall,
-        keyboardType: const TextInputType.numberWithOptions(
-          decimal: true,
-          signed: true,
-        ),
-        decoration: InputDecoration(
-          isDense: true,
-          hintText: widget.nullable ? 'none' : null,
-          border: const OutlineInputBorder(),
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 6,
-            vertical: 8,
-          ),
-        ),
-        onSubmitted: (_) => _submit(),
+    final tokens = PinPointTokens.of(context);
+    final state = _focus.hasFocus
+        ? FieldState.focus
+        : widget.tweaked
+        ? FieldState.tweaked
+        : FieldState.rest;
+    final textColor = state == FieldState.tweaked ? tokens.editInk : tokens.ink;
+    final field = TextField(
+      controller: _text,
+      focusNode: _focus,
+      style: tokens.value.copyWith(color: textColor),
+      textAlign: widget.compact ? TextAlign.start : TextAlign.center,
+      keyboardType: const TextInputType.numberWithOptions(
+        decimal: true,
+        signed: true,
       ),
+      decoration: InputDecoration.collapsed(
+        hintText: widget.nullable ? 'none' : null,
+        hintStyle: tokens.value.copyWith(color: tokens.faint),
+      ),
+      onSubmitted: (_) => _submit(),
     );
-    if (widget.compact) return field;
-    return Row(
-      children: [
-        Expanded(child: field),
-        _StepButton(
-          key: _partKey('dec'),
-          icon: Icons.remove,
-          onPressed: () => _nudge(-1),
+    if (widget.compact) {
+      final prefix = widget.prefix;
+      return DraftFieldFrame(
+        state: state,
+        child: Row(
+          children: [
+            if (prefix != null) ...[
+              Text(
+                prefix,
+                style: tokens.value.copyWith(
+                  fontSize: 10,
+                  color: state == FieldState.tweaked
+                      ? tokens.editInk
+                      : tokens.faint,
+                ),
+              ),
+              const SizedBox(width: 6),
+            ],
+            Expanded(child: field),
+          ],
         ),
-        _StepButton(
-          key: _partKey('inc'),
-          icon: Icons.add,
-          onPressed: () => _nudge(1),
-        ),
-      ],
+      );
+    }
+    return DraftStepper(
+      state: state,
+      valueWidth: 40,
+      minusKey: _partKey('dec'),
+      plusKey: _partKey('inc'),
+      onMinus: () => _nudge(-1),
+      onPlus: () => _nudge(1),
+      value: field,
     );
   }
 
@@ -521,20 +713,6 @@ class _NumberFieldState extends State<_NumberField> {
         ? ValueKey<String>('${key.value}.$part')
         : null;
   }
-}
-
-class _StepButton extends StatelessWidget {
-  const _StepButton({super.key, required this.icon, required this.onPressed});
-
-  final IconData icon;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) => IconButton(
-    icon: Icon(icon, size: 16),
-    visualDensity: VisualDensity.compact,
-    onPressed: onPressed,
-  );
 }
 
 /// A list of values in a menu. The menu draws in the Overlay that
@@ -547,16 +725,18 @@ class _ChoiceField extends StatelessWidget {
     required this.editor,
     required this.itemKey,
     required this.onChanged,
+    this.tweaked = false,
   });
 
   final Object? value;
   final ChoiceEditor<Object?> editor;
   final Key Function(String label) itemKey;
   final ValueChanged<Object?> onChanged;
+  final bool tweaked;
 
   @override
   Widget build(BuildContext context) {
-    final style = Theme.of(context).textTheme.bodySmall;
+    final tokens = PinPointTokens.of(context);
     final current = editor.choices.contains(value)
         ? editor.labelOf(value)
         : '$value';
@@ -566,38 +746,63 @@ class _ChoiceField extends StatelessWidget {
           MenuItemButton(
             key: itemKey(editor.labelOf(choice)),
             onPressed: () => onChanged(choice),
-            child: Text(editor.labelOf(choice), style: style),
+            child: Text(editor.labelOf(choice), style: tokens.value),
           ),
       ],
-      builder: (context, menu, _) => OutlinedButton(
-        style: OutlinedButton.styleFrom(
-          alignment: Alignment.centerLeft,
-          visualDensity: VisualDensity.compact,
-        ),
-        onPressed: () => menu.isOpen ? menu.close() : menu.open(),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                current,
-                style: style,
-                overflow: TextOverflow.ellipsis,
+      builder: (context, menu, _) => Semantics(
+        button: true,
+        label: current,
+        child: MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => menu.isOpen ? menu.close() : menu.open(),
+            child: DraftFieldFrame(
+              state: menu.isOpen
+                  ? FieldState.focus
+                  : tweaked
+                  ? FieldState.tweaked
+                  : FieldState.rest,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      current,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const Icon(PinPointIcons.expandMore),
+                ],
               ),
             ),
-            const Icon(Icons.arrow_drop_down, size: 18),
-          ],
+          ),
         ),
       ),
     );
   }
 }
 
-/// A hex field with a swatch: `#RRGGBB`, or `#AARRGGBB` with alpha.
+/// A hex field with a swatch: `#RRGGBB`, or `#AARRGGBB` with alpha. While
+/// the text is not a colour it shows the invalid look and says what is
+/// accepted; leaving the field then puts the colour back.
 class _ColorField extends StatefulWidget {
-  const _ColorField({super.key, required this.value, required this.onChanged});
+  const _ColorField({
+    super.key,
+    required this.value,
+    required this.onChanged,
+    this.tweaked = false,
+    this.onReset,
+    this.resetKey,
+  });
 
   final Color? value;
   final ValueChanged<Color> onChanged;
+  final bool tweaked;
+
+  /// Shows a `restart_alt` button in the tweaked field.
+  final VoidCallback? onReset;
+  final Key? resetKey;
 
   @override
   State<_ColorField> createState() => _ColorFieldState();
@@ -606,13 +811,32 @@ class _ColorField extends StatefulWidget {
 class _ColorFieldState extends State<_ColorField> {
   late final TextEditingController _text = TextEditingController(
     text: _format(widget.value),
-  );
+  )..addListener(_onText);
   late final FocusNode _focus = FocusNode(debugLabel: 'pinpoint tweak color')
     ..addListener(() {
       if (!_focus.hasFocus) _submit();
+      if (mounted) setState(() {});
     });
 
   static String _format(Color? c) => c == null ? '' : formatColor(c);
+
+  // The invalid look follows what is typed.
+  String _seen = '';
+  void _onText() {
+    if (_text.text == _seen) return;
+    _seen = _text.text;
+    if (mounted) setState(() {});
+  }
+
+  bool get _invalid =>
+      parseHexColor(_text.text) == null &&
+      !(widget.value == null && _text.text.trim().isEmpty);
+
+  @override
+  void initState() {
+    super.initState();
+    _seen = _text.text;
+  }
 
   @override
   void didUpdateWidget(_ColorField oldWidget) {
@@ -639,42 +863,134 @@ class _ColorFieldState extends State<_ColorField> {
     if (color != widget.value) widget.onChanged(color);
   }
 
+  // The chevron has no list to open: it puts the cursor in the field with
+  // the hex selected, ready to be typed over.
+  void _edit() {
+    _focus.requestFocus();
+    _text.selection = TextSelection(
+      baseOffset: 0,
+      extentOffset: _text.text.length,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Row(
+    final tokens = PinPointTokens.of(context);
+    final invalid = _invalid;
+    final state = invalid
+        ? FieldState.invalid
+        : _focus.hasFocus
+        ? FieldState.focus
+        : widget.tweaked
+        ? FieldState.tweaked
+        : FieldState.rest;
+    final textColor = state == FieldState.tweaked ? tokens.editInk : tokens.ink;
+    final Widget trailing;
+    if (invalid) {
+      trailing = Icon(PinPointIcons.error, color: tokens.err);
+    } else if (widget.tweaked && widget.onReset != null) {
+      trailing = DraftIconButton(
+        key: widget.resetKey,
+        icon: PinPointIcons.restartAlt,
+        iconSize: 15,
+        extent: 20,
+        color: tokens.editInk,
+        tooltip: 'Reset color',
+        onPressed: widget.onReset,
+      );
+    } else {
+      trailing = GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: _edit,
+        child: const Icon(PinPointIcons.expandMore),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Container(
-          width: 20,
-          height: 20,
-          margin: const EdgeInsets.only(right: 6),
-          decoration: BoxDecoration(
-            color: widget.value,
-            border: Border.all(color: const Color(0x61000000)),
-            borderRadius: BorderRadius.circular(3),
-          ),
-        ),
-        Expanded(
-          child: SizedBox(
-            height: 32,
-            child: TextField(
-              controller: _text,
-              focusNode: _focus,
-              style: Theme.of(context).textTheme.bodySmall,
-              decoration: const InputDecoration(
-                isDense: true,
-                border: OutlineInputBorder(),
-                contentPadding: EdgeInsets.symmetric(
-                  horizontal: 6,
-                  vertical: 8,
+        DraftFieldFrame(
+          state: state,
+          child: Row(
+            children: [
+              _Swatch(color: invalid ? null : widget.value),
+              const SizedBox(width: 8),
+              Expanded(
+                child: TextField(
+                  controller: _text,
+                  focusNode: _focus,
+                  style: tokens.value.copyWith(color: textColor),
+                  decoration: const InputDecoration.collapsed(hintText: null),
+                  onSubmitted: (_) => _submit(),
                 ),
               ),
-              onSubmitted: (_) => _submit(),
-            ),
+              trailing,
+            ],
           ),
         ),
+        if (invalid)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              'Use 6 or 8 hex digits',
+              style: tokens.body.copyWith(
+                fontSize: 11,
+                height: 14 / 11,
+                color: tokens.err,
+              ),
+            ),
+          ),
       ],
     );
   }
+}
+
+/// 14 px of colour in a 1 px ink ring. A null [color] is hatched: there is no
+/// colour to show.
+class _Swatch extends StatelessWidget {
+  const _Swatch({required this.color});
+
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = PinPointTokens.of(context);
+    return Container(
+      width: 14,
+      height: 14,
+      decoration: BoxDecoration(
+        color: color,
+        border: Border.all(color: tokens.ink),
+      ),
+      child: color == null
+          ? CustomPaint(painter: _HatchPainter(tokens.field))
+          : null,
+    );
+  }
+}
+
+class _HatchPainter extends CustomPainter {
+  const _HatchPainter(this.color);
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.clipRect(Offset.zero & size);
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 1.5;
+    // 45 degree lines, 5 px apart.
+    for (var d = -size.height; d < size.width + size.height; d += 5) {
+      canvas.drawLine(
+        Offset(d, size.height),
+        Offset(d + size.height, 0),
+        paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_HatchPainter old) => old.color != color;
 }
 
 /// `#RRGGBB`, `#AARRGGBB`, with or without `#`, as a color; else null.
@@ -689,16 +1005,23 @@ Color? parseHexColor(String text) {
 }
 
 /// Four fields for left, top, right and bottom. Linked (the default when
-/// all four are equal), a change to one sets all four.
+/// all four are equal), a change to one sets all four. A side that differs
+/// from the widget's own [original] is drawn as tweaked.
 class _InsetsField extends StatefulWidget {
   const _InsetsField({
     required this.value,
+    required this.original,
+    required this.tweaked,
     required this.keyOf,
     required this.step,
     required this.onChanged,
   });
 
   final EdgeInsets value;
+
+  /// The widget's own value, when tweaked.
+  final EdgeInsets? original;
+  final bool tweaked;
   final Key Function([String? part]) keyOf;
   final double step;
   final ValueChanged<EdgeInsets> onChanged;
@@ -731,41 +1054,37 @@ class _InsetsFieldState extends State<_InsetsField> {
   @override
   Widget build(BuildContext context) {
     final e = widget.value;
+    final o = widget.original;
     final sides = {
-      'left': e.left,
-      'top': e.top,
-      'right': e.right,
-      'bottom': e.bottom,
+      'left': (e.left, o?.left),
+      'top': (e.top, o?.top),
+      'right': (e.right, o?.right),
+      'bottom': (e.bottom, o?.bottom),
     };
-    final small = Theme.of(context).textTheme.labelSmall;
     return Row(
       children: [
-        for (final MapEntry(key: side, value: v) in sides.entries)
+        for (final MapEntry(key: side, value: (v, was)) in sides.entries)
           Expanded(
             child: Padding(
-              padding: const EdgeInsets.only(right: 4),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(side[0].toUpperCase(), style: small),
-                  _NumberField(
-                    key: widget.keyOf(side),
-                    value: v,
-                    min: 0,
-                    step: widget.step,
-                    compact: true,
-                    onChanged: (n) => _set(side, n),
-                  ),
-                ],
+              padding: const EdgeInsets.only(right: 6),
+              child: _NumberField(
+                key: widget.keyOf(side),
+                value: v,
+                min: 0,
+                step: widget.step,
+                compact: true,
+                prefix: side[0].toUpperCase(),
+                tweaked: widget.tweaked && (was == null || was != v),
+                onChanged: (n) => _set(side, n),
               ),
             ),
           ),
-        IconButton(
+        DraftIconButton(
           key: widget.keyOf('link'),
           tooltip: _linked ? 'Linked: one value for all sides' : 'Each side',
-          visualDensity: VisualDensity.compact,
-          isSelected: _linked,
-          icon: Icon(_linked ? Icons.link : Icons.link_off, size: 16),
+          icon: _linked ? PinPointIcons.link : PinPointIcons.linkOff,
+          iconSize: 16,
+          extent: 20,
           onPressed: () => setState(() => _linked = !_linked),
         ),
       ],
@@ -778,12 +1097,18 @@ class _InsetsFieldState extends State<_InsetsField> {
 class _ConstraintsField extends StatelessWidget {
   const _ConstraintsField({
     required this.value,
+    required this.original,
+    required this.tweaked,
     required this.keyOf,
     required this.step,
     required this.onChanged,
   });
 
   final BoxConstraints value;
+
+  /// The widget's own value, when tweaked.
+  final BoxConstraints? original;
+  final bool tweaked;
   final Key Function([String? part]) keyOf;
   final double step;
   final ValueChanged<BoxConstraints> onChanged;
@@ -808,38 +1133,46 @@ class _ConstraintsField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final small = Theme.of(context).textTheme.labelSmall;
-    final fields = {
-      'minWidth': value.minWidth,
-      'maxWidth': value.maxWidth,
-      'minHeight': value.minHeight,
-      'maxHeight': value.maxHeight,
-    };
-    return Wrap(
-      spacing: 4,
-      runSpacing: 4,
+    final o = original;
+    final fields = [
+      ('minWidth', 'min w', value.minWidth, o?.minWidth),
+      ('maxWidth', 'max w', value.maxWidth, o?.maxWidth),
+      ('minHeight', 'min h', value.minHeight, o?.minHeight),
+      ('maxHeight', 'max h', value.maxHeight, o?.maxHeight),
+    ];
+    Widget cell((String, String, double, double?) f) => Expanded(
+      child: _NumberField(
+        key: keyOf(f.$1),
+        value: f.$3,
+        min: 0,
+        infinite: f.$1.startsWith('max'),
+        step: step,
+        compact: true,
+        prefix: f.$2,
+        tweaked: tweaked && (f.$4 == null || f.$4 != f.$3),
+        onChanged: (n) {
+          if (n != null) onChanged(_with(f.$1, n));
+        },
+      ),
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        for (final MapEntry(key: field, value: v) in fields.entries)
-          SizedBox(
-            width: 112,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(field, style: small),
-                _NumberField(
-                  key: keyOf(field),
-                  value: v,
-                  min: 0,
-                  infinite: field.startsWith('max'),
-                  step: step,
-                  compact: true,
-                  onChanged: (n) {
-                    if (n != null) onChanged(_with(field, n));
-                  },
-                ),
-              ],
-            ),
-          ),
+        Row(
+          children: [
+            cell(fields[0]),
+            const SizedBox(width: 6),
+            cell(fields[1]),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Row(
+          children: [
+            cell(fields[2]),
+            const SizedBox(width: 6),
+            cell(fields[3]),
+          ],
+        ),
       ],
     );
   }
@@ -849,17 +1182,24 @@ class _ConstraintsField extends StatelessWidget {
 class _BorderField extends StatelessWidget {
   const _BorderField({
     required this.value,
+    required this.original,
+    required this.tweaked,
     required this.keyOf,
     required this.onChanged,
   });
 
   final Border value;
+
+  /// The widget's own value, when tweaked.
+  final Border? original;
+  final bool tweaked;
   final Key Function([String? part]) keyOf;
   final ValueChanged<Border> onChanged;
 
   @override
   Widget build(BuildContext context) {
     final side = value.top;
+    final was = original?.top;
     return Row(
       children: [
         SizedBox(
@@ -870,6 +1210,8 @@ class _BorderField extends StatelessWidget {
             min: 0,
             step: 0.5,
             compact: true,
+            prefix: 'w',
+            tweaked: tweaked && (was == null || was.width != side.width),
             onChanged: (w) =>
                 onChanged(Border.fromBorderSide(side.copyWith(width: w ?? 0))),
           ),
@@ -879,6 +1221,7 @@ class _BorderField extends StatelessWidget {
           child: _ColorField(
             key: keyOf('color'),
             value: side.color,
+            tweaked: tweaked && (was == null || was.color != side.color),
             onChanged: (c) =>
                 onChanged(Border.fromBorderSide(side.copyWith(color: c))),
           ),
@@ -891,6 +1234,10 @@ class _BorderField extends StatelessWidget {
 /// "N tweaks active", top center, in every mode while any edit is active,
 /// so a changed screen is never taken for the real one. Its button resets
 /// them all.
+///
+/// The look of an active override: 1.5 px `edit` border, `editBg` fill, mono
+/// text in `editInk`, 2 px corners. A warning glyph replaces the tune glyph
+/// while a tweaked widget animates, so the state does not rest on colour.
 class TweakChip extends StatelessWidget {
   const TweakChip({super.key, required this.session});
 
@@ -905,42 +1252,47 @@ class TweakChip extends StatelessWidget {
     builder: (context, _) {
       final n = session.length;
       if (n == 0) return const SizedBox.shrink();
-      final colors = Theme.of(context).colorScheme;
+      final tokens = PinPointTokens.of(context);
       final animating = session.tweaks.any((t) => t.animating);
       return SafeArea(
         child: Align(
           alignment: Alignment.topCenter,
           child: Padding(
             padding: const EdgeInsets.only(top: 8),
+            // A Material for the default text style; it paints nothing.
             child: Material(
-              key: chipKey,
-              elevation: 3,
-              color: colors.secondaryContainer,
-              borderRadius: BorderRadius.circular(16),
-              child: Padding(
-                padding: const EdgeInsets.only(left: 12),
+              type: MaterialType.transparency,
+              child: Container(
+                key: chipKey,
+                height: PinPointSizes.controlHeight + 2,
+                padding: const EdgeInsets.only(left: 8, right: 2),
+                decoration: BoxDecoration(
+                  color: tokens.editBg,
+                  borderRadius: BorderRadius.circular(2),
+                  border: Border.all(color: tokens.edit, width: 1.5),
+                  boxShadow: tokens.e1,
+                ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(
-                      animating ? Icons.warning_amber : Icons.tune,
-                      size: 16,
-                      color: colors.onSecondaryContainer,
+                      animating ? PinPointIcons.warning : PinPointIcons.tune,
+                      size: 14,
+                      color: tokens.editInk,
                     ),
                     const SizedBox(width: 6),
                     Text(
                       n == 1 ? '1 tweak active' : '$n tweaks active',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: colors.onSecondaryContainer,
-                      ),
+                      style: tokens.value.copyWith(color: tokens.editInk),
                     ),
-                    IconButton(
+                    const SizedBox(width: 2),
+                    DraftIconButton(
                       key: resetKey,
                       tooltip: 'Reset every tweak',
-                      visualDensity: VisualDensity.compact,
+                      icon: PinPointIcons.close,
+                      iconSize: 14,
+                      color: tokens.editInk,
                       onPressed: session.resetAll,
-                      icon: const Icon(Icons.close, size: 16),
                     ),
                   ],
                 ),
@@ -953,58 +1305,38 @@ class TweakChip extends StatelessWidget {
   );
 }
 
-/// A dotted outline around every edited render object, in every mode.
+/// A dotted outline around every edited render object, in every mode:
+/// 1.5 px dotted `edit` over a paper halo ([paintTweaked]).
 ///
 /// Repaints when [outlines] changes; the session reads them after each
-/// frame the app draws, so it adds no frames of its own.
+/// frame the app draws, so it adds no frames of its own. [tokens] are the
+/// palette's colours; a painter has no context to read them from, so the
+/// overlay passes them in.
 class TweakOutlinePainter extends CustomPainter {
-  TweakOutlinePainter({required this.outlines, required this.origin})
-    : super(repaint: outlines);
+  TweakOutlinePainter({
+    required this.outlines,
+    required this.origin,
+    this.tokens = PinPointTokens.redline,
+  }) : super(repaint: outlines);
 
   final ValueListenable<List<Rect>> outlines;
 
   /// The painter's own top-left in global logical pixels.
   final Offset Function() origin;
 
-  static const Color color = Color(0xFF6A1B9A);
-  static const double dash = 3;
+  final PinPointTokens tokens;
 
   @override
   void paint(Canvas canvas, Size size) {
     final rects = outlines.value;
     if (rects.isEmpty) return;
     final shift = -origin();
-    final paint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5
-      ..color = color;
     for (final rect in rects) {
-      canvas.drawPath(_dotted(rect.shift(shift)), paint);
+      paintTweaked(canvas, rect.shift(shift), tokens);
     }
-  }
-
-  static Path _dotted(Rect r) {
-    final path = Path();
-    void line(Offset a, Offset b) {
-      final length = (b - a).distance;
-      if (length == 0) return;
-      final dir = (b - a) / length;
-      for (var d = 0.0; d < length; d += 2 * dash) {
-        final end = d + dash > length ? length : d + dash;
-        path
-          ..moveTo(a.dx + dir.dx * d, a.dy + dir.dy * d)
-          ..lineTo(a.dx + dir.dx * end, a.dy + dir.dy * end);
-      }
-    }
-
-    line(r.topLeft, r.topRight);
-    line(r.topRight, r.bottomRight);
-    line(r.bottomRight, r.bottomLeft);
-    line(r.bottomLeft, r.topLeft);
-    return path;
   }
 
   @override
   bool shouldRepaint(TweakOutlinePainter oldDelegate) =>
-      oldDelegate.outlines != outlines;
+      oldDelegate.outlines != outlines || oldDelegate.tokens != tokens;
 }

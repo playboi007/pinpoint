@@ -126,6 +126,9 @@ void main() {
       bool screenshot = true,
     }) async {
       await tester.pumpWidget(host(sink));
+      // Clear of the launcher at the bottom left: Send sits at the panel's
+      // bottom edge.
+      controller.panelPosition = const Offset(300, 20);
       await selectForTweak(tester, controller, inApp(find.byType(Container)));
       await typeInto(tester, tweakField('Padding', 'padding', 'left'), '16');
       await tester.tap(find.byKey(InfoPanel.commentTabKey));

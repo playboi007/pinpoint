@@ -54,6 +54,9 @@ void main() {
     required Key button,
   }) async {
     if (controller.mode == PinPointMode.idle) controller.startPicking();
+    // Clear of the launcher at the bottom left: the footer buttons sit at the
+    // panel's bottom edge.
+    controller.panelPosition = const Offset(300, 20);
     await tester.pump();
     await tester.tapAt(tester.getCenter(appText(text)));
     await tester.pump();

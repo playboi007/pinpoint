@@ -1,12 +1,16 @@
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 
 import '../agent/checks.dart';
 import '../agent/commands.dart' show AgentCommands;
 import '../core/pinpoint_controller.dart';
 import '../model/annotation.dart';
+import '../theme/controls.dart';
+import '../theme/pinpoint_tokens.dart';
 
-/// The Comment tab of the info panel: intent, comment, whether to attach a
-/// screenshot, and the buttons that send it.
+/// The Comment tab of the info panel: intent, comment, and whether to attach
+/// a screenshot. Its buttons are in [CommentFooter], which the info panel
+/// keeps under the scrolling body.
 ///
 /// Everything it edits lives in [PinPointController.draft], so the text
 /// survives a new selection, Esc and a failed send.
@@ -15,9 +19,6 @@ class CommentForm extends StatelessWidget {
     super.key,
     required this.controller,
     required this.focusNode,
-    required this.onSend,
-    this.onSaveDraft,
-    required this.onCopy,
   });
 
   static const Key fieldKey = ValueKey<String>('pinpoint.comment.field');
@@ -54,18 +55,16 @@ class CommentForm extends StatelessWidget {
   /// into the field when commenting starts.
   final FocusNode focusNode;
 
-  final VoidCallback onSend;
-
-  /// Keeps the comment as a draft pin, sent to no agent. Null hides the
-  /// button.
-  final VoidCallback? onSaveDraft;
-
-  final VoidCallback onCopy;
-
   static String _label(AnnotationIntent intent) => switch (intent) {
     AnnotationIntent.bug => 'Bug',
     AnnotationIntent.improve => 'Improve',
     AnnotationIntent.question => 'Question',
+  };
+
+  static IconData _icon(AnnotationIntent intent) => switch (intent) {
+    AnnotationIntent.bug => PinPointIcons.bugReport,
+    AnnotationIntent.improve => PinPointIcons.improve,
+    AnnotationIntent.question => PinPointIcons.help,
   };
 
   @override
@@ -74,32 +73,27 @@ class CommentForm extends StatelessWidget {
     return ListenableBuilder(
       listenable: Listenable.merge([draft, draft.text]),
       builder: (context, _) {
-        final mode = controller.mode;
-        final sending = mode == PinPointMode.sending;
-        final commenting = mode == PinPointMode.commenting;
-        const compact = ButtonStyle(
-          visualDensity: VisualDensity.compact,
-          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        );
+        final sending = controller.mode == PinPointMode.sending;
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Wrap(
-              spacing: 8,
-              runSpacing: 4,
+              spacing: 6,
+              runSpacing: 6,
               children: [
                 for (final intent in AnnotationIntent.values)
-                  ChoiceChip(
-                    label: Text(_label(intent)),
-                    showCheckmark: false,
-                    visualDensity: VisualDensity.compact,
-                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    selected: draft.intent == intent,
-                    onSelected: sending ? null : (_) => draft.intent = intent,
+                  DraftChip(
+                    label: _label(intent),
+                    icon: _icon(intent),
+                    mono: false,
+                    look: draft.intent == intent
+                        ? ChipLook.selected
+                        : ChipLook.rest,
+                    onTap: sending ? null : () => draft.intent = intent,
                   ),
               ],
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 12),
             TextField(
               key: fieldKey,
               controller: draft.text,
@@ -124,54 +118,21 @@ class CommentForm extends StatelessWidget {
               onTapOutside: (_) {},
               decoration: const InputDecoration(
                 hintText: 'What should change?',
-                border: OutlineInputBorder(),
-                isDense: true,
+                contentPadding: EdgeInsets.all(8),
               ),
             ),
-            _Checks(controller: controller, enabled: !sending),
-            CheckboxListTile(
-              key: screenshotKey,
-              value: draft.includeScreenshot,
-              onChanged: sending
-                  ? null
-                  : (value) => draft.includeScreenshot = value ?? true,
-              title: const Text('Include screenshot'),
-              controlAffinity: ListTileControlAffinity.leading,
-              contentPadding: EdgeInsets.zero,
-              dense: true,
-              visualDensity: VisualDensity.compact,
-            ),
-            Wrap(
-              alignment: WrapAlignment.end,
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                FilledButton(
-                  key: sendKey,
-                  style: compact,
-                  onPressed: commenting && draft.hasText ? onSend : null,
-                  child: Text(sending ? 'Sending…' : 'Send'),
-                ),
-                if (onSaveDraft != null)
-                  OutlinedButton(
-                    key: draftKey,
-                    style: compact,
-                    onPressed: commenting && draft.hasText ? onSaveDraft : null,
-                    child: const Text('Save draft'),
-                  ),
-                OutlinedButton(
-                  key: copyKey,
-                  style: compact,
-                  onPressed: sending ? null : onCopy,
-                  child: const Text('Copy as Markdown'),
-                ),
-                TextButton(
-                  key: cancelKey,
-                  style: compact,
-                  onPressed: commenting ? controller.back : null,
-                  child: const Text('Cancel'),
-                ),
-              ],
+            const SizedBox(height: 12),
+            _Checks(
+              controller: controller,
+              enabled: !sending,
+              screenshot: DraftCheckbox(
+                key: screenshotKey,
+                value: draft.includeScreenshot,
+                onChanged: sending
+                    ? null
+                    : (value) => draft.includeScreenshot = value,
+                label: 'Include screenshot',
+              ),
             ),
           ],
         );
@@ -180,13 +141,134 @@ class CommentForm extends StatelessWidget {
   }
 }
 
-/// The chosen checks as chips, and "Add check": what `verify_note` will
-/// measure once the agent says the note is fixed.
+/// The footer of the Comment tab, 40 px: copy as Markdown, the send shortcut
+/// as a hint, Cancel, Save draft and Send.
+class CommentFooter extends StatelessWidget {
+  const CommentFooter({
+    super.key,
+    required this.controller,
+    required this.onSend,
+    required this.onCopy,
+    this.onSaveDraft,
+  });
+
+  final PinPointController controller;
+  final VoidCallback onSend;
+
+  /// Keeps the comment as a draft pin, sent to no agent. Null hides the
+  /// button.
+  final VoidCallback? onSaveDraft;
+
+  final VoidCallback onCopy;
+
+  /// `⌘↵ send` where Cmd+Enter sends, `Ctrl↵ send` elsewhere. Both work.
+  static String get _hint {
+    final key = switch (defaultTargetPlatform) {
+      TargetPlatform.macOS || TargetPlatform.iOS => '⌘↵',
+      _ => 'Ctrl↵',
+    };
+    return '$key send';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = PinPointTokens.of(context);
+    final draft = controller.draft;
+    return ListenableBuilder(
+      listenable: Listenable.merge([draft, draft.text]),
+      builder: (context, _) {
+        final mode = controller.mode;
+        final sending = mode == PinPointMode.sending;
+        final commenting = mode == PinPointMode.commenting;
+        final ready = commenting && draft.hasText;
+        return Container(
+          height: PinPointSizes.footerTall,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          decoration: BoxDecoration(
+            border: Border(top: BorderSide(color: tokens.ink)),
+          ),
+          // The buttons shrink to fit when the panel is narrow or the text
+          // wide, instead of overflowing.
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final room = constraints.maxWidth - 24 - 8 - 8;
+              return Row(
+                children: [
+                  DraftIconButton(
+                    key: CommentForm.copyKey,
+                    icon: PinPointIcons.contentCopy,
+                    iconSize: 16,
+                    color: tokens.muted,
+                    tooltip: 'Copy as Markdown',
+                    onPressed: sending ? null : onCopy,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _hint,
+                      style: tokens.value.copyWith(
+                        fontSize: 11,
+                        color: tokens.muted,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  ConstrainedBox(
+                    constraints: BoxConstraints(maxWidth: room < 0 ? 0 : room),
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          DraftButton.link(
+                            key: CommentForm.cancelKey,
+                            label: 'Cancel',
+                            onPressed: commenting ? controller.back : null,
+                          ),
+                          if (onSaveDraft != null) ...[
+                            const SizedBox(width: 8),
+                            DraftButton.outline(
+                              key: CommentForm.draftKey,
+                              label: 'Save draft',
+                              onPressed: ready ? onSaveDraft : null,
+                            ),
+                          ],
+                          const SizedBox(width: 8),
+                          DraftButton.primary(
+                            key: CommentForm.sendKey,
+                            label: sending ? 'Sending…' : 'Send',
+                            onPressed: ready ? onSend : null,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// The chosen checks as chips, then "Include screenshot" and "Add check":
+/// what `verify_note` will measure once the agent says the note is fixed.
 class _Checks extends StatelessWidget {
-  const _Checks({required this.controller, required this.enabled});
+  const _Checks({
+    required this.controller,
+    required this.enabled,
+    required this.screenshot,
+  });
 
   final PinPointController controller;
   final bool enabled;
+
+  /// The screenshot checkbox, shown before "Add check".
+  final Widget screenshot;
 
   /// The checks the menu offers for the selection: the fixed list, and
   /// "Text contains" with the selected widget's text when it shows one.
@@ -213,48 +295,55 @@ class _Checks extends StatelessWidget {
       for (final check in _offered())
         if (!chosen.any((c) => c['type'] == check['type'])) check,
     ];
-    return Padding(
-      padding: const EdgeInsets.only(top: 8),
-      child: Wrap(
-        spacing: 6,
-        runSpacing: 4,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        children: [
-          for (final check in chosen)
-            InputChip(
-              key: CommentForm.checkChipKey('${check['type']}'),
-              label: Text(CommentForm.checkLabel(check)),
-              visualDensity: VisualDensity.compact,
-              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              deleteIcon: const Icon(Icons.clear, size: 16),
-              onDeleted: enabled
-                  ? () => draft.removeCheck('${check['type']}')
-                  : null,
-            ),
-          MenuAnchor(
-            menuChildren: [
-              for (final check in open)
-                MenuItemButton(
-                  key: CommentForm.checkItemKey('${check['type']}'),
-                  onPressed: () => draft.addCheck(check),
-                  child: Text(CommentForm.checkLabel(check)),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (chosen.isNotEmpty) ...[
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              for (final check in chosen)
+                DraftChip(
+                  key: CommentForm.checkChipKey('${check['type']}'),
+                  label: CommentForm.checkLabel(check),
+                  mono: false,
+                  clearLabel: 'Remove',
+                  onClear: enabled
+                      ? () => draft.removeCheck('${check['type']}')
+                      : null,
                 ),
             ],
-            builder: (context, menu, _) => TextButton.icon(
-              key: CommentForm.addCheckKey,
-              style: const ButtonStyle(
-                visualDensity: VisualDensity.compact,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              onPressed: enabled && open.isNotEmpty
-                  ? () => menu.isOpen ? menu.close() : menu.open()
-                  : null,
-              icon: const Icon(Icons.rule, size: 16),
-              label: const Text('Add check'),
-            ),
           ),
+          const SizedBox(height: 12),
         ],
-      ),
+        Wrap(
+          spacing: 14,
+          runSpacing: 4,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            screenshot,
+            MenuAnchor(
+              menuChildren: [
+                for (final check in open)
+                  MenuItemButton(
+                    key: CommentForm.checkItemKey('${check['type']}'),
+                    onPressed: () => draft.addCheck(check),
+                    child: Text(CommentForm.checkLabel(check)),
+                  ),
+              ],
+              builder: (context, menu, _) => DraftButton.link(
+                key: CommentForm.addCheckKey,
+                label: 'Add check',
+                icon: PinPointIcons.add,
+                onPressed: enabled && open.isNotEmpty
+                    ? () => menu.isOpen ? menu.close() : menu.open()
+                    : null,
+              ),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }

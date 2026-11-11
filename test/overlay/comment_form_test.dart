@@ -6,6 +6,7 @@ import 'package:pinpoint/pinpoint.dart';
 import 'package:pinpoint/src/overlay/comment_form.dart';
 import 'package:pinpoint/src/overlay/highlight_painter.dart';
 import 'package:pinpoint/src/overlay/info_panel.dart';
+import 'package:pinpoint/src/theme/controls.dart';
 
 import '../fixtures/save_bar_fixture.dart';
 import '../support/fake_sink.dart';
@@ -49,8 +50,14 @@ void main() {
     await tester.pump();
   }
 
-  Future<void> selectSave(WidgetTester tester) async {
+  Future<void> selectSave(
+    WidgetTester tester, {
+    bool clearOfLauncher = true,
+  }) async {
     await tester.pumpWidget(host());
+    // Clear of the launcher at the bottom left: the footer buttons sit at the
+    // panel's bottom edge.
+    if (clearOfLauncher) controller.panelPosition = const Offset(300, 20);
     controller.startPicking();
     await tester.pump();
     await select(tester, appText('Save'));
@@ -75,15 +82,26 @@ void main() {
     for (final name in ['Row', 'ElevatedButton', 'Text']) {
       expect(crumb(name), findsOneWidget, reason: name);
     }
-    // Widget name and file:line.
-    expect(inPanel(locationLabel(selection)!), findsOneWidget);
+    // Widget name and file:line. The line is cut from the start when it does
+    // not fit, so look for the widget that holds the whole text.
+    expect(
+      find.descendant(
+        of: panel,
+        matching: find.byWidgetPredicate(
+          (widget) =>
+              widget is StartEllipsisText &&
+              widget.text == locationLabel(selection),
+        ),
+      ),
+      findsOneWidget,
+    );
     // Intent chips, the field, the screenshot box and three buttons.
     for (final label in ['Bug', 'Improve', 'Question']) {
       expect(inPanel(label), findsOneWidget, reason: label);
     }
     expect(field, findsOneWidget);
     final box = find.byKey(CommentForm.screenshotKey);
-    expect(tester.widget<CheckboxListTile>(box).value, isTrue);
+    expect(tester.widget<DraftCheckbox>(box).value, isTrue);
     for (final key in [
       CommentForm.sendKey,
       CommentForm.copyKey,
@@ -137,16 +155,18 @@ void main() {
 
   testWidgets('Send is off until there is a comment', (tester) async {
     await selectSave(tester);
-    Widget sendButton() => tester.widget(find.byKey(CommentForm.sendKey));
-    expect((sendButton() as ButtonStyleButton).enabled, isFalse);
+    bool sendEnabled() =>
+        tester.widget<DraftButton>(find.byKey(CommentForm.sendKey)).onPressed !=
+        null;
+    expect(sendEnabled(), isFalse);
 
     await tester.enterText(field, '   ');
     await tester.pump();
-    expect((sendButton() as ButtonStyleButton).enabled, isFalse);
+    expect(sendEnabled(), isFalse);
 
     await tester.enterText(field, 'Too tight');
     await tester.pump();
-    expect((sendButton() as ButtonStyleButton).enabled, isTrue);
+    expect(sendEnabled(), isTrue);
   });
 
   testWidgets('Send hands the note to the sink, then goes idle and clears '
@@ -281,7 +301,7 @@ void main() {
   });
 
   testWidgets('the panel opens next to its target', (tester) async {
-    await selectSave(tester);
+    await selectSave(tester, clearOfLauncher: false);
     final target = controller.selection.value!.globalRect;
     final screen = tester.getSize(find.byType(PinPointWrapper));
     expect(
@@ -313,9 +333,15 @@ void main() {
             await tester.tap(find.byKey(tab));
             await tester.pump();
             final rect = tester.getRect(panel);
+            final inner = Rect.fromLTRB(
+              panelMarginX,
+              panelMarginY,
+              screen.right - panelMarginX,
+              screen.bottom - panelMarginY,
+            );
             expect(
-              screen.deflate(panelMargin).expandToInclude(rect),
-              screen.deflate(panelMargin),
+              inner.expandToInclude(rect),
+              inner,
               reason: '$label, $tab: $rect',
             );
             expect(tester.takeException(), isNull, reason: '$label, $tab');

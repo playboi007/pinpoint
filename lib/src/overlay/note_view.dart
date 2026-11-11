@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../model/annotation.dart';
+import '../theme/controls.dart';
+import '../theme/pinpoint_tokens.dart';
 import 'pin_marker.dart';
 
 /// What the buttons of a [NoteView] do, each given the note's id.
@@ -97,28 +99,31 @@ class _NoteViewState extends State<NoteView> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final tokens = PinPointTokens.of(context);
     final note = widget.note;
     final id = note.id;
     final status = note.status;
     final draft = status == NoteStatus.draft;
-    const compact = ButtonStyle(
-      visualDensity: VisualDensity.compact,
-      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-    );
-    final muted = theme.textTheme.bodySmall?.copyWith(
-      color: theme.colorScheme.onSurfaceVariant,
-    );
+    final number = widget.number;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          key: NoteView.statusKey,
-          '${widget.number == null ? 'Note' : 'Note ${widget.number}'}'
-          ' · ${PinMarker.label(status)} · ${note.intent.name}',
-          style: theme.textTheme.labelLarge,
+        Row(
+          children: [
+            _StatusGlyph(status),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                key: NoteView.statusKey,
+                '${number == null ? 'NOTE' : 'NOTE $number'}'
+                ' · ${PinMarker.label(status).toUpperCase()}'
+                ' · ${note.intent.name.toUpperCase()}',
+                style: tokens.caps.copyWith(color: tokens.ink),
+              ),
+            ),
+          ],
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 12),
         if (draft)
           TextField(
             key: NoteView.fieldKey,
@@ -130,40 +135,37 @@ class _NoteViewState extends State<NoteView> {
             onChanged: (value) => widget.actions.edit(id, value),
             onTapOutside: (_) {},
             decoration: const InputDecoration(
-              border: OutlineInputBorder(),
-              isDense: true,
+              contentPadding: EdgeInsets.all(8),
             ),
           )
         else
-          SelectableText(note.comment, style: theme.textTheme.bodyMedium),
+          SelectableText(note.comment, style: tokens.body),
         if (note.messages.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          Text('Replies', style: theme.textTheme.labelMedium),
+          const SizedBox(height: 14),
+          const CapsText('REPLIES'),
+          const SizedBox(height: 6),
           for (final message in note.messages)
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Text.rich(
-                TextSpan(
-                  children: [
-                    TextSpan(text: '${message.from}: ', style: muted),
-                    TextSpan(text: message.text),
-                  ],
-                ),
-                style: theme.textTheme.bodySmall,
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              decoration: BoxDecoration(
+                border: Border(top: BorderSide(color: tokens.rule)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(message.from, style: tokens.micro),
+                  const SizedBox(height: 2),
+                  Text(message.text, style: tokens.body),
+                ],
               ),
             ),
         ],
         if (note.verification case final verification?)
           Padding(
-            key: NoteView.verificationKey,
-            padding: const EdgeInsets.only(top: 12),
-            child: Text(
-              _verificationText(verification),
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: note.checksPassed == true
-                    ? const Color(0xFF2E7D32)
-                    : theme.colorScheme.error,
-              ),
+            padding: const EdgeInsets.only(top: 14),
+            child: _Verification(
+              key: NoteView.verificationKey,
+              verification: verification,
             ),
           ),
         if (status == NoteStatus.resolved || status == NoteStatus.fixed)
@@ -171,52 +173,47 @@ class _NoteViewState extends State<NoteView> {
             padding: const EdgeInsets.only(top: 8),
             child: Text(
               'Check the change, then accept it or reopen the note.',
-              style: muted,
+              style: tokens.label,
             ),
           ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 14),
         Wrap(
           alignment: WrapAlignment.end,
+          crossAxisAlignment: WrapCrossAlignment.center,
           spacing: 8,
           runSpacing: 8,
           children: [
-            if (draft) ...[
-              FilledButton(
+            DraftButton.link(
+              key: NoteView.deleteKey,
+              label: 'Delete',
+              onPressed: () => widget.actions.delete(id),
+            ),
+            if (draft && widget.drafts > 1)
+              DraftButton.outline(
+                key: NoteView.sendAllKey,
+                label: 'Send all ${widget.drafts} drafts',
+                onPressed: widget.actions.sendAll,
+              ),
+            if (PinMarker.showsMark(status)) ...[
+              DraftButton.outline(
+                key: NoteView.reopenKey,
+                label: 'Reopen',
+                onPressed: () => widget.actions.reopen(id),
+              ),
+              DraftButton.primary(
+                key: NoteView.acceptKey,
+                label: 'Accept',
+                onPressed: () => widget.actions.accept(id),
+              ),
+            ],
+            if (draft)
+              DraftButton.primary(
                 key: NoteView.sendKey,
-                style: compact,
+                label: 'Send',
                 onPressed: _text.text.trim().isEmpty
                     ? null
                     : () => widget.actions.send(id),
-                child: const Text('Send'),
               ),
-              if (widget.drafts > 1)
-                OutlinedButton(
-                  key: NoteView.sendAllKey,
-                  style: compact,
-                  onPressed: widget.actions.sendAll,
-                  child: Text('Send all ${widget.drafts} drafts'),
-                ),
-            ],
-            if (PinMarker.showsMark(status)) ...[
-              FilledButton(
-                key: NoteView.acceptKey,
-                style: compact,
-                onPressed: () => widget.actions.accept(id),
-                child: const Text('Accept'),
-              ),
-              OutlinedButton(
-                key: NoteView.reopenKey,
-                style: compact,
-                onPressed: () => widget.actions.reopen(id),
-                child: const Text('Reopen'),
-              ),
-            ],
-            TextButton(
-              key: NoteView.deleteKey,
-              style: compact,
-              onPressed: () => widget.actions.delete(id),
-              child: const Text('Delete'),
-            ),
           ],
         ),
       ],
@@ -224,22 +221,135 @@ class _NoteViewState extends State<NoteView> {
   }
 }
 
-/// `Checks failed (0 of 1 passed)` and one line per check.
-String _verificationText(Map<String, Object?> verification) {
-  final checks = [
-    for (final c
-        in verification['checks'] is List<Object?>
-            ? verification['checks']! as List<Object?>
-            : const <Object?>[])
-      if (c is Map<String, Object?>) c,
-  ];
-  final passed = verification['passed'] == true;
-  final count = checks.where((c) => c['passed'] == true).length;
-  return [
-    'Checks ${passed ? 'passed' : 'failed'} ($count of ${checks.length} '
-        'passed)',
-    for (final check in checks)
-      '${check['passed'] == true ? '✓' : '✗'} ${check['type']}'
-          '${check['message'] is String ? ': ${check['message']}' : ''}',
-  ].join('\n');
+/// A 16 px square for a note's status, drawn the way its pin is: a dotted
+/// edge for a draft, a solid one once sent, a dashed one while the agent
+/// works, and a glyph for the states after that.
+class _StatusGlyph extends StatelessWidget {
+  const _StatusGlyph(this.status);
+
+  final NoteStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = PinPointTokens.of(context);
+    final (IconData? icon, Color color) = switch (status) {
+      NoteStatus.draft => (null, tokens.muted),
+      NoteStatus.submitted => (Icons.north_east, tokens.ink),
+      NoteStatus.inProgress => (PinPointIcons.moreHoriz, tokens.ink),
+      NoteStatus.fixed => (PinPointIcons.check, tokens.ok),
+      NoteStatus.verified => (PinPointIcons.doneAll, tokens.ok),
+      NoteStatus.resolved => (PinPointIcons.doneAll, tokens.ink),
+      NoteStatus.rejected => (PinPointIcons.close, tokens.ink),
+    };
+    final glyph = icon == null ? null : Icon(icon, size: 12, color: color);
+    const side = 16.0;
+    return SizedBox.square(
+      dimension: side,
+      child: switch (status) {
+        NoteStatus.draft => DashedBox(
+          color: color,
+          strokeWidth: 1.5,
+          dash: const [1.5, 1.5],
+          radius: 2,
+        ),
+        NoteStatus.inProgress => DashedBox(
+          color: color,
+          strokeWidth: 1.5,
+          dash: const [3, 2],
+          radius: 2,
+          child: Center(child: glyph),
+        ),
+        _ => DecoratedBox(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(2),
+            border: Border.all(color: tokens.ink, width: 1.5),
+          ),
+          child: Center(child: glyph),
+        ),
+      },
+    );
+  }
+}
+
+/// The result of a note's checks: a heading, then a line for each check, in
+/// the `ok` or the `err` colour with a tick or a cross as well.
+class _Verification extends StatelessWidget {
+  const _Verification({super.key, required this.verification});
+
+  final Map<String, Object?> verification;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = PinPointTokens.of(context);
+    final checks = [
+      for (final c
+          in verification['checks'] is List<Object?>
+              ? verification['checks']! as List<Object?>
+              : const <Object?>[])
+        if (c is Map<String, Object?>) c,
+    ];
+    final passed = verification['passed'] == true;
+    final count = checks.where((c) => c['passed'] == true).length;
+    final color = passed ? tokens.ok : tokens.err;
+    return Container(
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: passed ? null : tokens.errBg,
+        border: Border.all(color: color),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(
+                passed ? PinPointIcons.checkCircle : PinPointIcons.error,
+                size: 14,
+                color: color,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'Checks ${passed ? 'passed' : 'failed'} ($count of '
+                  '${checks.length} passed)',
+                  style: tokens.body.copyWith(
+                    color: color,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          for (final check in checks)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    check['passed'] == true
+                        ? PinPointIcons.check
+                        : PinPointIcons.close,
+                    size: 12,
+                    color: check['passed'] == true ? tokens.ok : tokens.err,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      '${check['type']}'
+                      '${check['message'] is String ? ': ${check['message']}' : ''}',
+                      style: tokens.value.copyWith(
+                        fontSize: 11,
+                        height: 14 / 11,
+                        color: tokens.ink,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 }

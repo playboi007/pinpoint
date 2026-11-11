@@ -6,6 +6,7 @@ import 'package:pinpoint/pinpoint.dart';
 import 'package:pinpoint/src/info/extractors/padding_extractor.dart';
 import 'package:pinpoint/src/overlay/inspector_overlay.dart';
 import 'package:pinpoint/src/overlay/tweak_panel.dart';
+import 'package:pinpoint/src/theme/pinpoint_tokens.dart';
 import 'package:pinpoint/src/tweak/tweak_scope.dart';
 
 import '../support/tweak_host.dart';
@@ -172,7 +173,7 @@ void main() {
     await typeInto(tester, tweakField('Padding', 'padding', 'left'), '12');
     expect(controller.tweaks.length, 2);
 
-    await tester.tap(find.byKey(TweakTab.resetKey('Padding', 'padding')));
+    await tester.tap(find.byKey(TweakTab.sectionResetKey('Padding')));
     await tester.pump();
     expect(
       tester.renderObject<RenderPadding>(inApp(find.byType(Padding))).padding,
@@ -354,7 +355,7 @@ void main() {
       expect(controller.tweaks.outlines.value, [tester.getRect(padding)]);
       expect(
         find.byKey(InspectorOverlay.tweakOutlineKey),
-        paints..path(color: TweakOutlinePainter.color),
+        paints..path(color: PinPointTokens.redline.edit),
       );
       controller.tweaks.resetAll();
       await tester.pump();

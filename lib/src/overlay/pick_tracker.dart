@@ -35,6 +35,7 @@ class PickTracker {
     this.resolver = const SourceResolver(),
   }) {
     _frameHook.tracker = this;
+    controller.candidateCycler = cycleCandidate;
     // There is no way to remove a persistent frame callback
     // (docs/api-notes.md, item 7). The hook drops its tracker on dispose, so
     // a disposed tracker is neither called nor kept alive.
@@ -93,6 +94,23 @@ class PickTracker {
     if (_disposed) return false;
     final pick = _pick(position, previous: controller.selection.value);
     return pick != null && controller.select(pick);
+  }
+
+  /// Chooses the next candidate under the spot the selection was picked at,
+  /// as a second click there would, without the click's rules: a typed comment
+  /// stays in the draft and an open note closes. Returns whether the selection
+  /// changed.
+  bool cycleCandidate() {
+    if (_disposed) return false;
+    final current = controller.selection.value;
+    if (current == null) return false;
+    final next = _pick(current.position, previous: current);
+    if (next == null || identical(next.element, current.element)) {
+      return false;
+    }
+    controller.closeNote();
+    controller.updateSelection(next);
+    return true;
   }
 
   /// Forwards a wheel [event] over the trap to the scrollable under the
@@ -200,6 +218,9 @@ class PickTracker {
   void dispose() {
     _cancelHover();
     _frameHook.tracker = null;
+    if (controller.candidateCycler == cycleCandidate) {
+      controller.candidateCycler = null;
+    }
     _disposed = true;
   }
 }

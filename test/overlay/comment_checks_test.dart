@@ -28,6 +28,9 @@ void main() {
   );
 
   Future<void> selectSave(WidgetTester tester) async {
+    // Clear of the launcher at the bottom left: the footer buttons sit at the
+    // panel's bottom edge.
+    controller.panelPosition = const Offset(300, 20);
     controller.startPicking();
     await tester.pump();
     await tester.tapAt(
@@ -72,7 +75,7 @@ void main() {
     await tester.tap(
       find.descendant(
         of: find.byKey(CommentForm.checkChipKey('visible')),
-        matching: find.byIcon(Icons.clear),
+        matching: find.byIcon(Icons.close),
       ),
     );
     await tester.pump();

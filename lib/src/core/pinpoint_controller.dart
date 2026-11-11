@@ -192,6 +192,17 @@ class PinPointController extends ChangeNotifier {
   /// picking.
   ValueListenable<PickResult?> get selection => _selection;
 
+  /// Chooses the next hit candidate under the selection's click spot, as a
+  /// second click on the same spot does. Set by the pick tracker; null while
+  /// there is none. Call it through [selectNextCandidate].
+  bool Function()? candidateCycler;
+
+  /// Selects the next widget under the spot the selection was picked at (the
+  /// panel's `unfold_more` button). Keeps the mode and the comment draft.
+  ///
+  /// Returns whether the selection changed.
+  bool selectNextCandidate() => candidateCycler?.call() ?? false;
+
   /// Top-left of the info panel after a drag, in global logical pixels.
   /// Null means the default corner. Kept here so the panel's place survives
   /// reselection and stopping. Setting it notifies no one: the panel that

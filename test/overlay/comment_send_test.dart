@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pinpoint/pinpoint.dart';
 import 'package:pinpoint/src/overlay/comment_form.dart';
 import 'package:pinpoint/src/overlay/toast_layer.dart';
+import 'package:pinpoint/src/theme/controls.dart';
 
 import '../fixtures/save_bar_fixture.dart';
 import '../support/fake_sink.dart';
@@ -40,6 +41,9 @@ void main() {
     List<PinPointSink> sinks,
   ) async {
     await tester.pumpWidget(host(sinks));
+    // Clear of the launcher at the bottom left: the footer buttons sit at the
+    // panel's bottom edge.
+    controller.panelPosition = const Offset(300, 20);
     controller.startPicking();
     await tester.pump();
     await tester.tapAt(
@@ -73,10 +77,10 @@ void main() {
       find.descendant(of: field, matching: find.text('Too tight')),
       findsOneWidget,
     );
-    final copy = tester.widget<ButtonStyleButton>(
+    final copy = tester.widget<DraftIconButton>(
       find.byKey(CommentForm.copyKey),
     );
-    expect(copy.enabled, isTrue, reason: 'the comment is never lost');
+    expect(copy.onPressed, isNotNull, reason: 'the comment is never lost');
   });
 
   testWidgets('one toast per sink, in order', (tester) async {
