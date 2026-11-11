@@ -6,17 +6,18 @@ import 'package:pinpoint/src/overlay/info_panel.dart';
 void main() {
   const viewport = Size(1280, 720);
   const panel = Size(360, 300);
-  const margin = panelMargin;
+  const marginX = panelMarginX;
+  const marginY = panelMarginY;
   const gap = panelGap;
 
   Rect placed(Rect target, {Size size = panel, Size area = viewport}) =>
       placePanel(target, size, area) & size;
 
   bool inside(Rect rect, Size area) =>
-      rect.left >= margin - 1e-9 &&
-      rect.top >= margin - 1e-9 &&
-      rect.right <= area.width - margin + 1e-9 &&
-      rect.bottom <= area.height - margin + 1e-9;
+      rect.left >= marginX - 1e-9 &&
+      rect.top >= marginY - 1e-9 &&
+      rect.right <= area.width - marginX + 1e-9 &&
+      rect.bottom <= area.height - marginY + 1e-9;
 
   group('order: below, above, right, left', () {
     test('below the target when there is room', () {
@@ -48,13 +49,13 @@ void main() {
 
     test('when no side fits, the side with the most room', () {
       // A 300 px tall, 360 px wide panel reaches past the margin by 52 px
-      // below, 100 px above, 12 px to the right and 368 px to the left.
-      const target = Rect.fromLTWH(12, 220, 900, 232);
+      // below, 100 px above, 16 px to the right and 364 px to the left.
+      const target = Rect.fromLTWH(12, 220, 908, 232);
       final at = placePanel(target, panel, viewport);
-      expect(at, Offset(viewport.width - margin - panel.width, 220));
-      // Pulled back 12 px, less the 8 px gap: 4 px over the target.
+      expect(at, Offset(viewport.width - marginX - panel.width, 220));
+      // Pulled back 16 px, less the 8 px gap: 8 px over the target.
       final covered = (at & panel).intersect(target);
-      expect(covered.width, closeTo(4, 1e-9));
+      expect(covered.width, closeTo(8, 1e-9));
     });
 
     test('over the target, clamped, when no side fits at all', () {
@@ -65,24 +66,24 @@ void main() {
     });
   });
 
-  group('clamping with a 12 px margin', () {
+  group('clamping with an 8 px side and a 12 px top and bottom margin', () {
     test('below a target at the right edge, pulled back inside', () {
       const target = Rect.fromLTWH(1200, 100, 80, 20);
       expect(
         placePanel(target, panel, viewport).dx,
-        viewport.width - margin - panel.width,
+        viewport.width - marginX - panel.width,
       );
     });
 
     test('below a target off the left edge, pushed inside', () {
       const target = Rect.fromLTWH(-50, 100, 80, 20);
-      expect(placePanel(target, panel, viewport).dx, margin);
+      expect(placePanel(target, panel, viewport).dx, marginX);
     });
 
     test('beside a target that starts above the screen', () {
       const target = Rect.fromLTWH(100, -200, 200, 900);
       final at = placePanel(target, panel, viewport);
-      expect(at.dy, margin);
+      expect(at.dy, marginY);
       expect(at.dx, 300 + gap);
     });
 
@@ -92,7 +93,7 @@ void main() {
         const Size(2000, 2000),
         viewport,
       );
-      expect(at, const Offset(margin, margin));
+      expect(at, const Offset(marginX, marginY));
     });
 
     test('a target with no finite rect still gives a finite place', () {
@@ -108,13 +109,13 @@ void main() {
     test('clampPanel keeps a dragged panel inside the margin', () {
       expect(
         clampPanel(const Offset(-500, -500), panel, viewport),
-        const Offset(margin, margin),
+        const Offset(marginX, marginY),
       );
       expect(
         clampPanel(const Offset(5000, 5000), panel, viewport),
         Offset(
-          viewport.width - margin - panel.width,
-          viewport.height - margin - panel.height,
+          viewport.width - marginX - panel.width,
+          viewport.height - marginY - panel.height,
         ),
       );
       expect(
@@ -128,9 +129,9 @@ void main() {
     for (final area in const [Size(360, 640), Size(1920, 1080)]) {
       test('${area.width.toInt()} x ${area.height.toInt()}', () {
         final width = panelWidthFor(area.width);
-        expect(width, lessThanOrEqualTo(area.width - 2 * margin));
+        expect(width, lessThanOrEqualTo(area.width - 2 * marginX));
         // Short, typical and as tall as the space allows.
-        final heights = [120.0, 420.0, area.height - 2 * margin];
+        final heights = [120.0, 420.0, area.height - 2 * marginY];
         // Targets of many sizes all over the screen and past its edges.
         for (final height in heights) {
           final size = Size(width, height);
@@ -156,7 +157,7 @@ void main() {
 
     test('panelWidthFor caps at InfoPanel.width', () {
       expect(panelWidthFor(1920), InfoPanel.width);
-      expect(panelWidthFor(360), 360 - 2 * margin);
+      expect(panelWidthFor(360), 360 - 2 * marginX);
       expect(panelWidthFor(10), 0);
     });
   });

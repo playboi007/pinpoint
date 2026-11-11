@@ -98,14 +98,19 @@ class DashedBox extends StatelessWidget {
   );
 }
 
-/// Tracks hover and press for a control and reports taps. No splash: the
-/// caller decides what a hover or a press looks like.
+/// Tracks hover, press and keyboard focus for a control and reports taps. No
+/// splash: the caller decides what a hover or a press looks like.
+///
+/// An enabled control takes keyboard focus (Tab) and Enter or Space taps it,
+/// through `ActivateIntent`. A focus ring shows only when focus came from the
+/// keyboard.
 class _Interactive extends StatefulWidget {
   const _Interactive({
     required this.onTap,
     required this.builder,
     this.semanticLabel,
     this.button = true,
+    this.focusable = true,
   });
 
   /// Null disables the control: no cursor, no tap, `hovered` stays false.
@@ -115,6 +120,10 @@ class _Interactive extends StatefulWidget {
   final String? semanticLabel;
   final bool button;
 
+  /// False keeps the control out of the Tab order, for a control whose job
+  /// the keyboard already has (the arrow keys in a number field).
+  final bool focusable;
+
   @override
   State<_Interactive> createState() => _InteractiveState();
 }
@@ -122,37 +131,64 @@ class _Interactive extends StatefulWidget {
 class _InteractiveState extends State<_Interactive> {
   bool _hovered = false;
   bool _pressed = false;
+  bool _focused = false;
 
   bool get _enabled => widget.onTap != null;
 
   @override
   void didUpdateWidget(_Interactive oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!_enabled && (_hovered || _pressed)) {
+    if (!_enabled && (_hovered || _pressed || _focused)) {
       _hovered = false;
       _pressed = false;
+      _focused = false;
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final tokens = PinPointTokens.of(context);
+    Widget content = widget.builder(context, _hovered && _enabled, _pressed);
+    if (_focused) {
+      content = DecoratedBox(
+        position: DecorationPosition.foreground,
+        decoration: BoxDecoration(
+          border: Border.all(color: tokens.accent, width: 1.5),
+        ),
+        child: content,
+      );
+    }
     return Semantics(
       button: widget.button,
       enabled: _enabled,
       label: widget.semanticLabel,
-      child: MouseRegion(
-        cursor: _enabled ? SystemMouseCursors.click : MouseCursor.defer,
-        onEnter: (_) {
-          if (_enabled) setState(() => _hovered = true);
+      child: FocusableActionDetector(
+        enabled: _enabled && widget.focusable,
+        onShowFocusHighlight: (value) {
+          if (_focused != value) setState(() => _focused = value);
         },
-        onExit: (_) => setState(() => _hovered = false),
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTapDown: _enabled ? (_) => setState(() => _pressed = true) : null,
-          onTapUp: (_) => setState(() => _pressed = false),
-          onTapCancel: () => setState(() => _pressed = false),
-          onTap: widget.onTap,
-          child: widget.builder(context, _hovered && _enabled, _pressed),
+        actions: <Type, Action<Intent>>{
+          ActivateIntent: CallbackAction<ActivateIntent>(
+            onInvoke: (_) {
+              widget.onTap?.call();
+              return null;
+            },
+          ),
+        },
+        child: MouseRegion(
+          cursor: _enabled ? SystemMouseCursors.click : MouseCursor.defer,
+          onEnter: (_) {
+            if (_enabled) setState(() => _hovered = true);
+          },
+          onExit: (_) => setState(() => _hovered = false),
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTapDown: _enabled ? (_) => setState(() => _pressed = true) : null,
+            onTapUp: (_) => setState(() => _pressed = false),
+            onTapCancel: () => setState(() => _pressed = false),
+            onTap: widget.onTap,
+            child: content,
+          ),
         ),
       ),
     );
@@ -495,6 +531,8 @@ class DraftStepper extends StatelessWidget {
     this.onPlus,
     this.state = FieldState.rest,
     this.valueWidth = 36,
+    this.minusKey,
+    this.plusKey,
   });
 
   final Widget value;
@@ -502,6 +540,10 @@ class DraftStepper extends StatelessWidget {
   final VoidCallback? onPlus;
   final FieldState state;
   final double valueWidth;
+
+  /// Keys of the two buttons, for tests and for finding them.
+  final Key? minusKey;
+  final Key? plusKey;
 
   @override
   Widget build(BuildContext context) {
@@ -517,6 +559,7 @@ class DraftStepper extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _StepButton(
+            key: minusKey,
             glyph: '−',
             label: 'Decrease',
             color: glyph,
@@ -527,6 +570,7 @@ class DraftStepper extends StatelessWidget {
             child: Center(child: value),
           ),
           _StepButton(
+            key: plusKey,
             glyph: '+',
             label: 'Increase',
             color: glyph,
@@ -540,6 +584,7 @@ class DraftStepper extends StatelessWidget {
 
 class _StepButton extends StatelessWidget {
   const _StepButton({
+    super.key,
     required this.glyph,
     required this.label,
     required this.onTap,
@@ -557,6 +602,7 @@ class _StepButton extends StatelessWidget {
     return _Interactive(
       onTap: onTap,
       semanticLabel: label,
+      focusable: false,
       builder: (context, hovered, pressed) {
         final base = DefaultTextStyle.of(context).style;
         final tint = onTap == null ? tokens.faint : color;
@@ -603,6 +649,7 @@ class DraftChip extends StatelessWidget {
     this.onTap,
     this.onClear,
     this.mono = true,
+    this.clearLabel = 'Reset',
   });
 
   final String label;
@@ -612,9 +659,14 @@ class DraftChip extends StatelessWidget {
   final ChipLook look;
   final VoidCallback? onTap;
 
-  /// Called by the close button of an [ChipLook.override] chip.
+  /// Called by the close button. An [ChipLook.override] chip always has one;
+  /// another look, except [ChipLook.disabled], has one when this is set.
   final VoidCallback? onClear;
   final bool mono;
+
+  /// What the close button is called for a screen reader: `Reset 1.3×` or,
+  /// say, `Remove No overflow`.
+  final String clearLabel;
 
   static const double _radius = 2;
 
@@ -628,7 +680,9 @@ class DraftChip extends StatelessWidget {
       ChipLook.rest => tokens.ink,
     };
     final leading = look == ChipLook.selected ? PinPointIcons.check : icon;
-    final clearable = look == ChipLook.override;
+    final clearable =
+        look == ChipLook.override ||
+        (onClear != null && look != ChipLook.disabled);
     final content = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -647,7 +701,7 @@ class DraftChip extends StatelessWidget {
             onTap: onClear,
             child: Semantics(
               button: true,
-              label: 'Reset $label',
+              label: '$clearLabel $label',
               child: Icon(PinPointIcons.close, size: 14, color: textColor),
             ),
           ),
@@ -694,8 +748,9 @@ class DraftChip extends StatelessWidget {
 }
 
 /// A 14 px square checkbox with a label. On: ink fill and a paper check.
-/// [onChanged] null disables it.
-class DraftCheckbox extends StatelessWidget {
+/// [onChanged] null disables it. An enabled one takes keyboard focus; Enter
+/// or Space toggles it, and a ring shows around the box.
+class DraftCheckbox extends StatefulWidget {
   const DraftCheckbox({
     super.key,
     required this.value,
@@ -708,44 +763,70 @@ class DraftCheckbox extends StatelessWidget {
   final String label;
 
   @override
+  State<DraftCheckbox> createState() => _DraftCheckboxState();
+}
+
+class _DraftCheckboxState extends State<DraftCheckbox> {
+  bool _focused = false;
+
+  @override
   Widget build(BuildContext context) {
     final tokens = PinPointTokens.of(context);
-    final enabled = onChanged != null;
+    final enabled = widget.onChanged != null;
+    final value = widget.value;
     final edge = enabled ? tokens.ink : tokens.field;
+    void toggle() => widget.onChanged?.call(!value);
     return Semantics(
       checked: value,
       enabled: enabled,
-      label: label,
+      label: widget.label,
       excludeSemantics: true,
-      onTap: enabled ? () => onChanged!(!value) : null,
-      child: MouseRegion(
-        cursor: enabled ? SystemMouseCursors.click : MouseCursor.defer,
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: enabled ? () => onChanged!(!value) : null,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 14,
-                height: 14,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: value ? edge : tokens.input,
-                  border: Border.all(color: edge, width: 1.5),
+      onTap: enabled ? toggle : null,
+      child: FocusableActionDetector(
+        enabled: enabled,
+        onShowFocusHighlight: (focused) {
+          if (_focused != focused) setState(() => _focused = focused);
+        },
+        actions: <Type, Action<Intent>>{
+          ActivateIntent: CallbackAction<ActivateIntent>(
+            onInvoke: (_) {
+              toggle();
+              return null;
+            },
+          ),
+        },
+        child: MouseRegion(
+          cursor: enabled ? SystemMouseCursors.click : MouseCursor.defer,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: enabled ? toggle : null,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 14,
+                  height: 14,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: value ? edge : tokens.input,
+                    border: Border.all(color: edge, width: 1.5),
+                    boxShadow: _focused
+                        ? [BoxShadow(spreadRadius: 2, color: tokens.accent)]
+                        : null,
+                  ),
+                  child: value
+                      ? Icon(PinPointIcons.check, size: 11, color: tokens.paper)
+                      : null,
                 ),
-                child: value
-                    ? Icon(PinPointIcons.check, size: 11, color: tokens.paper)
-                    : null,
-              ),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: tokens.body.copyWith(
-                  color: enabled ? tokens.ink : tokens.faint,
+                const SizedBox(width: 6),
+                Text(
+                  widget.label,
+                  style: tokens.body.copyWith(
+                    color: enabled ? tokens.ink : tokens.faint,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -763,12 +844,16 @@ class DraftSegmented<T> extends StatelessWidget {
     required this.value,
     required this.onChanged,
     this.cellWidth = 28,
+    this.cellKey,
   });
 
   final List<(T, String)> items;
   final T value;
   final ValueChanged<T> onChanged;
   final double cellWidth;
+
+  /// The key of the cell of a value, if any.
+  final Key? Function(T value)? cellKey;
 
   @override
   Widget build(BuildContext context) {
@@ -782,6 +867,7 @@ class DraftSegmented<T> extends StatelessWidget {
           for (var i = 0; i < items.length; i++) ...[
             if (i > 0) SizedBox(width: 1, child: ColoredBox(color: tokens.ink)),
             _SegmentCell(
+              key: cellKey?.call(items[i].$1),
               label: items[i].$2,
               width: cellWidth,
               active: items[i].$1 == value,
@@ -796,6 +882,7 @@ class DraftSegmented<T> extends StatelessWidget {
 
 class _SegmentCell extends StatelessWidget {
   const _SegmentCell({
+    super.key,
     required this.label,
     required this.width,
     required this.active,

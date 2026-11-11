@@ -6,22 +6,29 @@ import '../core/pinpoint_controller.dart';
 import '../info/widget_info.dart';
 import '../model/annotation.dart';
 import '../search/pick_result.dart';
+import '../theme/controls.dart';
+import '../theme/pinpoint_tokens.dart';
 import 'comment_form.dart';
 import 'highlight_painter.dart';
 import 'note_view.dart';
 import 'panel_keys.dart';
+import 'panel_parts.dart';
 import 'tweak_panel.dart';
 
-/// Space kept between the panel and the viewport's edges.
-const double panelMargin = 12;
+/// Space kept between the panel and the left and right edges of the viewport.
+const double panelMarginX = 8;
+
+/// Space kept between the panel and the top and bottom edges of the viewport.
+const double panelMarginY = 12;
 
 /// Space between the panel and the widget it describes.
 const double panelGap = 8;
 
 /// The panel's width in a viewport [viewportWidth] wide: [InfoPanel.width],
-/// or less where that would not fit between the margins.
+/// or less where that would not fit between the margins
+/// (`min(360, viewport - 16)`).
 double panelWidthFor(double viewportWidth) {
-  final room = viewportWidth - 2 * panelMargin;
+  final room = viewportWidth - 2 * panelMarginX;
   if (room <= 0) return 0;
   return room < InfoPanel.width ? room : InfoPanel.width;
 }
@@ -32,8 +39,9 @@ double panelWidthFor(double viewportWidth) {
 /// the left. When no side fits, the side with the most room, pushed back
 /// inside: the panel then covers as little of the target as it can, so the
 /// outline stays visible and the target can still be clicked. Every result
-/// keeps [panelMargin] to each edge of the viewport, unless the panel is
-/// larger than the space.
+/// keeps [panelMarginX] to the left and right edges of the viewport and
+/// [panelMarginY] to the top and bottom ones, unless the panel is larger than
+/// the space.
 ///
 /// All three are in one coordinate space (engineering rule 7).
 Offset placePanel(Rect target, Size panel, Size viewport) {
@@ -48,15 +56,15 @@ Offset placePanel(Rect target, Size panel, Size viewport) {
   // Zero or less means it fits.
   final sides = <(double, Offset)>[
     (
-      below + panel.height - (viewport.height - panelMargin),
+      below + panel.height - (viewport.height - panelMarginY),
       Offset(target.left, below),
     ),
-    (panelMargin - above, Offset(target.left, above)),
+    (panelMarginY - above, Offset(target.left, above)),
     (
-      right + panel.width - (viewport.width - panelMargin),
+      right + panel.width - (viewport.width - panelMarginX),
       Offset(right, target.top),
     ),
-    (panelMargin - left, Offset(left, target.top)),
+    (panelMarginX - left, Offset(left, target.top)),
   ];
   var best = sides.first;
   for (final side in sides) {
@@ -70,18 +78,18 @@ Offset placePanel(Rect target, Size panel, Size viewport) {
 }
 
 /// [position] moved the least distance that keeps a [panel] there inside
-/// [viewport] with [panelMargin] to each edge. A panel larger than the space
-/// sits at the top-left margin.
+/// [viewport] with [panelMarginX] and [panelMarginY] to the edges. A panel
+/// larger than the space sits at the top-left margin.
 Offset clampPanel(Offset position, Size panel, Size viewport) {
-  double clampAxis(double value, double size, double extent) {
-    final max = extent - panelMargin - size;
-    if (max <= panelMargin || value.isNaN) return panelMargin;
-    return value.clamp(panelMargin, max);
+  double clampAxis(double value, double size, double extent, double margin) {
+    final max = extent - margin - size;
+    if (max <= margin || value.isNaN) return margin;
+    return value.clamp(margin, max);
   }
 
   return Offset(
-    clampAxis(position.dx, panel.width, viewport.width),
-    clampAxis(position.dy, panel.height, viewport.height),
+    clampAxis(position.dx, panel.width, viewport.width, panelMarginX),
+    clampAxis(position.dy, panel.height, viewport.height, panelMarginY),
   );
 }
 
@@ -309,7 +317,7 @@ class _PanelLayout extends SingleChildLayoutDelegate {
 
   @override
   BoxConstraints getConstraintsForChild(BoxConstraints constraints) {
-    final height = constraints.maxHeight - 2 * panelMargin;
+    final height = constraints.maxHeight - 2 * panelMarginY;
     return BoxConstraints(
       minWidth: width,
       maxWidth: width,
@@ -332,9 +340,10 @@ class _PanelLayout extends SingleChildLayoutDelegate {
       width != oldDelegate.width;
 }
 
-/// A card for the selected widget: header, breadcrumb, then the Info tab
-/// (its [WidgetInfo]), the Tweak tab ([TweakTab]) or the Comment tab
-/// ([CommentForm]).
+/// A card for the selected widget: header, breadcrumb, tabs, then the Info
+/// tab (its [WidgetInfo]), the Tweak tab ([TweakTab]) or the Comment tab
+/// ([CommentForm]). The Tweak and Comment tabs keep their footer under the
+/// scrolling body.
 class InfoPanel extends StatelessWidget {
   const InfoPanel({
     super.key = panelKey,
@@ -364,10 +373,15 @@ class InfoPanel extends StatelessWidget {
   );
   static const Key tweakTabKey = ValueKey<String>('pinpoint.infoPanel.tweak');
 
+  /// The `unfold_more` button in the header: the next widget under the spot.
+  static const Key nextCandidateKey = ValueKey<String>(
+    'pinpoint.infoPanel.nextCandidate',
+  );
+
   /// The widest the panel gets; narrower in a small viewport
   /// ([panelWidthFor]).
-  static const double width = 360;
-  static const double headerHeight = 48;
+  static const double width = PinPointSizes.panelWidth;
+  static const double headerHeight = PinPointSizes.panelHeader;
 
   final PickResult selection;
   final PinPointController controller;
@@ -399,7 +413,6 @@ class InfoPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     // Plus Ctrl or Cmd and Enter to send.
     return PanelKeyScope(
       shortcuts: {
@@ -414,73 +427,92 @@ class InfoPanel extends StatelessWidget {
       actions: {
         _SendIntent: _SendAction(controller: controller, onSend: onSend),
       },
-      child: _card(theme),
+      child: _card(),
     );
   }
 
-  Widget _card(ThemeData theme) {
+  Widget _card() {
+    final showsNote = tab == PanelTab.comment && note != null;
+    final Widget? footer = switch (tab) {
+      PanelTab.tweak => TweakFooter(session: controller.tweaks),
+      PanelTab.comment when !showsNote || noteActions == null => CommentFooter(
+        controller: controller,
+        onSend: onSend,
+        onSaveDraft: onSaveDraft,
+        onCopy: onCopy,
+      ),
+      _ => null,
+    };
+    // A Material for the text fields and menus inside, and the default text
+    // style: it adds no fill, elevation or splash.
     return Material(
-      elevation: 6,
-      borderRadius: BorderRadius.circular(8),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          GestureDetector(
-            key: headerKey,
-            // Count the movement from pointer down, so the panel stays
-            // under the pointer instead of lagging by the touch slop.
-            dragStartBehavior: DragStartBehavior.down,
-            onPanUpdate: onDrag == null
-                ? null
-                : (details) => onDrag!(details.delta),
-            child: _Header(selection: selection, onClose: onClose),
-          ),
-          _Crumbs(selection: selection, onSelect: controller.selectChainIndex),
-          _Tabs(
-            tab: tab,
-            onTab: onTab,
-            commentLabel: note == null
-                ? 'Comment'
-                : noteNumber == null
-                ? 'Note'
-                : 'Note $noteNumber',
-          ),
-          Flexible(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-              child: switch (tab) {
-                PanelTab.info => _info(theme),
-                PanelTab.tweak => TweakTab(
-                  selection: selection,
-                  session: controller.tweaks,
-                  onApply: onTweak ?? controller.tweaks.apply,
-                ),
-                PanelTab.comment when note != null && noteActions != null =>
-                  NoteView(
-                    note: note!,
-                    number: noteNumber,
-                    drafts: drafts,
-                    focusNode: commentFocus,
-                    actions: noteActions!,
-                  ),
-                PanelTab.comment => CommentForm(
-                  controller: controller,
-                  focusNode: commentFocus,
-                  onSend: onSend,
-                  onSaveDraft: onSaveDraft,
-                  onCopy: onCopy,
-                ),
-              },
+      type: MaterialType.transparency,
+      child: DraftSurface(
+        elevation: 3,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            GestureDetector(
+              key: headerKey,
+              // Count the movement from pointer down, so the panel stays
+              // under the pointer instead of lagging by the touch slop.
+              dragStartBehavior: DragStartBehavior.down,
+              onPanUpdate: onDrag == null
+                  ? null
+                  : (details) => onDrag!(details.delta),
+              child: _Header(
+                selection: selection,
+                onClose: onClose,
+                onNextCandidate: controller.selectNextCandidate,
+              ),
             ),
-          ),
-        ],
+            _Crumbs(
+              selection: selection,
+              onSelect: controller.selectChainIndex,
+            ),
+            _Tabs(
+              tab: tab,
+              onTab: onTab,
+              commentLabel: note == null
+                  ? 'Comment'
+                  : noteNumber == null
+                  ? 'Note'
+                  : 'Note $noteNumber',
+            ),
+            Flexible(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(PinPointSizes.panelPadding),
+                child: switch (tab) {
+                  PanelTab.info => _info(),
+                  PanelTab.tweak => TweakTab(
+                    selection: selection,
+                    session: controller.tweaks,
+                    onApply: onTweak ?? controller.tweaks.apply,
+                  ),
+                  PanelTab.comment when note != null && noteActions != null =>
+                    NoteView(
+                      note: note!,
+                      number: noteNumber,
+                      drafts: drafts,
+                      focusNode: commentFocus,
+                      actions: noteActions!,
+                    ),
+                  PanelTab.comment => CommentForm(
+                    controller: controller,
+                    focusNode: commentFocus,
+                  ),
+                },
+              ),
+            ),
+            ?footer,
+          ],
+        ),
       ),
     );
   }
 
-  Widget _info(ThemeData theme) {
+  Widget _info() {
     final WidgetInfo info;
     try {
       info = WidgetInfo.fromRenderObject(selection.renderObject);
@@ -489,57 +521,78 @@ class InfoPanel extends StatelessWidget {
       // frame; until then there is nothing to read.
       return const SizedBox.shrink();
     }
-    return _InfoContent(info: info, theme: theme);
+    return _InfoContent(info: info);
   }
 }
 
+/// 40 px: the widget's name over its source path, then the hit-candidate
+/// count, the button for the next candidate, and close.
 class _Header extends StatelessWidget {
-  const _Header({required this.selection, required this.onClose});
+  const _Header({
+    required this.selection,
+    required this.onClose,
+    required this.onNextCandidate,
+  });
 
   final PickResult selection;
   final VoidCallback onClose;
+  final bool Function() onNextCandidate;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final tokens = PinPointTokens.of(context);
+    final candidates = selection.candidates.length;
     return MouseRegion(
       cursor: SystemMouseCursors.move,
       child: Container(
         height: InfoPanel.headerHeight,
-        color: theme.colorScheme.surfaceContainerHigh,
-        padding: const EdgeInsets.only(left: 12),
+        padding: const EdgeInsets.only(left: 12, right: 6),
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: tokens.ink)),
+        ),
         child: Row(
           children: [
             Expanded(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
                     selection.entry.name,
-                    style: theme.textTheme.titleSmall,
+                    style: tokens.title,
+                    maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  Text(
+                  StartEllipsisText(
                     locationLabel(selection) ?? 'source unavailable',
-                    style: theme.textTheme.bodySmall,
-                    overflow: TextOverflow.ellipsis,
+                    style: tokens.value.copyWith(
+                      fontSize: 10,
+                      height: 13 / 10,
+                      color: tokens.muted,
+                    ),
                   ),
                 ],
               ),
             ),
+            const SizedBox(width: 8),
             Tooltip(
               message: 'Click the same spot again for the next widget',
               child: Text(
-                '${selection.index + 1} of ${selection.candidates.length}',
-                style: theme.textTheme.bodySmall,
+                '${selection.index + 1}/$candidates',
+                style: tokens.micro.copyWith(fontSize: 11),
               ),
             ),
-            IconButton(
+            const SizedBox(width: 4),
+            DraftIconButton(
+              key: InfoPanel.nextCandidateKey,
+              icon: PinPointIcons.unfoldMore,
+              tooltip: 'Next widget under the pointer',
+              onPressed: candidates > 1 ? onNextCandidate : null,
+            ),
+            DraftIconButton(
+              icon: PinPointIcons.close,
               tooltip: 'Close panel',
-              iconSize: 18,
               onPressed: onClose,
-              icon: const Icon(Icons.close),
             ),
           ],
         ),
@@ -548,46 +601,118 @@ class _Header extends StatelessWidget {
   }
 }
 
-/// The local chain around the selection, outermost first. A click on a
-/// crumb selects that widget.
-class _Crumbs extends StatelessWidget {
+/// The local chain around the selection, outermost first, on one line that
+/// scrolls sideways and never wraps. A click on a crumb selects that widget.
+/// The selected crumb is scrolled into view.
+class _Crumbs extends StatefulWidget {
   const _Crumbs({required this.selection, required this.onSelect});
 
   final PickResult selection;
   final ValueChanged<int> onSelect;
 
   @override
+  State<_Crumbs> createState() => _CrumbsState();
+}
+
+class _CrumbsState extends State<_Crumbs> {
+  final ScrollController _scroll = ScrollController();
+  final GlobalKey _current = GlobalKey(debugLabel: 'pinpoint current crumb');
+
+  @override
+  void initState() {
+    super.initState();
+    _showCurrent();
+  }
+
+  @override
+  void didUpdateWidget(_Crumbs oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.selection.chainIndex != widget.selection.chainIndex ||
+        !identical(oldWidget.selection.chain, widget.selection.chain)) {
+      _showCurrent();
+    }
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  void _showCurrent() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final context = _current.currentContext;
+      if (!mounted || context == null || !_scroll.hasClients) return;
+      Scrollable.ensureVisible(context);
+    });
+  }
+
+  // A mouse wheel has only a vertical axis: it moves the line sideways.
+  void _onWheel(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent || !_scroll.hasClients) return;
+    final position = _scroll.position;
+    final delta = event.scrollDelta.dx != 0
+        ? event.scrollDelta.dx
+        : event.scrollDelta.dy;
+    GestureBinding.instance.pointerSignalResolver.register(event, (_) {
+      position.jumpTo(
+        (position.pixels + delta).clamp(
+          position.minScrollExtent,
+          position.maxScrollExtent,
+        ),
+      );
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final tokens = PinPointTokens.of(context);
+    final selection = widget.selection;
     final crumbs = crumbsFor(selection);
-    final muted = theme.textTheme.bodySmall?.copyWith(
-      color: theme.colorScheme.onSurfaceVariant,
+    final muted = tokens.value.copyWith(fontSize: 11, color: tokens.muted);
+    Widget separator() => Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 5),
+      child: Text('/', style: muted),
     );
-    Widget separator() => Text(' > ', style: muted);
-    return Padding(
+    return Container(
       key: InfoPanel.crumbsKey,
-      padding: const EdgeInsets.fromLTRB(8, 6, 8, 2),
-      child: Wrap(
-        crossAxisAlignment: WrapCrossAlignment.center,
-        children: [
-          if (crumbs.moreAbove) ...[Text('…', style: muted), separator()],
-          for (final (n, index) in crumbs.indices.indexed) ...[
-            if (n > 0) separator(),
-            _Crumb(
-              name: selection.chain[index].name,
-              selected: index == selection.chainIndex,
-              onTap: () => onSelect(index),
+      height: PinPointSizes.breadcrumb,
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: tokens.rule)),
+      ),
+      child: Listener(
+        onPointerSignal: _onWheel,
+        child: SingleChildScrollView(
+          controller: _scroll,
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Center(
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (crumbs.moreAbove) ...[Text('…', style: muted), separator()],
+                for (final (n, index) in crumbs.indices.indexed) ...[
+                  if (n > 0) separator(),
+                  _Crumb(
+                    key: index == selection.chainIndex ? _current : null,
+                    name: selection.chain[index].name,
+                    selected: index == selection.chainIndex,
+                    onTap: () => widget.onSelect(index),
+                  ),
+                ],
+                if (crumbs.moreBelow) ...[separator(), Text('…', style: muted)],
+              ],
             ),
-          ],
-          if (crumbs.moreBelow) ...[separator(), Text('…', style: muted)],
-        ],
+          ),
+        ),
       ),
     );
   }
 }
 
-class _Crumb extends StatelessWidget {
+class _Crumb extends StatefulWidget {
   const _Crumb({
+    super.key,
     required this.name,
     required this.selected,
     required this.onTap,
@@ -598,23 +723,44 @@ class _Crumb extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
+  State<_Crumb> createState() => _CrumbState();
+}
+
+class _CrumbState extends State<_Crumb> {
+  bool _hovered = false;
+
+  @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final style = theme.textTheme.bodySmall?.copyWith(
-      color: theme.colorScheme.primary,
-      fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
+    final tokens = PinPointTokens.of(context);
+    final selected = widget.selected;
+    final style = tokens.value.copyWith(
+      fontSize: 11,
+      color: selected
+          ? tokens.ink
+          : _hovered
+          ? tokens.accentInk
+          : tokens.muted,
+      fontWeight: selected ? FontWeight.w500 : FontWeight.w400,
     );
-    return InkWell(
-      onTap: selected ? null : onTap,
-      borderRadius: BorderRadius.circular(4),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-        child: Text(name, style: style),
+    final text = Text(widget.name, style: style, maxLines: 1, softWrap: false);
+    if (selected) return text;
+    return Semantics(
+      button: true,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() => _hovered = false),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: widget.onTap,
+          child: text,
+        ),
       ),
     );
   }
 }
 
+/// 30 px: three equal cells, caps labels, the active one in ink.
 class _Tabs extends StatelessWidget {
   const _Tabs({
     required this.tab,
@@ -628,66 +774,100 @@ class _Tabs extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        _TabButton(
-          key: InfoPanel.infoTabKey,
-          label: 'Info',
-          selected: tab == PanelTab.info,
-          onTap: () => onTab(PanelTab.info),
-        ),
-        _TabButton(
-          key: InfoPanel.tweakTabKey,
-          label: 'Tweak',
-          selected: tab == PanelTab.tweak,
-          onTap: () => onTab(PanelTab.tweak),
-        ),
-        _TabButton(
-          key: InfoPanel.commentTabKey,
-          label: commentLabel,
-          selected: tab == PanelTab.comment,
-          onTap: () => onTab(PanelTab.comment),
-        ),
-      ],
+    final tokens = PinPointTokens.of(context);
+    return Container(
+      height: PinPointSizes.tabBar,
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: tokens.ink)),
+      ),
+      child: Row(
+        children: [
+          _TabCell(
+            key: InfoPanel.infoTabKey,
+            label: 'INFO',
+            selected: tab == PanelTab.info,
+            onTap: () => onTab(PanelTab.info),
+          ),
+          _TabCell(
+            key: InfoPanel.tweakTabKey,
+            label: 'TWEAK',
+            selected: tab == PanelTab.tweak,
+            onTap: () => onTab(PanelTab.tweak),
+          ),
+          _TabCell(
+            key: InfoPanel.commentTabKey,
+            label: commentLabel.toUpperCase(),
+            selected: tab == PanelTab.comment,
+            last: true,
+            onTap: () => onTab(PanelTab.comment),
+          ),
+        ],
+      ),
     );
   }
 }
 
-class _TabButton extends StatelessWidget {
-  const _TabButton({
+class _TabCell extends StatefulWidget {
+  const _TabCell({
     super.key,
     required this.label,
     required this.selected,
     required this.onTap,
+    this.last = false,
   });
 
   final String label;
   final bool selected;
   final VoidCallback onTap;
+  final bool last;
+
+  @override
+  State<_TabCell> createState() => _TabCellState();
+}
+
+class _TabCellState extends State<_TabCell> {
+  bool _hovered = false;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final color = selected
-        ? theme.colorScheme.primary
-        : theme.colorScheme.onSurfaceVariant;
+    final tokens = PinPointTokens.of(context);
+    final selected = widget.selected;
     return Expanded(
-      child: InkWell(
-        onTap: onTap,
-        child: Container(
-          height: 36,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            border: Border(
-              bottom: BorderSide(
-                color: selected ? color : theme.dividerColor,
-                width: selected ? 2 : 1,
+      child: Semantics(
+        button: true,
+        selected: selected,
+        child: MouseRegion(
+          cursor: SystemMouseCursors.click,
+          onEnter: (_) => setState(() => _hovered = true),
+          onExit: (_) => setState(() => _hovered = false),
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: widget.onTap,
+            child: Container(
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: selected
+                    ? tokens.ink
+                    : _hovered
+                    ? tokens.accentBg
+                    : null,
+                border: widget.last
+                    ? null
+                    : Border(
+                        right: BorderSide(
+                          color: selected ? tokens.ink : tokens.rule,
+                        ),
+                      ),
+              ),
+              child: Text(
+                widget.label,
+                style: tokens.caps.copyWith(
+                  color: selected ? tokens.paper : tokens.muted,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
-          ),
-          child: Text(
-            label,
-            style: theme.textTheme.labelLarge?.copyWith(color: color),
           ),
         ),
       ),
@@ -695,64 +875,45 @@ class _TabButton extends StatelessWidget {
   }
 }
 
+/// The Info tab: the render object's basics, then one numbered section for
+/// each extractor that matched.
 class _InfoContent extends StatelessWidget {
-  const _InfoContent({required this.info, required this.theme});
+  const _InfoContent({required this.info});
 
   final WidgetInfo info;
-  final ThemeData theme;
 
   @override
   Widget build(BuildContext context) {
-    final title = theme.textTheme.labelMedium?.copyWith(
-      color: theme.colorScheme.primary,
+    final tokens = PinPointTokens.of(context);
+    Widget row(String name, String label) => PanelRow(
+      name: name,
+      child: Text(label, style: tokens.value),
     );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _Row(name: 'render', label: info.renderType),
-        _Row(name: 'size', label: info.sizeLabel),
-        _Row(name: 'position', label: info.positionLabel),
-        _Row(name: 'constraints', label: info.constraintsLabel),
-        _Row(name: 'depth', label: '${info.depth}'),
-        for (final section in info.sections) ...[
-          Padding(
-            padding: const EdgeInsets.only(top: 12, bottom: 4),
-            child: Text(section.title, style: title),
+        PanelSection(
+          heading: sectionHeading(1, 'Render'),
+          first: true,
+          children: [
+            row('render', info.renderType),
+            row('size', info.sizeLabel),
+            row('position', info.positionLabel),
+            row('constraints', info.constraintsLabel),
+            row('depth', '${info.depth}'),
+          ],
+        ),
+        for (final (n, section) in info.sections.indexed) ...[
+          const SizedBox(height: PinPointSizes.sectionGap),
+          PanelSection(
+            heading: sectionHeading(n + 2, section.title),
+            children: [
+              for (final property in section.properties)
+                row(property.name, property.label),
+            ],
           ),
-          for (final property in section.properties)
-            _Row(name: property.name, label: property.label),
         ],
       ],
-    );
-  }
-}
-
-class _Row extends StatelessWidget {
-  const _Row({required this.name, required this.label});
-
-  final String name;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 96,
-            child: Text(
-              name,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ),
-          Expanded(child: Text(label, style: theme.textTheme.bodySmall)),
-        ],
-      ),
     );
   }
 }

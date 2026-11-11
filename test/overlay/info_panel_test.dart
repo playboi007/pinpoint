@@ -68,8 +68,10 @@ void main() {
     expect(inPanel(info.positionLabel), findsOneWidget);
     expect(inPanel(info.constraintsLabel), findsOneWidget);
     // The selected widget (Milestone 3 refines RichText to Text) in the
-    // header and the breadcrumb, and the section title.
-    expect(inPanel('Text'), findsNWidgets(3));
+    // header and the breadcrumb; the section title is numbered, in capitals.
+    expect(inPanel('Text'), findsNWidgets(2));
+    expect(inPanel('01 RENDER'), findsOneWidget);
+    expect(inPanel('02 TEXT'), findsOneWidget);
     expect(inPanel('Save'), findsOneWidget);
     expect(inPanel('16.0'), findsOneWidget);
   });
@@ -84,7 +86,7 @@ void main() {
     expect(selected.index, 1);
     // In the header and in the breadcrumb.
     expect(inPanel('${selected.element.widget.runtimeType}'), findsNWidgets(2));
-    expect(inPanel('2 of ${selected.candidates.length}'), findsOneWidget);
+    expect(inPanel('2/${selected.candidates.length}'), findsOneWidget);
   });
 
   testWidgets('a click on the panel does not pick through it', (tester) async {
@@ -119,14 +121,14 @@ void main() {
 
     await tester.drag(header, const Offset(-5000, -5000));
     await tester.pump();
-    expect(tester.getTopLeft(panel), const Offset(panelMargin, panelMargin));
+    expect(tester.getTopLeft(panel), const Offset(panelMarginX, panelMarginY));
 
     await tester.drag(header, const Offset(5000, 5000));
     await tester.pump();
     final screen = tester.getSize(find.byType(PinPointWrapper));
     final rect = tester.getRect(panel);
-    expect(rect.right, screen.width - panelMargin);
-    expect(rect.bottom, lessThanOrEqualTo(screen.height - panelMargin));
+    expect(rect.right, screen.width - panelMarginX);
+    expect(rect.bottom, lessThanOrEqualTo(screen.height - panelMarginY));
   });
 
   testWidgets('keeps its place across reselection and stop', (tester) async {
@@ -141,6 +143,42 @@ void main() {
     await tester.pump();
     await selectText(tester);
     expect(tester.getTopLeft(panel), moved);
+  });
+
+  testWidgets('the next-candidate button does what a second click does', (
+    tester,
+  ) async {
+    await tester.pumpWidget(host());
+    await selectText(tester);
+    final first = controller.selection.value!;
+    expect(first.index, 0);
+
+    await tester.tap(find.byKey(InfoPanel.nextCandidateKey));
+    await tester.pump();
+    final next = controller.selection.value!;
+    expect(next.index, 1);
+    expect(next.candidates.length, first.candidates.length);
+    expect(inPanel('2/${first.candidates.length}'), findsOneWidget);
+  });
+
+  testWidgets('tabs are caps cells; the breadcrumb is one scrolling line', (
+    tester,
+  ) async {
+    await tester.pumpWidget(host());
+    await selectText(tester);
+    for (final label in ['INFO', 'TWEAK', 'COMMENT']) {
+      expect(inPanel(label), findsOneWidget, reason: label);
+    }
+    final crumbs = find.byKey(InfoPanel.crumbsKey);
+    expect(tester.getSize(crumbs).height, 26);
+    expect(
+      find.descendant(of: crumbs, matching: find.byType(Wrap)),
+      findsNothing,
+    );
+    expect(
+      find.descendant(of: crumbs, matching: find.byType(SingleChildScrollView)),
+      findsOneWidget,
+    );
   });
 
   testWidgets('close clears the selection', (tester) async {
