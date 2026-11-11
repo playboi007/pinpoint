@@ -300,7 +300,9 @@ void main() {
         .single;
     expect(color.label, '#00897B');
     expect(color.editable, isFalse);
-    expect(find.textContaining('private render object'), findsOneWidget);
+    // The reason is the tooltip of the lock glyph.
+    expect(color.note, contains('private render object'));
+    expect(find.byTooltip(color.note!), findsOneWidget);
   });
 
   testWidgets('the constraint chain lists what each ancestor gives', (
