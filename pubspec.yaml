@@ -18,3 +18,12 @@ dev_dependencies:
   flutter_lints: ^6.0.0
 
 flutter:
+  fonts:
+    # The one font Flutter does not bundle. Used as
+    # `fontFamily: 'RobotoMono', package: 'pinpoint'`. See assets/fonts/OFL.txt.
+    - family: RobotoMono
+      fonts:
+        - asset: assets/fonts/RobotoMono-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/RobotoMono-Medium.ttf
+          weight: 500

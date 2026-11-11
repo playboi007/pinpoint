@@ -3,6 +3,7 @@ import 'package:flutter/material.dart' show ThemeData;
 
 import '../agent/state_dump.dart';
 import '../sink/pinpoint_sink.dart';
+import '../theme/pinpoint_tokens.dart';
 import 'keymap.dart';
 
 /// Settings for [PinPointWrapper].
@@ -22,7 +23,12 @@ class PinPointConfig {
     this.themeVariants = const <String, ThemeData>{},
     this.allowAgentControl = true,
     this.stateAdapters = const <StateAdapter>[],
+    this.palette = PinPointPalette.redline,
   }) : assert(maxScreenshotWidth > 0);
+
+  /// The palette used until the user picks one in the theme menu. The pick is
+  /// saved per origin on web, and wins over this on the next run.
+  final PinPointPalette palette;
 
   /// Adds the app's own state (Bloc, Riverpod, Provider) to the agent's
   /// `get_state` dump.

@@ -6,6 +6,7 @@ import '../detect/findings_controller.dart';
 import '../env/environment_controller.dart';
 import '../model/annotation.dart';
 import '../search/pick_result.dart';
+import '../theme/palette_store.dart';
 import '../tweak/tweak_session.dart';
 import 'note_book.dart';
 
@@ -127,6 +128,12 @@ class CommentDraft extends ChangeNotifier {
 /// are separate [ValueListenable]s, so pointer moves and an outline that
 /// follows its widget do not rebuild everything that watches the mode.
 class PinPointController extends ChangeNotifier {
+  /// [paletteStore] is where the palette pick is saved. Tests pass a
+  /// `MemoryPaletteStore`; by default it is `localStorage` on web and memory
+  /// elsewhere.
+  PinPointController({@visibleForTesting PaletteStore? paletteStore})
+    : palette = PaletteController(store: paletteStore);
+
   PinPointMode _mode = PinPointMode.idle;
   bool _frozen = false;
   final ValueNotifier<PickResult?> _hovered = ValueNotifier<PickResult?>(null);
@@ -140,6 +147,11 @@ class PinPointController extends ChangeNotifier {
 
   /// Drafts and sent notes, shown as pins.
   final NoteBook notes = NoteBook();
+
+  /// The palette of Pinpoint's overlay. The overlay sets it from the saved
+  /// pick, or `PinPointConfig.palette`, when it first mounts; the theme menu
+  /// changes it with `palette.select`.
+  final PaletteController palette;
 
   /// The what-if overrides: viewport, text scale, theme, platform and the
   /// rest. Independent of [mode]: they stay when picking stops.
@@ -383,6 +395,7 @@ class PinPointController extends ChangeNotifier {
     findings.dispose();
     tweaks.dispose();
     agent.dispose();
+    palette.dispose();
     super.dispose();
   }
 }

@@ -1,6 +1,7 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart' show kDebugMode, listEquals;
+import 'package:flutter/foundation.dart'
+    show ValueListenable, kDebugMode, listEquals;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -28,6 +29,8 @@ import '../sink/bridge_client.dart';
 import '../sink/http_sink.dart';
 import '../sink/markdown_formatter.dart';
 import '../sink/pinpoint_sink.dart';
+import '../theme/pinpoint_theme.dart';
+import '../theme/pinpoint_tokens.dart';
 import '../tweak/tweak_scope.dart';
 import '../tweak/tweak_session.dart';
 import 'agent_layer.dart';
@@ -92,12 +95,6 @@ class InspectorOverlay extends StatefulWidget {
 }
 
 class _InspectorOverlayState extends State<InspectorOverlay> {
-  /// A fixed theme keeps the tool readable whatever the app's theme is.
-  static final ThemeData _theme = ThemeData(
-    colorSchemeSeed: const Color(0xFF2962FF),
-    brightness: Brightness.light,
-  );
-
   /// Holds primary focus while a mode is active, so no app widget gets keys.
   final FocusNode _holder = FocusNode(
     debugLabel: 'pinpoint focus holder',
@@ -234,6 +231,8 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
   @override
   void initState() {
     super.initState();
+    // Before the first build, so the first frame has the saved palette.
+    widget.controller.palette.restore(widget.config.palette);
     widget.controller.addListener(_onControllerChanged);
     widget.controller.environment.addListener(_onEnvironmentChanged);
     _tab.addListener(_syncFocus);
@@ -1052,8 +1051,8 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
         true;
     // `MaterialApp.builder` sits above the Navigator, so there is no Overlay
     // ancestor here. Text fields and tooltips in Pinpoint's UI need one.
-    return Theme(
-      data: _theme,
+    return _PaletteTheme(
+      palette: widget.controller.palette,
       // Fixed like the theme: the panel's header has a fixed height and
       // overflows at a large system text scale. The page context the
       // collector reads sits above this, so notes keep the real scale.
@@ -1245,6 +1244,27 @@ class _PointerTrap extends StatelessWidget {
         onExit: (_) => tracker.hoverAt(null),
         child: const SizedBox.expand(),
       ),
+    );
+  }
+}
+
+/// Pinpoint's own [Theme], in the palette the user picked. A switch rebuilds
+/// only what reads the theme under here, never the host app, and the
+/// overlay's own tree is passed in as [child], so it is not rebuilt as a
+/// whole either.
+class _PaletteTheme extends StatelessWidget {
+  const _PaletteTheme({required this.palette, required this.child});
+
+  final ValueListenable<PinPointPalette> palette;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<PinPointPalette>(
+      valueListenable: palette,
+      builder: (context, palette, child) =>
+          Theme(data: pinPointThemeData(palette), child: child!),
+      child: child,
     );
   }
 }
