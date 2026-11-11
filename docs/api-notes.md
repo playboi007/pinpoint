@@ -38,6 +38,7 @@ Result of the "Verify first" lists in `PLAN.md`. Where this file differs from th
 | 25 | Facts found in Session 9 | Apple platforms add a `Shortcuts` layer outside web, so a platform switch remounts the builder subtree; reassemble from inside a frame fails in tests; the platform setter throws outside debug. |
 | 26 | Facts found in Session 10 | Overflow diagnostics confirmed in a run; `debugSemantics` maps render objects to semantics nodes; `testWidgets` turns semantics on by default; three more test invariants; label glyphs are painted lighter than their style color. |
 | 27 | Facts found in Session 11 | `Text` and `Text.rich` wrap the span in a root of their own; a widget rebuild writes values back through `updateRenderObject`, parent data only on a widget change; `DropdownButton` needs a Navigator. |
+| 28 | Facts found in Session 12 | Navigation replies outside the test clock; `Scrollable.ensureVisible` subscribes; menu items act a frame late; a closed long poll can spin. |
 
 ---
 
@@ -326,14 +327,14 @@ Use the supported entry point, the navigation platform channel (`SystemChannels.
 | `popRoute` | none | `handlePopRoute` |
 | `pushRouteInformation` | `{'location': String, 'state': Object?}` | observers' `didPushRouteInformation` (`:1279`) |
 
-Send a message through `ServicesBinding.instance.defaultBinaryMessenger.handlePlatformMessage('flutter/navigation', const JSONMethodCodec().encodeMethodCall(MethodCall(...)), callback)`. `handlePlatformMessage` is public (`services/platform_channel.dart:61`).
+Send the message with `ServicesBinding.instance.channelBuffers.push('flutter/navigation', const JSONMethodCodec().encodeMethodCall(MethodCall(...)), callback)` and decode the reply with `decodeEnvelope` (a `bool`: whether someone handled it). **Corrected in Session 12:** `BinaryMessenger.handlePlatformMessage`, which Session 0 named here, is `@Deprecated` since 3.9 (`services/binary_messenger.dart:54`, "use ServicesBinding.instance.channelBuffers.push"). `AgentCommands.pushRoute` and `popRoute` use `channelBuffers.push`.
 
 Who listens (all are `WidgetsBindingObserver`s):
 
 - Navigator 1 apps: `_WidgetsAppState.didPushRouteInformation` (`widgets/app.dart:1623`) calls `navigator.pushNamed(...)`. It returns `false` when the app uses a `Router` (`_usesRouterWithDelegates`). Pop: `didPopRoute` (`app.dart:1607`) calls `navigator.maybePop()`.
 - Router apps: `PlatformRouteInformationProvider.didPushRouteInformation` (`widgets/router.dart:1590`) and `RootBackButtonDispatcher.didPopRoute` (`router.dart:1112`).
 
-`pushRoute` **pushes** a named route. It does not replace. **[unverified]** The behavior on a real `Router` app was not run. That is the M12 acceptance test.
+`pushRoute` **pushes** a named route. It does not replace. **[run-vm]** Session 12: `pushRouteInformation` and `popRoute` drive a named-route app and a `Router` app (`MaterialApp.router` with a hand-written delegate and `RootBackButtonDispatcher`), in package and example tests. **[unverified]** in Chrome.
 
 ## 13. `EditableTextState.userUpdateTextEditingValue` — takes two arguments
 
@@ -495,6 +496,21 @@ Extra tools exist behind `--enable` (`launch_app`, `list_devices`, `run_tests`, 
 - **[run-vm]** `ConstrainedBox` has no const constructor (its constraints are checked in an assert). A `const` widget tree that holds one does not compile.
 - **[run-vm]** The `LayoutBuilder` builder runs again only when its constraints change or its element is marked for build: `markNeedsLayout()` on its render object alone does not run it.
 - **[unverified]** In Chrome: the menus of the Tweak tab, arrow-key nudging in its number fields, the before and after image, and a tweak held under a real `setState`.
+
+## 28. Facts found in Session 12
+
+- **[source]** `BinaryMessenger.handlePlatformMessage` is deprecated (item 12, corrected). `ServicesBinding.instance.channelBuffers.push` (the same object as `dart:ui`'s `channelBuffers`) calls the framework's listener synchronously, in the zone where the listener was set (`dart:ui` `_Channel`), and the reply callback runs there too. **[run-vm]** So in `testWidgets` the reply to a pushed navigation message arrives outside the fake clock: a test must give real time (`tester.runAsync`) between pumps, or the future never completes. In an app this does not matter.
+- **[source]** `Scrollable.ensureVisible(context)` looks the scrollable up with `Scrollable.maybeOf`, which **depends** on `_ScrollableScope`: calling it on an app element subscribes that element (rule 3). Pinpoint walks `findAncestorStateOfType<ScrollableState>()` and calls `ScrollPosition.ensureVisible(renderObject, alignment: 0.5)` (`widgets/scroll_position.dart:813`) on each, which subscribes nothing.
+- **[source]** `ModalRoute.isCurrentOf` (`widgets/routes.dart:1328`) depends only on the `isCurrent` aspect, like `settingsOf`. `get_state` calls it on a render object element, on demand, the same accepted exception as item 20.
+- **[source]** `registerExtension` (`dart-sdk/lib/developer/extension.dart:109`) throws `ArgumentError` on a second registration of a name, and there is no unregister. `ServiceExtensionTransport` registers once per isolate and routes to the current handler.
+- **[run-vm]** A synthetic `PointerDownEvent` sent through `GestureBinding.handlePointerEvent` reaches a `Listener` as `_TransformedPointerDownEvent` (`is PointerDownEvent` still holds). The hit test for it is `RendererBinding.hitTestInView(result, position, viewId)` (`rendering/binding.dart:724`); a modal barrier stops the Overlay's hit test, so the page beneath is not on the path.
+- **[run-vm]** A hit inside an `AlertDialog` lands first in a `Dialog` it builds; name the outermost known cover.
+- **[run-vm]** `MenuItemButton` calls `onPressed` after the frame that closes its menu: a test pumps twice after choosing an item.
+- **[run-vm]** The default `flutter test` view has a device pixel ratio of 3. Semantics rects (item 26) are divided by it; pass `tester.view.devicePixelRatio`, not 1.
+- **[run-vm]** A `RenderFlex` with zero height paints no overflow indicator and Flutter reports no overflow error, but the measured overflow detector (Milestone 10) still finds it.
+- **[run-vm]** A long-poll loop whose poll answers empty at once (a closed queue) spins on microtasks: no timer and no frame ever run, so even the test timeout cannot fire. `LongPollTransport` pauses after an empty answer that came back in under a second.
+- **[run-vm]** A screen with a looping animation never reaches idle; each settle wait of a driving command then runs to its limit. The settle limit is 1 second (a route transition takes 300 ms).
+- **[unverified]** In Chrome: the long poll's XHR is aborted by `Client.close()`; `AppLifecycleState.hidden` arrives when the tab is hidden; synthetic taps, `enter_text` with the DOM input, and navigation in a real tab; `ext.pinpoint.command` with DWDS attached.
 
 ---
 
