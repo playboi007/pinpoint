@@ -10,6 +10,7 @@ import 'dart:typed_data';
 import '../model/annotation.dart' show NoteStatus, annotationSchema, clipText;
 import 'agent_instructions.dart';
 import 'bridge_protocol.dart';
+import 'command_queue.dart';
 import 'mcp_server.dart';
 import 'note_store.dart';
 
@@ -42,8 +43,7 @@ class BridgeStartException implements Exception {
 /// MCP for the agent: `POST /mcp` (Streamable HTTP with JSON answers; no
 /// server-sent events) with the tools of [McpServer].
 class PinPointBridge {
-  PinPointBridge._(this._server, this.store, this._allowedOrigins, this._log)
-    : _mcp = McpServer(store, log: _log) {
+  PinPointBridge._(this._server, this.store, this._allowedOrigins, this._log) {
     _subscription = _server.listen(_handle);
   }
 
@@ -96,8 +96,11 @@ class PinPointBridge {
   /// The notes on disk.
   final NoteStore store;
 
+  /// Agent commands on their way to the app (Milestone 12).
+  final CommandQueue commands = CommandQueue();
+
   final List<String> _allowedOrigins;
-  final McpServer _mcp;
+  late final McpServer _mcp = McpServer(store, commands: commands, log: _log);
   final void Function(String line) _log;
   late final StreamSubscription<HttpRequest> _subscription;
 
@@ -112,6 +115,7 @@ class PinPointBridge {
 
   /// Stops listening and drops open connections.
   Future<void> close() async {
+    commands.close();
     await _subscription.cancel();
     await _server.close(force: true);
   }
@@ -132,6 +136,8 @@ class PinPointBridge {
           path == healthPath ||
           path == changesPath ||
           path == mcpPath ||
+          path == commandsPath ||
+          path.startsWith('$commandsPath/') ||
           noteId != null;
       if (request.method == 'OPTIONS' && known) {
         // A browser sends this before every JSON POST, PATCH and DELETE.
@@ -225,6 +231,9 @@ class PinPointBridge {
         'Method not allowed',
       );
     }
+    if (path == commandsPath || path.startsWith('$commandsPath/')) {
+      return _command(request, path);
+    }
     switch ((method, path)) {
       case ('POST', mcpPath):
         return _mcpCall(request);
@@ -258,6 +267,48 @@ class PinPointBridge {
       healthPath || changesPath => 'GET, OPTIONS',
       _ => 'GET, POST, OPTIONS',
     });
+    _error(response, HttpStatus.methodNotAllowed, 'Method not allowed');
+  }
+
+  /// The app's side of the command channel: its long poll, its answers,
+  /// and the control switch.
+  Future<void> _command(HttpRequest request, String path) async {
+    final response = request.response;
+    final method = request.method;
+    if (method == 'GET' && path == commandsPath) {
+      final wait = int.tryParse(request.uri.queryParameters['wait'] ?? '');
+      final command = await commands.next(
+        wait: Duration(seconds: (wait ?? commandWait.inSeconds).clamp(0, 30)),
+      );
+      return _json(response, HttpStatus.ok, {'command': command});
+    }
+    if (method == 'POST' && path == '$commandsPath/control') {
+      final body = await _jsonBody(request);
+      if (body == null) return;
+      final enabled = body['enabled'] == true;
+      commands.setControl(enabled);
+      _log('pinpoint: agent control is ${enabled ? 'on' : 'off'} in the app');
+      return _json(response, HttpStatus.ok, {'enabled': enabled});
+    }
+    final match = RegExp(
+      '^${RegExp.escape(commandsPath)}/(c[0-9]{1,9})/result\$',
+    ).firstMatch(path);
+    if (method == 'POST' && match != null) {
+      final body = await _jsonBody(request);
+      if (body == null) return;
+      return commands.complete(match.group(1)!, body)
+          ? _json(response, HttpStatus.ok, {'ok': true})
+          : _error(response, HttpStatus.notFound, 'No command ${match[1]}');
+    }
+    if (match == null &&
+        path != commandsPath &&
+        path != '$commandsPath/control') {
+      return _error(response, HttpStatus.notFound, 'Not found: $path');
+    }
+    response.headers.set(
+      'allow',
+      method == 'GET' ? 'POST, OPTIONS' : 'GET, OPTIONS',
+    );
     _error(response, HttpStatus.methodNotAllowed, 'Method not allowed');
   }
 

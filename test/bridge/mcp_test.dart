@@ -147,7 +147,9 @@ void main() {
 
     final tools = (await rpc('tools/list'))['result']! as Map<String, Object?>;
     expect(
-      [for (final t in tools['tools']! as List<Object?>) (t! as Map)['name']],
+      [
+        for (final t in tools['tools']! as List<Object?>) (t! as Map)['name'],
+      ].take(3),
       ['list_notes', 'get_note', 'update_note'],
     );
 

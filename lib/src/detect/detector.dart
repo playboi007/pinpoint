@@ -154,6 +154,9 @@ class FindingLocator {
 
   Map<RenderObject, Element>? _index;
 
+  /// The element that owns [renderObject], or null.
+  Element? elementOf(RenderObject renderObject) => _elementOf(renderObject);
+
   /// Where [renderObject] is. Every part is null when unknown.
   ({Element? element, SourceLocation? source, String? route}) locate(
     RenderObject renderObject,

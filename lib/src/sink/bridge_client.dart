@@ -121,11 +121,7 @@ class BridgeClient {
     final json = await _send(
       'PATCH',
       _at('$annotationsPath/$id'),
-      body: {
-        'status': ?status?.name,
-        'comment': ?comment,
-        'message': ?message,
-      },
+      body: {'status': ?status?.name, 'comment': ?comment, 'message': ?message},
     );
     return Annotation.fromJson(json);
   }
@@ -166,6 +162,39 @@ class BridgeClient {
     );
   }
 
+  /// The app's long poll: the next agent command as `{id, tool, args}`, or
+  /// null when none came within [wait].
+  ///
+  /// With [client], the request goes through it and it stays open: closing
+  /// it ends a held poll at once.
+  Future<Map<String, Object?>?> nextCommand({
+    Duration wait = commandWait,
+    http.Client? client,
+  }) async {
+    final json = await _send(
+      'GET',
+      _at(commandsPath, {'wait': '${wait.inSeconds}'}),
+      client: client,
+      timeout: wait + const Duration(seconds: 10),
+    );
+    final command = json['command'];
+    return command is Map<String, Object?> ? command : null;
+  }
+
+  /// Hands the answer to the command [id] back to the bridge.
+  Future<void> postCommandResult(String id, Map<String, Object?> answer) =>
+      _send(
+        'POST',
+        _at('$commandsPath/$id/result'),
+        body: answer,
+        timeout: const Duration(seconds: 30),
+      );
+
+  /// Tells the bridge that the user turned agent control on or off. Off
+  /// fails every command the app has not answered.
+  Future<void> setAgentControl({required bool enabled}) =>
+      _send('POST', _at('$commandsPath/control'), body: {'enabled': enabled});
+
   static List<Annotation> _notes(Object? list) => [
     for (final note in list is List<Object?> ? list : const <Object?>[])
       if (note is Map<String, Object?>) ?Annotation.fromJson(note),
@@ -175,8 +204,14 @@ class BridgeClient {
     String method,
     Uri url, {
     Object? body,
+    http.Client? client,
+    Duration? timeout,
   }) async {
-    final client = debugClient ?? http.Client();
+    // A client passed in belongs to the caller, who may close it to end a
+    // held request.
+    final owned = client == null && debugClient == null;
+    final sender = client ?? debugClient ?? http.Client();
+    final wait = timeout ?? this.timeout;
     final http.Response response;
     try {
       final request = http.Request(method, url);
@@ -185,14 +220,14 @@ class BridgeClient {
         request.body = jsonEncode(body);
       }
       response = await http.Response.fromStream(
-        await client.send(request).timeout(timeout),
-      ).timeout(timeout);
+        await sender.send(request).timeout(wait),
+      ).timeout(wait);
     } on TimeoutException {
       throw HttpSinkException('no answer from ${url.authority}');
     } on http.ClientException {
       throw HttpSinkException('cannot reach ${url.authority}');
     } finally {
-      if (debugClient == null) client.close();
+      if (owned) sender.close();
     }
     Object? decoded;
     try {

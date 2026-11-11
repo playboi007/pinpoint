@@ -9,7 +9,7 @@ import 'package:http/testing.dart';
 /// It keeps notes as JSON, numbers every change like the real store, and
 /// records every request.
 class FakeBridge {
-  late final http.Client client = MockClient(_handle);
+  late final http.Client client = MockClient(handle);
 
   /// Notes by id, as the bridge stores them (no image data).
   final Map<String, Map<String, Object?>> notes = {};
@@ -39,7 +39,8 @@ class FakeBridge {
     _changed[id] = ++_seq;
   }
 
-  Future<http.Response> _handle(http.Request request) async {
+  /// Answers [request] as the bridge would.
+  Future<http.Response> handle(http.Request request) async {
     final path = request.url.path;
     requests.add('${request.method} $path');
     if (offline) throw http.ClientException('Connection refused');

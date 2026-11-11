@@ -161,6 +161,15 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
   void _applyEnvironment() => _globals?.apply(_controller.environment.value);
 
   bool _handleKey(KeyEvent event) {
+    // Esc stops the agent's running command and turns control off, in any
+    // mode, idle included: the user must always be able to take the app
+    // back. The key still goes on to Pinpoint's own Esc below and to the
+    // app.
+    if (event is KeyDownEvent &&
+        event.logicalKey == LogicalKeyboardKey.escape &&
+        _controller.agent.enabled) {
+      _controller.agent.abort();
+    }
     // Alt alone is not claimed: it only switches the rulers to measuring
     // the gap between the selection and the hovered widget.
     _controller.setMeasuring(HardwareKeyboard.instance.isAltPressed);

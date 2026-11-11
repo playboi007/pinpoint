@@ -19,7 +19,14 @@ class PinPointConfig {
     this.bridgeUrl,
     this.maxScreenshotWidth = 1600,
     this.themeVariants = const <String, ThemeData>{},
+    this.allowAgentControl = true,
   }) : assert(maxScreenshotWidth > 0);
+
+  /// Whether the overlay offers "Allow agent control", which lets a coding
+  /// agent operate the app through the bridge (tap, type, navigate, verify
+  /// notes). The switch itself is off at every start; false hides it, and
+  /// no command ever reaches the app.
+  final bool allowAgentControl;
 
   /// The bridge (`dart run pinpoint:bridge`), for example
   /// `http://127.0.0.1:4747`. The app loads its pins from it at start, stores

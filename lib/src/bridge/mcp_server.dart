@@ -7,6 +7,8 @@
 import 'dart:convert';
 
 import '../model/annotation.dart' show NoteStatus;
+import 'agent_tools.dart';
+import 'command_queue.dart';
 import 'note_detail.dart';
 import 'note_store.dart';
 import 'png_resize.dart';
@@ -26,14 +28,24 @@ const int mcpMaxImageWidth = 800;
 const int mcpMaxListed = 50;
 
 /// The agent's tools: `list_notes`, `get_note` and `update_note`, over the
-/// notes in [store].
+/// notes in [store], and with [commands] the Milestone 12 tools that run in
+/// the app ([agentToolNames]).
 ///
 /// Drafts are invisible here: no tool lists, reads or changes one, so
 /// half-written feedback never triggers an edit.
 class McpServer {
-  McpServer(this.store, {this.version = '0.0.1', this._log = _noLog});
+  McpServer(
+    this.store, {
+    this.commands,
+    this.version = '0.0.1',
+    this._log = _noLog,
+  });
 
   final NoteStore store;
+
+  /// The way to the app; null: the note tools only.
+  final CommandQueue? commands;
+
   final void Function(String line) _log;
 
   /// Reported as `serverInfo.version`.
@@ -68,7 +80,9 @@ class McpServer {
       return switch (method) {
         'initialize' => _result(id, _initialize(args)),
         'ping' => _result(id, const <String, Object?>{}),
-        'tools/list' => _result(id, {'tools': _tools}),
+        'tools/list' => _result(id, {
+          'tools': [..._tools, if (commands != null) ...agentTools],
+        }),
         'tools/call' => _result(id, await _call(args)),
         _ => _error(id, -32601, 'Method not found: $method'),
       };
@@ -185,6 +199,9 @@ class McpServer {
       'list_notes' => _listNotes(input),
       'get_note' => _getNote(input),
       'update_note' => _updateNote(input),
+      final String tool
+          when commands != null && agentToolNames.contains(tool) =>
+        _agent(tool, input),
       _ => throw _InvalidParams('Unknown tool: $name'),
     };
   }
@@ -287,6 +304,53 @@ class McpServer {
       'Note $id is ${note['status']}.\n\n'
       '${noteText(note, NoteDetail.compact)}',
     );
+  }
+
+  /// Runs [tool] in the app and turns its answer into tool content. An
+  /// image in the answer (`png`, base64) becomes image content, at most
+  /// [mcpMaxImageWidth] wide; the rest is compact JSON.
+  Future<Map<String, Object?>> _agent(
+    String tool,
+    Map<String, Object?> input,
+  ) async {
+    final answer = await commands!.run(
+      tool,
+      input,
+      timeout: agentToolTimeout(tool, input),
+    );
+    if (answer['ok'] != true) {
+      return _text('${answer['error']}', isError: true);
+    }
+    final result = answer['result'];
+    return _resultContent(
+      result is Map<String, Object?> ? {...result} : result,
+    );
+  }
+
+  /// [result] as text, with its `png` (base64) as an image.
+  Map<String, Object?> _resultContent(Object? result) {
+    Map<String, Object?>? image;
+    if (result is Map<String, Object?> && result['png'] is String) {
+      final png = result.remove('png')! as String;
+      try {
+        final bytes = base64Decode(png);
+        final small = downscalePng(bytes, maxWidth: mcpMaxImageWidth) ?? bytes;
+        image = {
+          'type': 'image',
+          'data': base64Encode(small),
+          'mimeType': 'image/png',
+        };
+      } on FormatException {
+        result['image'] = 'not attached (not base64)';
+      }
+    }
+    return {
+      'content': [
+        {'type': 'text', 'text': jsonEncode(result)},
+        ?image,
+      ],
+      'isError': false,
+    };
   }
 
   /// The note [id], unless it is a draft or unknown.

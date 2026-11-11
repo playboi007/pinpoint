@@ -7,6 +7,8 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
+import '../agent/command_channel.dart';
+import '../agent/commands.dart';
 import '../capture/context_collector.dart';
 import '../capture/screenshot.dart';
 import '../core/note_sync.dart';
@@ -28,6 +30,7 @@ import '../sink/markdown_formatter.dart';
 import '../sink/pinpoint_sink.dart';
 import '../tweak/tweak_scope.dart';
 import '../tweak/tweak_session.dart';
+import 'agent_layer.dart';
 import 'environment_panel.dart';
 import 'findings_panel.dart';
 import 'highlight_painter.dart';
@@ -155,6 +158,30 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
   /// The bridge sync, or null without a bridge.
   NoteSync? _sync;
 
+  /// Runs the agent's commands in this app.
+  late AgentCommands _agentCommands = _newAgentCommands();
+
+  AgentCommands _newAgentCommands() => AgentCommands(
+    controller: widget.controller,
+    appKey: widget.appKey,
+    contentKey: widget.contentKey,
+    resolver: () => _tracker.resolver,
+  );
+
+  /// Takes the agent's commands from the bridge while control is on; null
+  /// without a bridge.
+  CommandTransport? _transport;
+
+  /// The bridge [_transport] talks to.
+  BridgeClient? _agentBridge;
+
+  /// Whether the page is shown. A hidden tab holds no poll.
+  bool _visible = true;
+
+  late final AppLifecycleListener _lifecycle = AppLifecycleListener(
+    onStateChange: _onLifecycle,
+  );
+
   /// Holds a draft's edits for a moment, so the bridge gets one PATCH per
   /// pause in typing, not one per key.
   Timer? _editTimer;
@@ -209,6 +236,72 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
       if (_findingsPanel.value) _environmentPanel.value = false;
     });
     _startSync();
+    _attachAgent();
+    _lifecycle; // starts listening
+  }
+
+  /// Hands the controller's agent this overlay's commands, and follows
+  /// its switch.
+  void _attachAgent() {
+    final agent = widget.controller.agent;
+    agent.runner = _agentCommands.run;
+    agent.addListener(_syncTransport);
+    _agentBridge = BridgeClient.find(
+      url: widget.config.bridgeUrl,
+      sinks: widget.config.sinks,
+    );
+    final bridge = _agentBridge;
+    _transport = bridge == null ? null : LongPollTransport(bridge);
+    _syncTransport();
+  }
+
+  void _detachAgent(PinPointController controller) {
+    final agent = controller.agent;
+    agent.removeListener(_syncTransport);
+    if (agent.runner == _agentCommands.run) agent.runner = null;
+    _stopTransport();
+    _transport = null;
+  }
+
+  /// Polls for commands only while the user allows agent control and the
+  /// page is shown.
+  void _syncTransport() {
+    final transport = _transport;
+    if (transport == null) return;
+    final agent = widget.controller.agent;
+    final want = widget.config.allowAgentControl && agent.enabled && _visible;
+    if (want && !transport.running) {
+      transport.start(agent.run);
+    } else if (!want) {
+      _stopTransport();
+    }
+  }
+
+  /// Stops the poll and tells the bridge, so a tool call fails at once
+  /// instead of waiting for an app that will not ask.
+  void _stopTransport() {
+    final transport = _transport;
+    if (transport == null || !transport.running) return;
+    transport.stop();
+    final bridge = _agentBridge;
+    if (bridge != null) {
+      unawaited(
+        bridge.setAgentControl(enabled: false).catchError((Object _) {}),
+      );
+    }
+  }
+
+  void _onLifecycle(AppLifecycleState state) {
+    // Watch out for: a long poll held open must end when the tab is
+    // hidden. On web a hidden tab draws no frames, so a command could not
+    // finish anyway.
+    _visible = switch (state) {
+      AppLifecycleState.resumed || AppLifecycleState.inactive => true,
+      AppLifecycleState.hidden ||
+      AppLifecycleState.paused ||
+      AppLifecycleState.detached => false,
+    };
+    _syncTransport();
   }
 
   /// Loads the pins once: a restarted app gets them back. One request, not
@@ -252,18 +345,33 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
       _sync?.dispose();
       _startSync();
     }
+    if (oldWidget.controller != widget.controller ||
+        oldWidget.appKey != widget.appKey ||
+        oldWidget.contentKey != widget.contentKey ||
+        oldWidget.config.bridgeUrl != widget.config.bridgeUrl ||
+        !listEquals(oldWidget.config.sinks, widget.config.sinks)) {
+      _detachAgent(oldWidget.controller);
+      _agentCommands = _newAgentCommands();
+      _attachAgent();
+    } else if (oldWidget.config.allowAgentControl !=
+        widget.config.allowAgentControl) {
+      _syncTransport();
+    }
   }
 
   @override
   void reassemble() {
     super.reassemble();
     // After a hot reload held elements may be stale and lines may have
-    // moved: every pin is looked up again.
+    // moved: every pin is looked up again. Handles re-resolve from their
+    // anchors on use.
     _pins.reset();
   }
 
   @override
   void dispose() {
+    _detachAgent(widget.controller);
+    _lifecycle.dispose();
     widget.controller.removeListener(_onControllerChanged);
     widget.controller.environment.removeListener(_onEnvironmentChanged);
     _tracker.dispose();
@@ -1042,6 +1150,16 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
                                 ],
                               ),
                       ),
+                    // Takes no pointer events, so a synthetic tap reaches
+                    // the app beneath it.
+                    Builder(
+                      builder: (layerContext) => AgentLayer(
+                        agent: widget.controller.agent,
+                        origin: () => _originOf(layerContext),
+                      ),
+                    ),
+                    if (widget.config.allowAgentControl)
+                      AgentToggle(controller: widget.controller),
                     ToastLayer(toasts: _toasts),
                     // Above the trap, so it can always stop picking. Always
                     // offered by default: some shortcuts never reach Flutter.

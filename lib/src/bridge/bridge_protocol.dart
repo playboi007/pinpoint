@@ -24,6 +24,14 @@ const String changesPath = '/changes';
 /// The MCP endpoint for the agent (Streamable HTTP, JSON answers).
 const String mcpPath = '/mcp';
 
+/// The app's long poll for agent commands (`GET /commands`), their
+/// results (`POST /commands/<id>/result`) and the control switch
+/// (`POST /commands/control`).
+const String commandsPath = '/commands';
+
+/// How long the app holds a command poll open.
+const Duration commandWait = Duration(seconds: 25);
+
 /// How often the app asks [changesPath], only while the overlay is active.
 const Duration pollInterval = Duration(seconds: 2);
 

@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
+import '../agent/agent_control.dart';
 import '../detect/findings_controller.dart';
 import '../env/environment_controller.dart';
 import '../model/annotation.dart';
@@ -119,6 +120,10 @@ class PinPointController extends ChangeNotifier {
   /// The live edits of the Tweak tab. Independent of [mode]: they stay,
   /// outlined, until reset.
   final TweakSession tweaks = TweakSession();
+
+  /// Whether the agent may operate the app, and what it is doing. Off at
+  /// every start.
+  final AgentControl agent = AgentControl();
 
   final ValueNotifier<String?> _openNote = ValueNotifier<String?>(null);
 
@@ -346,6 +351,7 @@ class PinPointController extends ChangeNotifier {
     environment.dispose();
     findings.dispose();
     tweaks.dispose();
+    agent.dispose();
     super.dispose();
   }
 }

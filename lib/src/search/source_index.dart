@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 
@@ -40,6 +42,42 @@ class SourceIndex {
     required Element root,
     String? route,
   }) {
+    final anchor = _baseAnchor(element, route);
+    if (anchor == null || !anchor.resolvable) return anchor;
+    final ordinal = find(anchor, root: root).indexOf(element);
+    return anchor.withOrdinal(ordinal < 0 ? 0 : ordinal);
+  }
+
+  /// [anchorFor] for every element of [elements], in one walk. Elements
+  /// that are gone are left out.
+  Map<Element, NoteAnchor> anchorsFor(
+    Iterable<Element> elements, {
+    required Element root,
+  }) {
+    final bases = Map<Element, NoteAnchor>.identity();
+    for (final element in elements) {
+      final anchor = _baseAnchor(element, null);
+      if (anchor != null) bases[element] = anchor;
+    }
+    final found = _walk(
+      {
+        for (final a in bases.values)
+          if (a.resolvable) a,
+      }.toList(),
+      root,
+    );
+    return {
+      for (final MapEntry(key: element, value: anchor) in bases.entries)
+        element: anchor.resolvable
+            ? anchor.withOrdinal(
+                math.max(0, found[anchor]?.indexOf(element) ?? 0),
+              )
+            : anchor,
+    };
+  }
+
+  /// [element] as an anchor with ordinal 0, or null when it is gone.
+  NoteAnchor? _baseAnchor(Element element, String? route) {
     final Widget widget;
     try {
       widget = element.widget;
@@ -48,7 +86,7 @@ class SourceIndex {
     }
     final location = resolver.locationOf(element);
     final key = widget.key;
-    final anchor = NoteAnchor(
+    return NoteAnchor(
       file: location == null ? null : resolver.paths.relativePath(location.uri),
       line: location?.line,
       column: location?.column,
@@ -57,9 +95,6 @@ class SourceIndex {
       itemIndex: itemIndexOf(element),
       route: route,
     );
-    if (!anchor.resolvable) return anchor;
-    final ordinal = find(anchor, root: root).indexOf(element);
-    return anchor.withOrdinal(ordinal < 0 ? 0 : ordinal);
   }
 
   /// Every element under [root] that matches [anchor], in tree order.
