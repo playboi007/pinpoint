@@ -49,6 +49,10 @@ class LongPollTransport implements CommandTransport {
   /// The pause after a failed poll (bridge stopped), before the next one.
   final Duration retry;
 
+  /// An empty poll answered faster than this is followed by a [retry]
+  /// pause.
+  static const Duration minEmptyPoll = Duration(seconds: 1);
+
   bool _running = false;
 
   /// Bumped by every start and stop, so a loop from before a stop ends
@@ -92,10 +96,17 @@ class LongPollTransport implements CommandTransport {
     while (live()) {
       final held = BridgeClient.debugClient == null ? http.Client() : null;
       _held = held;
+      final asked = Stopwatch()..start();
       try {
         final command = await client.nextCommand(wait: wait, client: held);
         if (!live()) return;
-        if (command == null) continue;
+        if (command == null) {
+          // An empty answer long before the wait ended (a bridge that is
+          // stopping, or one that does not hold polls) would make this
+          // loop spin without a pause.
+          if (asked.elapsed < minEmptyPoll) await _pause(generation);
+          continue;
+        }
         final id = command['id'];
         final tool = command['tool'];
         final args = command['args'];

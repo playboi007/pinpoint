@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart';
@@ -19,6 +20,7 @@ import '../search/source_index.dart';
 import '../search/source_resolver.dart';
 import 'agent_control.dart';
 import 'checks.dart';
+import 'synthetic_input.dart';
 
 /// A command failed for a reason the agent should read, for example
 /// `stale handle h3`.
@@ -194,6 +196,14 @@ class AgentCommands {
     try {
       final Object result = switch (tool) {
         'verify_note' => await verifyNote(args, cancel),
+        'wait_idle' => await waitIdleTool(args, cancel),
+        'tap' => await tap(args, cancel),
+        'long_press' => await tap(args, cancel, long: true),
+        'enter_text' => await enterText(args, limits, cancel),
+        'scroll' => await scroll(args),
+        'scroll_to' => await scrollTo(args, limits, cancel),
+        'navigate' => await navigate(args, cancel),
+        'back' => await back(cancel),
         'get_screen' => getScreen(limits),
         'find_widgets' => findWidgets(args, limits),
         'inspect' => inspect(args),
@@ -206,8 +216,10 @@ class AgentCommands {
     }
   }
 
-  /// How long a command waits for the app to settle after a change.
-  static const Duration settleTimeout = Duration(seconds: 3);
+  /// How long a command waits for the app to settle after a change. A
+  /// route transition takes 300 ms; a screen with a looping animation
+  /// never settles, and then each wait costs this much.
+  static const Duration settleTimeout = Duration(seconds: 1);
 
   /// Runs a note's checks (plan Milestone 12, step 7): applies the note's
   /// environment, goes to its route when its widget is not on screen,
@@ -530,6 +542,17 @@ class AgentCommands {
     Map<String, Object?> args,
     OutputLimits limits,
   ) {
+    final ordered = matching(args);
+    final shown = ordered.take(limits.items).toList();
+    return {
+      'widgets': describeAll(shown, limits),
+      if (ordered.length > shown.length) 'more': ordered.length - shown.length,
+    };
+  }
+
+  /// The elements under [root] (the app when null) that fit the query in
+  /// [args] (`file`, `line`, `type`, `text`, `key`), visible ones first.
+  List<Element> matching(Map<String, Object?> args, {Element? root}) {
     final file = _string(args['file']);
     final line = args['line'];
     final type = _string(args['type']);
@@ -542,7 +565,7 @@ class AgentCommands {
       throw const AgentError('line must be an integer, with a file');
     }
     final matches = sourceIndex().query(
-      root: contentRoot,
+      root: root ?? contentRoot,
       file: file,
       line: line as int?,
       type: type,
@@ -569,15 +592,397 @@ class AgentCommands {
           RenderSearch.visibleRectOf(renderObject) != null;
     }
 
-    final ordered = [
-      ...matches.where(visible),
-      ...matches.where((e) => !visible(e)),
-    ];
-    final shown = ordered.take(limits.items).toList();
+    return [...matches.where(visible), ...matches.where((e) => !visible(e))];
+  }
+
+  /// `wait_idle`: whether the app settled within `timeout_ms` (default
+  /// 2000).
+  Future<Map<String, Object?>> waitIdleTool(
+    Map<String, Object?> args,
+    AgentCancel cancel,
+  ) async {
+    final ms = args['timeout_ms'];
+    final timeout = ms is num ? ms.round().clamp(0, 60000) : 2000;
+    final idle = await waitIdle(Duration(milliseconds: timeout), cancel);
+    return {'idle': idle, 'timeout_ms': timeout};
+  }
+
+  /// A synthetic tap (or long press) at the center of the handle's
+  /// visible part, after checking that nothing covers it.
+  Future<Map<String, Object?>> tap(
+    Map<String, Object?> args,
+    AgentCancel cancel, {
+    bool long = false,
+  }) async {
+    final target = element(args);
+    await prepareToDrive();
+    cancel.check();
+    final renderObject = renderObjectOf(target);
+    if (renderObject == null) {
+      throw const AgentError('the widget is not laid out');
+    }
+    final visible = RenderSearch.visibleRectOf(renderObject);
+    if (visible == null || visible.width <= 0 || visible.height <= 0) {
+      throw const AgentError('not on screen; call scroll_to first');
+    }
+    final point = visible.center;
+    // A what-if viewport leaves screen around the app: a point there is
+    // over nothing (Milestone 9, RenderSearch.isOnApp).
+    if (!RenderSearch.isOnApp(appRoot, point)) {
+      throw const AgentError('outside the app viewport');
+    }
+    final viewId = SyntheticInput.viewIdOf(renderObject);
+    final blocker = SyntheticInput.obscuredBy(
+      renderObject,
+      point,
+      viewId: viewId,
+      describe: describeObscurer,
+    );
+    if (blocker != null) throw AgentError('obscured by $blocker');
+    controller.agent.mark(point, longPress: long);
+    await SyntheticInput.press(
+      point,
+      viewId: viewId,
+      cancel: cancel,
+      hold: long ? SyntheticInput.longPressHold : SyntheticInput.tapHold,
+    );
+    await _frame();
     return {
-      'widgets': describeAll(shown, limits),
-      if (ordered.length > shown.length) 'more': ordered.length - shown.length,
+      'handle': args['handle'],
+      'tapped': [_round(point.dx), _round(point.dy)],
     };
+  }
+
+  /// The widget that covers a point: its nearest meaningful name, and
+  /// whether it is Pinpoint's own (a pin, the launcher).
+  String describeObscurer(RenderObject renderObject) {
+    final locator = this.locator();
+    final owner = locator.elementOf(renderObject);
+    if (owner == null) return renderObject.runtimeType.toString();
+    final name = _meaningfulName(owner);
+    return locator.isInApp(owner) ? name : "Pinpoint's own $name";
+  }
+
+  /// Wrappers that say nothing about what covers a point.
+  static const Set<String> _plain = {
+    'AbsorbPointer',
+    'Actions',
+    'Align',
+    'AnimatedBuilder',
+    'BlockSemantics',
+    'Builder',
+    'Center',
+    'ColoredBox',
+    'ConstrainedBox',
+    'Container',
+    'CustomPaint',
+    'DecoratedBox',
+    'DefaultTextStyle',
+    'ExcludeSemantics',
+    'FadeTransition',
+    'Focus',
+    'FocusScope',
+    'GestureDetector',
+    'IconTheme',
+    'IgnorePointer',
+    'InkResponse',
+    'InkWell',
+    'KeyedSubtree',
+    'Listener',
+    'ListenableBuilder',
+    'Material',
+    'MergeSemantics',
+    'MouseRegion',
+    'Opacity',
+    'Padding',
+    'Positioned',
+    'RawGestureDetector',
+    'RepaintBoundary',
+    'Semantics',
+    'Shortcuts',
+    'SizedBox',
+    'Stack',
+    'Tooltip',
+    'ValueListenableBuilder',
+  };
+
+  /// Widgets that cover the app on purpose: named first when one of them
+  /// is above the hit.
+  static const Set<String> _covers = {
+    'AlertDialog',
+    'BottomSheet',
+    'CupertinoAlertDialog',
+    'Dialog',
+    'Drawer',
+    'ModalBarrier',
+    'NavigationDrawer',
+    'PinPointLauncher',
+    'PinMarker',
+    'SimpleDialog',
+    'SnackBar',
+  };
+
+  /// The name of what covers a point: a known cover above the hit
+  /// (a barrier, a dialog, a sheet), else the nearest widget from the
+  /// app's own source, else the nearest public widget that is not a plain
+  /// wrapper.
+  String _meaningfulName(Element element) {
+    final chain = <Element>[element];
+    element.visitAncestorElements((ancestor) {
+      chain.add(ancestor);
+      return chain.length < 40;
+    });
+    String nameOf(Element e) =>
+        e.widget.runtimeType.toString().split('<').first;
+    // The outermost cover: an AlertDialog builds a Dialog inside it.
+    String? cover;
+    for (final e in chain) {
+      if (_covers.contains(nameOf(e))) cover = nameOf(e);
+    }
+    if (cover != null) return cover;
+    final resolver = this.resolver();
+    for (final e in chain) {
+      if (resolver.entryOf(e).isLocal) return nameOf(e);
+    }
+    for (final e in chain) {
+      final name = nameOf(e);
+      if (!name.startsWith('_') && !_plain.contains(name)) return name;
+    }
+    return nameOf(element);
+  }
+
+  /// Focuses the text field under the handle and sets its text as typing
+  /// would: `userUpdateTextEditingValue` runs the input formatters and
+  /// `onChanged` (docs/api-notes.md, item 13: it takes a cause too).
+  Future<Map<String, Object?>> enterText(
+    Map<String, Object?> args,
+    OutputLimits limits,
+    AgentCancel cancel,
+  ) async {
+    final text = args['text'];
+    if (text is! String) throw const AgentError('text is required');
+    final target = element(args);
+    final field = _editableIn(target);
+    if (field == null) {
+      throw const AgentError('no text field at or under the handle');
+    }
+    if (field.widget.readOnly) {
+      throw const AgentError('the field is read only or disabled');
+    }
+    await prepareToDrive();
+    cancel.check();
+    field.widget.focusNode.requestFocus();
+    await _frame();
+    cancel.check();
+    if (!field.mounted) throw const AgentError('the field went away');
+    field.userUpdateTextEditingValue(
+      TextEditingValue(
+        text: text,
+        selection: TextSelection.collapsed(offset: text.length),
+      ),
+      SelectionChangedCause.keyboard,
+    );
+    await _frame();
+    final value = field.mounted ? field.textEditingValue.text : text;
+    return {
+      'handle': args['handle'],
+      // Never echo a password back (engineering rule 9).
+      'text': field.widget.obscureText ? '[masked]' : limits.clip(value),
+      'focused': field.mounted && field.widget.focusNode.hasFocus,
+    };
+  }
+
+  static EditableTextState? _editableIn(Element element) {
+    EditableTextState? found;
+    var visited = 0;
+    void visit(Element e) {
+      if (found != null || ++visited > 2000) return;
+      if (e is StatefulElement && e.state is EditableTextState) {
+        found = e.state as EditableTextState;
+        return;
+      }
+      e.visitChildren(visit);
+    }
+
+    visit(element);
+    return found;
+  }
+
+  /// Moves the nearest scrollable at or above the handle by `dx` or `dy`.
+  Future<Map<String, Object?>> scroll(Map<String, Object?> args) async {
+    final target = element(args);
+    await prepareToDrive();
+    final scrollable = scrollableFor(target);
+    if (scrollable == null) {
+      throw const AgentError('no scrollable at or above the widget');
+    }
+    final position = scrollable.position;
+    final vertical =
+        axisDirectionToAxis(position.axisDirection) == Axis.vertical;
+    final delta = args[vertical ? 'dy' : 'dx'];
+    if (delta is! num || delta == 0) {
+      throw AgentError(
+        'give ${vertical ? 'dy' : 'dx'}: the list scrolls '
+        '${vertical ? 'vertically' : 'horizontally'}',
+      );
+    }
+    position.jumpTo(
+      (position.pixels + delta).clamp(
+        position.minScrollExtent,
+        position.maxScrollExtent,
+      ),
+    );
+    await _frame();
+    return _scrollState(position);
+  }
+
+  static Map<String, Object?> _scrollState(ScrollPosition position) => {
+    'pixels': _round(position.pixels),
+    'min': _round(position.minScrollExtent),
+    'max': _round(position.maxScrollExtent),
+    'viewport': _round(position.viewportDimension),
+    'axis': axisDirectionToAxis(position.axisDirection).name,
+  };
+
+  /// The scrollable of a handle: its own (a list's handle), else the
+  /// nearest above it. Found without subscribing (engineering rule 3).
+  static ScrollableState? scrollableFor(Element element) {
+    ScrollableState? own;
+    var visited = 0;
+    void visit(Element e) {
+      if (own != null || ++visited > 200) return;
+      if (e is StatefulElement && e.state is ScrollableState) {
+        own = e.state as ScrollableState;
+        return;
+      }
+      e.visitChildren(visit);
+    }
+
+    visit(element);
+    return own ?? element.findAncestorStateOfType<ScrollableState>();
+  }
+
+  /// The biggest scrollable on screen: the page's main list.
+  ScrollableState? mainScrollable() {
+    ScrollableState? best;
+    var bestArea = 0.0;
+    var visited = 0;
+    void visit(Element e) {
+      if (++visited > 20000) return;
+      if (e is StatefulElement && e.state is ScrollableState) {
+        final renderObject = renderObjectOf(e);
+        final shown = renderObject == null
+            ? null
+            : RenderSearch.visibleRectOf(renderObject);
+        final area = shown == null ? 0.0 : shown.width * shown.height;
+        if (area > bestArea) {
+          bestArea = area;
+          best = e.state as ScrollableState;
+        }
+      }
+      e.visitChildren(visit);
+    }
+
+    visit(contentRoot);
+    return best;
+  }
+
+  /// `scroll_to`: with a handle, brings it into view. With a query, scrolls
+  /// a list one screen at a time until a matching widget is built, then
+  /// brings it into view.
+  ///
+  /// Lazy lists build only what is near the screen (watch out for):
+  /// `find_widgets` cannot see an item that was never built, so this
+  /// scrolls, waits for the frame that builds the next items, and searches
+  /// again, at most `max_steps` times (default 30). From the end of the
+  /// list it goes on from the start, up to where it began.
+  Future<Map<String, Object?>> scrollTo(
+    Map<String, Object?> args,
+    OutputLimits limits,
+    AgentCancel cancel,
+  ) async {
+    await prepareToDrive();
+    if (args['handle'] is String) {
+      final target = element(args);
+      await ensureVisible(target);
+      await _frame();
+      return {'widget': describe(target, _anchorOf(target), limits)};
+    }
+    final within = args['within'];
+    final scrollable = within is String
+        ? scrollableFor(element({'handle': within}))
+        : mainScrollable();
+    if (scrollable == null) {
+      throw const AgentError('no scrollable list on screen');
+    }
+    final steps = args['max_steps'] is num
+        ? (args['max_steps']! as num).round().clamp(1, 200)
+        : 30;
+    final start = scrollable.position.pixels;
+    var wrapped = false;
+    for (var step = 0; step < steps; step++) {
+      cancel.check();
+      if (!scrollable.mounted) throw const AgentError('the list went away');
+      final found = matching(args, root: scrollable.context as Element);
+      if (found.isNotEmpty) {
+        final target = found.first;
+        await ensureVisible(target);
+        await _frame();
+        return {
+          'widget': describe(target, _anchorOf(target), limits),
+          'steps': step,
+        };
+      }
+      final position = scrollable.position;
+      if (position.pixels >= position.maxScrollExtent - 0.5) {
+        // The end: go on from the start, once.
+        if (wrapped || start <= position.minScrollExtent + 0.5) break;
+        wrapped = true;
+        position.jumpTo(position.minScrollExtent);
+      } else {
+        // One screen on: with the cache extent, no item is skipped.
+        position.jumpTo(
+          math.min(
+            position.pixels + position.viewportDimension,
+            position.maxScrollExtent,
+          ),
+        );
+        if (wrapped && position.pixels >= start) break;
+      }
+      // The frame that builds the newly shown items.
+      await _frame();
+    }
+    throw AgentError('not found after $steps steps');
+  }
+
+  NoteAnchor? _anchorOf(Element element) =>
+      sourceIndex().anchorsFor([element], root: contentRoot)[element];
+
+  /// Pushes a route by path, as the platform would.
+  Future<Map<String, Object?>> navigate(
+    Map<String, Object?> args,
+    AgentCancel cancel,
+  ) async {
+    final path = args['path'];
+    if (path is! String || path.isEmpty) {
+      throw const AgentError('path is required, for example /settings');
+    }
+    await prepareToDrive();
+    final handled = await pushRoute(path);
+    await waitIdle(settleTimeout, cancel);
+    return {
+      'handled': handled,
+      'route': currentRoute(),
+      if (!handled) 'reason': 'no navigator or router took the route',
+    };
+  }
+
+  /// Pops the current route, as the back button does.
+  Future<Map<String, Object?>> back(AgentCancel cancel) async {
+    await prepareToDrive();
+    final handled = await popRoute();
+    await waitIdle(settleTimeout, cancel);
+    return {'handled': handled, 'route': currentRoute()};
   }
 
   /// The Milestone 4 payload for the handle's widget, without a

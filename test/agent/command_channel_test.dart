@@ -107,6 +107,20 @@ void main() {
     await bridge.shutdown(tester);
   });
 
+  testWidgets('an empty poll answered at once is followed by a pause, not '
+      'a spin', (tester) async {
+    await pumpScreen(tester, const _Screen());
+    await turnOn(tester);
+    // A closed queue answers every poll at once with no command.
+    bridge.queue.close();
+    final before = bridge.requests.where((r) => r == 'GET /commands').length;
+    await tester.pump(const Duration(seconds: 3));
+    final polls =
+        bridge.requests.where((r) => r == 'GET /commands').length - before;
+    expect(polls, inInclusiveRange(1, 3));
+    await bridge.shutdown(tester);
+  });
+
   testWidgets('acceptance: with control off, every driving tool returns '
       '"agent control is disabled" and nothing happens', (tester) async {
     await pumpScreen(tester, const _Screen());
