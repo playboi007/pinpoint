@@ -168,6 +168,7 @@ class InfoPanelLayer extends StatelessWidget {
     required this.onCopy,
     required this.noteActions,
     required this.onTweak,
+    this.rightInset = 0,
   });
 
   final PinPointController controller;
@@ -178,6 +179,10 @@ class InfoPanelLayer extends StatelessWidget {
   final VoidCallback onCopy;
   final NoteActions noteActions;
   final TweakApply onTweak;
+
+  /// Space at the right edge the panel never covers: the rail sits there,
+  /// drawn above the panel. The panel is placed and dragged in the rest.
+  final double rightInset;
 
   @override
   Widget build(BuildContext context) {
@@ -193,31 +198,36 @@ class InfoPanelLayer extends StatelessWidget {
         if (selection == null) return const SizedBox.shrink();
         final openId = controller.openNote.value;
         final note = openId == null ? null : controller.notes.byId(openId);
-        return _PanelPlacement(
-          controller: controller,
-          selection: selection,
-          panel: (onDrag, keepPlace) => InfoPanel(
-            selection: selection,
+        // Padding on the right only keeps the layer's origin at the
+        // wrapper's, so global rects stay valid (engineering rule 7).
+        return Padding(
+          padding: EdgeInsets.only(right: rightInset),
+          child: _PanelPlacement(
             controller: controller,
-            tab: tab.value,
-            onTab: (value) => tab.value = value,
-            commentFocus: commentFocus,
-            onSend: onSend,
-            onSaveDraft: onSaveDraft,
-            onCopy: onCopy,
-            onClose: controller.clearSelection,
-            onDrag: onDrag,
-            note: note,
-            noteNumber: note == null
-                ? null
-                : controller.notes.numberOf(note.id),
-            drafts: controller.notes.drafts.length,
-            noteActions: noteActions,
-            // A tweak can move the widget; the panel stays where it is.
-            onTweak: (target, property, value) {
-              keepPlace();
-              return onTweak(target, property, value);
-            },
+            selection: selection,
+            panel: (onDrag, keepPlace) => InfoPanel(
+              selection: selection,
+              controller: controller,
+              tab: tab.value,
+              onTab: (value) => tab.value = value,
+              commentFocus: commentFocus,
+              onSend: onSend,
+              onSaveDraft: onSaveDraft,
+              onCopy: onCopy,
+              onClose: controller.clearSelection,
+              onDrag: onDrag,
+              note: note,
+              noteNumber: note == null
+                  ? null
+                  : controller.notes.numberOf(note.id),
+              drafts: controller.notes.drafts.length,
+              noteActions: noteActions,
+              // A tweak can move the widget; the panel stays where it is.
+              onTweak: (target, property, value) {
+                keepPlace();
+                return onTweak(target, property, value);
+              },
+            ),
           ),
         );
       },

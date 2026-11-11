@@ -345,8 +345,10 @@ void main() {
     testWidgets('is clamped to the viewport', (tester) async {
       final (text, drawn) = await selectedPill(
         tester,
+        // Top right, above the rail, which is centred on the right edge and
+        // would take the tap.
         const Scaffold(
-          body: Align(alignment: Alignment.centerRight, child: Text('target')),
+          body: Align(alignment: Alignment.topRight, child: Text('target')),
         ),
       );
       final screen = tester.view.physicalSize / tester.view.devicePixelRatio;

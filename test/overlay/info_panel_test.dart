@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pinpoint/pinpoint.dart';
 import 'package:pinpoint/src/overlay/info_panel.dart';
+import 'package:pinpoint/src/overlay/rail.dart';
 
 /// Milestone 2, build step 3: the draggable info panel.
 void main() {
@@ -127,7 +128,11 @@ void main() {
     await tester.pump();
     final screen = tester.getSize(find.byType(PinPointWrapper));
     final rect = tester.getRect(panel);
-    expect(rect.right, screen.width - panelMarginX);
+    // The panel keeps clear of the rail on the right edge.
+    expect(
+      rect.right,
+      screen.width - RailPlacement.inset - RailPlacement.width - panelMarginX,
+    );
     expect(rect.bottom, lessThanOrEqualTo(screen.height - panelMarginY));
   });
 

@@ -8,6 +8,7 @@ import 'package:pinpoint/src/overlay/highlight_painter.dart';
 import 'package:pinpoint/src/overlay/info_panel.dart';
 import 'package:pinpoint/src/search/pick_result.dart';
 import 'package:pinpoint/src/search/source_resolver.dart';
+import 'package:pinpoint/src/theme/controls.dart';
 
 import '../fixtures/save_bar_fixture.dart';
 import '../support/markers.dart';
@@ -122,7 +123,19 @@ void main() {
       tester,
     ) async {
       await selectSave(tester, config: rooted);
-      expect(inPanel('$saveBarFixture:$saveLine'), findsOneWidget);
+      // The line is cut from the start when it does not fit, so look for the
+      // widget that holds the whole text.
+      expect(
+        find.descendant(
+          of: find.byKey(InfoPanel.panelKey),
+          matching: find.byWidgetPredicate(
+            (widget) =>
+                widget is StartEllipsisText &&
+                widget.text == '$saveBarFixture:$saveLine',
+          ),
+        ),
+        findsOneWidget,
+      );
       // Milestone 5: one clickable crumb per local widget.
       final crumbs = find.byKey(InfoPanel.crumbsKey);
       final names = ['Row', 'ElevatedButton', 'Text'];
@@ -132,7 +145,7 @@ void main() {
           findsOneWidget,
         );
       }
-      // Reading order: by line, then from the left. The crumbs wrap.
+      // Reading order: by line, then from the left. The crumbs sit on one line.
       final places = [
         for (final name in names)
           tester.getTopLeft(

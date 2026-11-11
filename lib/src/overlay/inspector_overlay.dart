@@ -1098,6 +1098,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
                                 hovered: widget.controller.hovered,
                                 measuring: widget.controller.measuring,
                                 origin: () => _originOf(paintContext),
+                                tokens: PinPointTokens.of(paintContext),
                               ),
                             ),
                             CustomPaint(
@@ -1106,6 +1107,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
                                 hovered: widget.controller.hovered,
                                 selected: widget.controller.selection,
                                 origin: () => _originOf(paintContext),
+                                tokens: PinPointTokens.of(paintContext),
                               ),
                             ),
                             CustomPaint(
@@ -1113,6 +1115,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
                               painter: TweakOutlinePainter(
                                 outlines: widget.controller.tweaks.outlines,
                                 origin: () => _originOf(paintContext),
+                                tokens: PinPointTokens.of(paintContext),
                               ),
                             ),
                             CustomPaint(
@@ -1129,7 +1132,11 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
                     ),
                     // Above the trap, so a click on a pin opens its note
                     // instead of picking. In every mode, idle included.
-                    PinLayer(placements: _pins.placements, onOpen: _openPin),
+                    PinLayer(
+                      placements: _pins.placements,
+                      onOpen: _openPin,
+                      openNote: widget.controller.openNote,
+                    ),
                     // Above the trap, so clicks on the panel never pick.
                     InfoPanelLayer(
                       controller: widget.controller,
@@ -1140,6 +1147,9 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
                       onCopy: _copy,
                       noteActions: _noteActions,
                       onTweak: _applyTweak,
+                      // Keeps the panel clear of the rail, which is drawn
+                      // above it so the launcher can always stop picking.
+                      rightInset: RailPlacement.inset + RailPlacement.width,
                     ),
                     // Above the trap, so clicks on it never pick.
                     EnvironmentPanelLayer(

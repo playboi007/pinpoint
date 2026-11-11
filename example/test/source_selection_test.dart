@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pinpoint/src/theme/controls.dart';
 import 'package:pinpoint_example/main.dart';
 
 /// Milestone 3 acceptance on the example app: clicking a button's label
@@ -27,6 +28,15 @@ void main() {
   Finder panelText(String text) => find.descendant(
     of: find.byKey(const ValueKey<String>('pinpoint.infoPanel')),
     matching: find.text(text),
+  );
+
+  /// The header's source path. It is cut from the start when it does not
+  /// fit, so match the full text it was given.
+  Finder panelLocation(String location) => find.descendant(
+    of: find.byKey(const ValueKey<String>('pinpoint.infoPanel')),
+    matching: find.byWidgetPredicate(
+      (w) => w is StartEllipsisText && w.text == location,
+    ),
   );
 
   Future<void> shortcut(WidgetTester tester) async {
@@ -57,7 +67,7 @@ void main() {
 
     final textLine = lineOf(saveBarFile, "child: const Text('Save')");
     expect(panelText('Text'), findsWidgets);
-    expect(panelText('example/$saveBarFile:$textLine'), findsOneWidget);
+    expect(panelLocation('example/$saveBarFile:$textLine'), findsOneWidget);
     final crumbs = find.byKey(
       const ValueKey<String>('pinpoint.infoPanel.crumbs'),
     );
@@ -78,7 +88,7 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
     await tester.pump();
     final buttonLine = lineOf(saveBarFile, 'ElevatedButton(');
-    expect(panelText('example/$saveBarFile:$buttonLine'), findsOneWidget);
+    expect(panelLocation('example/$saveBarFile:$buttonLine'), findsOneWidget);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
@@ -86,7 +96,7 @@ void main() {
     final barLine = lineOf(formFile, 'SaveBar(');
     // In the header and in the breadcrumb.
     expect(panelText('SaveBar'), findsNWidgets(2));
-    expect(panelText('example/$formFile:$barLine'), findsOneWidget);
+    expect(panelLocation('example/$formFile:$barLine'), findsOneWidget);
 
     await shortcut(tester); // back to idle
   });

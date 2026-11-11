@@ -428,7 +428,11 @@ void main() {
       expect(rect.right, rail.right - 1);
       expect(rect.bottom, rail.bottom - 1);
       expect(rect.size, const Size(40, 44));
-      expect(rail.center.dy, closeTo(screen.height / 2, 0.5), reason: 'centred');
+      expect(
+        rail.center.dy,
+        closeTo(screen.height / 2, 0.5),
+        reason: 'centred',
+      );
       expect(
         find.descendant(
           of: appBoundary(),
@@ -474,10 +478,7 @@ void main() {
       );
       expect(controller.mode, PinPointMode.idle, reason: 'a drag is no tap');
 
-      await tester.drag(
-        find.byType(PinPointLauncher),
-        const Offset(0, -5000),
-      );
+      await tester.drag(find.byType(PinPointLauncher), const Offset(0, -5000));
       await tester.pump();
       final top = tester.getRect(find.byKey(RailLayer.railKey));
       expect(top.top, 0);
@@ -589,10 +590,10 @@ void main() {
     await tester.pump();
     final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
     addTearDown(mouse.removePointer);
-    // Away from the panel, which opens next to the selection (right of
-    // x 440, down to about y 540 with the checks row).
-    await mouse.addPointer(location: const Offset(280, 500));
-    await mouse.moveTo(const Offset(300, 520));
+    // Away from the panel, which opens beside the selection (here the left
+    // 8..368 by 248..588), and from the rail on the right edge.
+    await mouse.addPointer(location: const Offset(580, 280));
+    await mouse.moveTo(const Offset(600, 300));
     await tester.pump();
     expect(controller.selection.value, isNotNull);
     expect(controller.hovered.value, isNotNull);
