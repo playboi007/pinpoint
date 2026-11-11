@@ -42,6 +42,7 @@ import 'note_view.dart';
 import 'pick_tracker.dart';
 import 'pin_marker.dart';
 import 'pin_tracker.dart';
+import 'rail.dart';
 import 'ruler_painter.dart';
 import 'toast_layer.dart';
 import 'toolbar.dart';
@@ -124,6 +125,9 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
   /// Whether the findings list is open. It takes turns with the what-if
   /// panel, in the same place, and closes when the mode goes idle.
   final ValueNotifier<bool> _findingsPanel = ValueNotifier<bool>(false);
+
+  /// Where the rail is, so the panels open beside it.
+  final RailPlacement _rail = RailPlacement();
 
   /// Whether a rescan waits for the end of the frame.
   bool _rescanQueued = false;
@@ -392,6 +396,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     _offline.dispose();
     _environmentPanel.dispose();
     _findingsPanel.dispose();
+    _rail.dispose();
     super.dispose();
   }
 
@@ -1115,6 +1120,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
                               painter: FindingPainter(
                                 findings: widget.controller.findings,
                                 origin: () => _originOf(paintContext),
+                                tokens: PinPointTokens.of(paintContext),
                               ),
                             ),
                           ],
@@ -1139,6 +1145,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
                     EnvironmentPanelLayer(
                       controller: widget.controller,
                       panelOpen: _environmentPanel,
+                      placement: _rail,
                       themeVariants: widget.config.themeVariants.keys.toList(),
                       material3: material3,
                     ),
@@ -1146,36 +1153,22 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
                     FindingsPanelLayer(
                       controller: widget.controller,
                       panelOpen: _findingsPanel,
+                      placement: _rail,
                       onScan: _scanFindings,
                       onAudit: () => unawaited(_auditAccessibility()),
                       onMakeNote: (finding) =>
                           unawaited(_noteFromFinding(finding)),
                       onCopy: (finding) => unawaited(_copyFinding(finding)),
                     ),
-                    FindingsButton(
-                      controller: widget.controller,
-                      panelOpen: _findingsPanel,
-                    ),
                     // In idle too while any tweak is active.
                     TweakChip(session: widget.controller.tweaks),
                     // In idle too while an override is active.
-                    EnvironmentBar(
+                    EnvironmentBar(controller: widget.controller),
+                    // The frozen and bridge-offline badges, top-right.
+                    SystemBadgeLayer(
                       controller: widget.controller,
-                      panelOpen: _environmentPanel,
+                      offline: _offline,
                     ),
-                    if (widget.controller.isActive)
-                      ValueListenableBuilder<List<HttpSink>>(
-                        valueListenable: _offline,
-                        builder: (context, offline, _) => offline.isEmpty
-                            ? const SizedBox.shrink()
-                            : BridgeBadge(
-                                offline: [
-                                  for (final sink in offline)
-                                    '${sink.name} offline: '
-                                        '${sink.url.authority}',
-                                ],
-                              ),
-                      ),
                     // Takes no pointer events, so a synthetic tap reaches
                     // the app beneath it.
                     Builder(
@@ -1184,16 +1177,19 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
                         origin: () => _originOf(layerContext),
                       ),
                     ),
-                    if (widget.config.allowAgentControl)
-                      AgentToggle(controller: widget.controller),
-                    ToastLayer(toasts: _toasts),
-                    // Above the trap, so it can always stop picking. Always
-                    // offered by default: some shortcuts never reach Flutter.
-                    if (widget.config.showLauncher)
-                      LauncherLayer(
-                        controller: widget.controller,
-                        shortcutLabel: widget.config.shortcut.label,
-                      ),
+                    ToastLayer(toasts: _toasts, controller: widget.controller),
+                    // Above the trap, so the launcher at its foot can always
+                    // stop picking. Always offered by default: some shortcuts
+                    // never reach Flutter.
+                    RailLayer(
+                      controller: widget.controller,
+                      placement: _rail,
+                      environmentPanel: _environmentPanel,
+                      findingsPanel: _findingsPanel,
+                      shortcutLabel: widget.config.shortcut.label,
+                      showLauncher: widget.config.showLauncher,
+                      allowAgentControl: widget.config.allowAgentControl,
+                    ),
                   ],
                 ),
               ),

@@ -6,42 +6,34 @@ import '../core/pinpoint_controller.dart';
 import '../env/device_presets.dart';
 import '../env/environment_controller.dart';
 import '../info/widget_info.dart' show formatColor;
+import '../theme/controls.dart';
+import '../theme/pinpoint_tokens.dart';
 import 'panel_keys.dart';
+import 'rail.dart';
 
 /// A seed color's option value in the panel: its hex without `#`.
 String formatSeed(Color color) => formatColor(color).substring(1);
 
-/// The what-if bar, bottom-left: a button that opens [EnvironmentPanel],
-/// and while any override is active, what is overridden and a reset.
+/// The what-if bar, bottom-left: a strip with one chip per active override,
+/// each with a close that resets it, and a reset for all of them.
 ///
-/// It shows while a mode is active, and in idle too while an override is
-/// active: the app looks different from the real thing, and the bar says
-/// so.
+/// It shows while any override is active, in idle too: the app looks
+/// different from the real thing, and the bar says so. The what-if panel is
+/// opened from the rail, whose What-if item has [toggleKey].
 class EnvironmentBar extends StatelessWidget {
-  const EnvironmentBar({
-    super.key,
-    required this.controller,
-    required this.panelOpen,
-  });
+  const EnvironmentBar({super.key, required this.controller});
 
   static const Key barKey = ValueKey<String>('pinpoint.env.bar');
+
+  /// The What-if item of the rail.
   static const Key toggleKey = ValueKey<String>('pinpoint.env.toggle');
   static const Key resetKey = ValueKey<String>('pinpoint.env.reset');
 
+  /// The chip of the override [name], for example `viewport`.
+  static Key chipKey(String name) =>
+      ValueKey<String>('pinpoint.env.chip.$name');
+
   final PinPointController controller;
-
-  /// Whether the panel is open. The bar toggles it.
-  final ValueNotifier<bool> panelOpen;
-
-  void _toggle() {
-    if (!controller.isActive) {
-      // The panel lives with the active modes, behind the pointer trap.
-      controller.startPicking();
-      panelOpen.value = true;
-      return;
-    }
-    panelOpen.value = !panelOpen.value;
-  }
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
@@ -49,51 +41,172 @@ class EnvironmentBar extends StatelessWidget {
     builder: (context, _) => _build(context),
   );
 
+  /// The active overrides of [env]: a name, a label, and a copy of the
+  /// environment without that one.
+  static List<(String, String, Environment Function(Environment))> overrides(
+    Environment env,
+  ) => [
+    if (env.viewport case final v?)
+      ('viewport', sizeLabelOf(v), (e) => e.copyWith(viewport: () => null)),
+    if (env.textScale case final t?)
+      (
+        'textScale',
+        'text ${_number(t)}×',
+        (e) => e.copyWith(textScale: () => null),
+      ),
+    if (env.boldText == true)
+      ('bold', 'bold', (e) => e.copyWith(boldText: () => null)),
+    if (env.safeArea != null)
+      ('safeArea', 'safe area', (e) => e.copyWith(safeArea: () => null)),
+    if (env.keyboardHeight != null)
+      ('keyboard', 'keyboard', (e) => e.copyWith(keyboardHeight: () => null)),
+    if (env.textDirection case final d?)
+      (
+        'direction',
+        d == TextDirection.rtl ? 'RTL' : 'LTR',
+        (e) => e.copyWith(textDirection: () => null),
+      ),
+    if (env.themeVariant case final t?)
+      ('theme', t, (e) => e.copyWith(themeVariant: () => null))
+    else if (env.brightness case final b?)
+      ('theme', b.name, (e) => e.copyWith(brightness: () => null)),
+    if (env.seedColor case final c?)
+      (
+        'seed',
+        'seed ${formatColor(c)}',
+        (e) => e.copyWith(seedColor: () => null),
+      ),
+    if (env.platform case final p?)
+      ('platform', p.name, (e) => e.copyWith(platform: () => null)),
+    if (env.timeDilation case final t?)
+      (
+        'slow',
+        'slow ${_number(t)}×',
+        (e) => e.copyWith(timeDilation: () => null),
+      ),
+  ];
+
   Widget _build(BuildContext context) {
     final environment = controller.environment;
-    if (!controller.isActive && !environment.isActive) {
-      return const SizedBox.shrink();
-    }
-    final colors = Theme.of(context).colorScheme;
-    final active = environment.isActive;
+    if (!environment.isActive) return const SizedBox.shrink();
+    final tokens = PinPointTokens.of(context);
     return SafeArea(
       child: Align(
         alignment: Alignment.bottomLeft,
         child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Material(
+          // Clear of the rail, which sits on the right edge.
+          padding: EdgeInsets.fromLTRB(
+            16,
+            16,
+            16 + RailPlacement.width + RailPlacement.inset,
+            16,
+          ),
+          child: DraftSurface(
             key: barKey,
-            elevation: 4,
-            color: active ? colors.tertiaryContainer : colors.surface,
-            borderRadius: BorderRadius.circular(22),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 420, minHeight: 44),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Flexible(
-                    child: TextButton.icon(
-                      key: toggleKey,
-                      onPressed: _toggle,
-                      icon: const Icon(Icons.tune, size: 18),
-                      label: Text(
-                        active
-                            ? 'What-if: ${environment.value.summary}'
-                            : 'What-if',
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
+            elevation: 2,
+            padding: const EdgeInsets.fromLTRB(10, 6, 4, 6),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text('WHAT-IF', style: tokens.caps),
+                ),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      for (final (name, label, without) in overrides(
+                        environment.value,
+                      ))
+                        DraftChip(
+                          key: chipKey(name),
+                          label: label,
+                          look: ChipLook.override,
+                          onTap: () => environment.update(without),
+                          onClear: () => environment.update(without),
+                        ),
+                    ],
                   ),
-                  if (active)
-                    IconButton(
-                      key: resetKey,
-                      tooltip: 'Reset every what-if switch',
-                      onPressed: environment.reset,
-                      icon: const Icon(Icons.close, size: 18),
-                    ),
-                ],
-              ),
+                ),
+                DraftIconButton(
+                  key: resetKey,
+                  icon: PinPointIcons.restartAlt,
+                  tooltip: 'Reset every what-if switch',
+                  onPressed: environment.reset,
+                ),
+              ],
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A number without a trailing `.0`.
+String _number(double value) => value == value.truncateToDouble()
+    ? value.toInt().toString()
+    : value.toString();
+
+/// A swatch of a seed color: a 24 px square with 2 px corners. Selected, it
+/// gets a heavier ink border and a check, so the pick does not rest on color.
+/// [onTap] null disables it.
+class SeedSwatchChip extends StatelessWidget {
+  const SeedSwatchChip({
+    super.key,
+    required this.color,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final Color color;
+  final bool selected;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = PinPointTokens.of(context);
+    final enabled = onTap != null;
+    final onColor = color.computeLuminance() > 0.5
+        ? const Color(0xFF111111)
+        : const Color(0xFFFFFFFF);
+    final swatch = Container(
+      width: 24,
+      height: 24,
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(2),
+        border: Border.all(
+          color: selected ? tokens.ink : tokens.field,
+          width: selected ? 2 : 1,
+        ),
+      ),
+      child: ColoredBox(
+        color: color,
+        child: selected
+            ? Center(child: Icon(PinPointIcons.check, size: 12, color: onColor))
+            : null,
+      ),
+    );
+    return Tooltip(
+      message: formatColor(color),
+      child: Semantics(
+        button: true,
+        selected: selected,
+        enabled: enabled,
+        label: formatColor(color),
+        excludeSemantics: true,
+        onTap: onTap,
+        child: MouseRegion(
+          cursor: enabled ? SystemMouseCursors.click : MouseCursor.defer,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: onTap,
+            child: Opacity(opacity: enabled ? 1 : 0.4, child: swatch),
           ),
         ),
       ),
@@ -124,8 +237,6 @@ class EnvironmentPanel extends StatefulWidget {
   /// `option('viewport', '360x800')`.
   static Key option(String section, String value) =>
       ValueKey<String>('pinpoint.env.$section.$value');
-
-  static const double width = 320;
 
   final EnvironmentController environment;
   final VoidCallback onClose;
@@ -196,10 +307,6 @@ class _EnvironmentPanelState extends State<EnvironmentPanel> {
     show(_safeBottom, env.safeArea?.bottom);
   }
 
-  static String _number(double value) => value == value.truncateToDouble()
-      ? value.toInt().toString()
-      : value.toString();
-
   static double? _parse(TextEditingController field) {
     final value = double.tryParse(field.text.trim());
     return value == null || value < 0 ? null : value;
@@ -229,122 +336,120 @@ class _EnvironmentPanelState extends State<EnvironmentPanel> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final tokens = PinPointTokens.of(context);
     final env = _env.value;
     return PanelKeyScope(
-      child: Material(
+      child: DraftSurface(
         key: EnvironmentPanel.panelKey,
-        elevation: 6,
-        borderRadius: BorderRadius.circular(12),
-        clipBehavior: Clip.antiAlias,
-        child: SizedBox(
-          width: EnvironmentPanel.width,
-          child: Column(
-            children: [
-              _header(theme),
-              const Divider(height: 1),
-              Expanded(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      _viewport(env),
-                      _choices<double?>(
-                        'Text scale',
-                        'textScale',
-                        env.textScale,
-                        {
-                          'system': null,
-                          for (final step in textScaleSteps)
-                            _number(step): step,
-                        },
-                        label: (value, name) =>
-                            value == null ? 'System' : '$name×',
-                        onSelected: (v) =>
-                            _set((e) => e.copyWith(textScale: () => v)),
+        elevation: 3,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _header(tokens),
+            Flexible(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(PinPointSizes.panelPadding),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _viewport(env),
+                    _choices<double?>(
+                      'Text scale',
+                      'textScale',
+                      env.textScale,
+                      {
+                        'system': null,
+                        for (final step in textScaleSteps) _number(step): step,
+                      },
+                      label: (value, name) =>
+                          value == null ? 'System' : '$name×',
+                      onSelected: (v) =>
+                          _set((e) => e.copyWith(textScale: () => v)),
+                    ),
+                    _switch(
+                      'Bold text',
+                      'bold',
+                      env.boldText ?? false,
+                      (on) => _set(
+                        (e) => e.copyWith(boldText: () => on ? true : null),
                       ),
-                      _switch(
-                        'Bold text',
-                        'bold',
-                        env.boldText ?? false,
-                        (on) => _set(
-                          (e) => e.copyWith(boldText: () => on ? true : null),
+                    ),
+                    _safeArea(env),
+                    _switch(
+                      'Fake keyboard (${_number(fakeKeyboardHeight)} px)',
+                      'keyboard',
+                      env.keyboardHeight != null,
+                      (on) => _set(
+                        (e) => e.copyWith(
+                          keyboardHeight: () => on ? fakeKeyboardHeight : null,
                         ),
                       ),
-                      _safeArea(env),
-                      _switch(
-                        'Fake keyboard (${_number(fakeKeyboardHeight)} px)',
-                        'keyboard',
-                        env.keyboardHeight != null,
-                        (on) => _set(
-                          (e) => e.copyWith(
-                            keyboardHeight: () =>
-                                on ? fakeKeyboardHeight : null,
-                          ),
-                        ),
+                    ),
+                    _choices<TextDirection?>(
+                      'Direction',
+                      'direction',
+                      env.textDirection,
+                      const {
+                        'system': null,
+                        'ltr': TextDirection.ltr,
+                        'rtl': TextDirection.rtl,
+                      },
+                      label: (value, name) =>
+                          value == null ? 'System' : name.toUpperCase(),
+                      onSelected: (v) =>
+                          _set((e) => e.copyWith(textDirection: () => v)),
+                      note: 'Strings stay in the current locale.',
+                    ),
+                    _theme(env),
+                    _seed(env),
+                    _platform(env),
+                    _choices<double?>(
+                      'Slow motion',
+                      'slow',
+                      env.timeDilation,
+                      {
+                        for (final step in slowMotionSteps)
+                          _number(step): step == 1 ? null : step,
+                      },
+                      label: (value, name) => '$name×',
+                      onSelected: (v) =>
+                          _set((e) => e.copyWith(timeDilation: () => v)),
+                    ),
+                    const SizedBox(height: PinPointSizes.sectionGap),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: DraftButton.outline(
+                        key: EnvironmentPanel.resetAllKey,
+                        onPressed: env.isEmpty ? null : _env.reset,
+                        icon: PinPointIcons.restartAlt,
+                        label: 'Reset all',
                       ),
-                      _choices<TextDirection?>(
-                        'Direction',
-                        'direction',
-                        env.textDirection,
-                        const {
-                          'system': null,
-                          'ltr': TextDirection.ltr,
-                          'rtl': TextDirection.rtl,
-                        },
-                        label: (value, name) =>
-                            value == null ? 'System' : name.toUpperCase(),
-                        onSelected: (v) =>
-                            _set((e) => e.copyWith(textDirection: () => v)),
-                        note: 'Strings stay in the current locale.',
-                      ),
-                      _theme(env),
-                      _seed(env),
-                      _platform(env),
-                      _choices<double?>(
-                        'Slow motion',
-                        'slow',
-                        env.timeDilation,
-                        {
-                          for (final step in slowMotionSteps)
-                            _number(step): step == 1 ? null : step,
-                        },
-                        label: (value, name) => '$name×',
-                        onSelected: (v) =>
-                            _set((e) => e.copyWith(timeDilation: () => v)),
-                      ),
-                      const SizedBox(height: 8),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: OutlinedButton.icon(
-                          key: EnvironmentPanel.resetAllKey,
-                          onPressed: env.isEmpty ? null : _env.reset,
-                          icon: const Icon(Icons.restart_alt, size: 18),
-                          label: const Text('Reset all'),
-                        ),
-                      ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _header(ThemeData theme) => Padding(
-    padding: const EdgeInsets.fromLTRB(16, 4, 4, 4),
+  Widget _header(PinPointTokens tokens) => Container(
+    height: PinPointSizes.panelHeader,
+    padding: const EdgeInsets.only(left: PinPointSizes.panelPadding, right: 8),
+    decoration: BoxDecoration(
+      border: Border(bottom: BorderSide(color: tokens.ink)),
+    ),
     child: Row(
       children: [
-        Expanded(child: Text('What-if', style: theme.textTheme.titleMedium)),
-        IconButton(
+        Expanded(child: Text('What-if', style: tokens.title)),
+        DraftIconButton(
           key: EnvironmentPanel.closeKey,
+          icon: PinPointIcons.close,
           tooltip: 'Close',
           onPressed: widget.onClose,
-          icon: const Icon(Icons.close, size: 18),
         ),
       ],
     ),
@@ -363,6 +468,7 @@ class _EnvironmentPanelState extends State<EnvironmentPanel> {
               'custom';
     return _section(
       'Viewport',
+      first: true,
       [
         Wrap(
           spacing: 6,
@@ -395,9 +501,9 @@ class _EnvironmentPanelState extends State<EnvironmentPanel> {
                 _applySize,
               ),
             ),
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 6),
-              child: Text('×'),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: Text('×', style: PinPointTokens.of(context).value),
             ),
             Expanded(
               child: _field(
@@ -407,11 +513,12 @@ class _EnvironmentPanelState extends State<EnvironmentPanel> {
                 _applySize,
               ),
             ),
-            IconButton(
+            const SizedBox(width: 4),
+            DraftIconButton(
               key: EnvironmentPanel.rotateKey,
               tooltip: 'Rotate',
               onPressed: size == null ? null : _env.rotate,
-              icon: const Icon(Icons.screen_rotation, size: 18),
+              icon: Icons.screen_rotation,
             ),
           ],
         ),
@@ -527,20 +634,13 @@ class _EnvironmentPanelState extends State<EnvironmentPanel> {
                   : null,
             ),
             for (final color in seedColors)
-              ChoiceChip(
+              SeedSwatchChip(
                 key: EnvironmentPanel.option('seed', formatSeed(color)),
-                tooltip: formatColor(color),
+                color: color,
                 selected: env.seedColor == color,
-                onSelected: enabled
-                    ? (_) => _set((e) => e.copyWith(seedColor: () => color))
+                onTap: enabled
+                    ? () => _set((e) => e.copyWith(seedColor: () => color))
                     : null,
-                label: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: color,
-                    shape: BoxShape.circle,
-                  ),
-                  child: const SizedBox.square(dimension: 16),
-                ),
               ),
           ],
         ),
@@ -610,12 +710,15 @@ class _EnvironmentPanelState extends State<EnvironmentPanel> {
     String label,
     bool selected,
     VoidCallback? onSelected,
-  ) => ChoiceChip(
+  ) => DraftChip(
     key: EnvironmentPanel.option(section, value),
-    label: Text(label),
-    selected: selected,
-    visualDensity: VisualDensity.compact,
-    onSelected: onSelected == null ? null : (_) => onSelected(),
+    label: label,
+    look: onSelected == null
+        ? ChipLook.disabled
+        : selected
+        ? ChipLook.selected
+        : ChipLook.rest,
+    onTap: onSelected,
   );
 
   Widget _switch(
@@ -624,18 +727,15 @@ class _EnvironmentPanelState extends State<EnvironmentPanel> {
     bool value,
     ValueChanged<bool> onChanged,
   ) => Padding(
-    padding: const EdgeInsets.only(top: 8),
-    child: Row(
-      children: [
-        Expanded(
-          child: Text(title, style: Theme.of(context).textTheme.labelLarge),
-        ),
-        Switch(
-          key: EnvironmentPanel.option(section, 'switch'),
-          value: value,
-          onChanged: onChanged,
-        ),
-      ],
+    padding: const EdgeInsets.only(top: PinPointSizes.sectionGap),
+    child: Align(
+      alignment: Alignment.centerLeft,
+      child: DraftCheckbox(
+        key: EnvironmentPanel.option(section, 'switch'),
+        value: value,
+        onChanged: onChanged,
+        label: title,
+      ),
     ),
   );
 
@@ -644,30 +744,57 @@ class _EnvironmentPanelState extends State<EnvironmentPanel> {
     TextEditingController controller,
     String label,
     VoidCallback onSubmit,
-  ) => TextField(
-    key: key,
-    controller: controller,
-    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-    inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
-    textInputAction: TextInputAction.done,
-    decoration: InputDecoration(labelText: label, isDense: true),
-    onSubmitted: (_) => onSubmit(),
-  );
+  ) {
+    final tokens = PinPointTokens.of(context);
+    return SizedBox(
+      height: PinPointSizes.controlHeight,
+      child: TextField(
+        key: key,
+        controller: controller,
+        style: tokens.value,
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+        textInputAction: TextInputAction.done,
+        textAlignVertical: TextAlignVertical.center,
+        decoration: InputDecoration(
+          isDense: true,
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 6,
+            vertical: 4,
+          ),
+          prefixText: '$label ',
+          prefixStyle: tokens.label.copyWith(color: tokens.faint, fontSize: 10),
+        ),
+        onSubmitted: (_) => onSubmit(),
+      ),
+    );
+  }
 
-  Widget _section(String title, List<Widget> children, {String? note}) {
-    final theme = Theme.of(context);
+  /// A section: a 1 px `rule` on top (not on the first), 10 px below it, the
+  /// caps title, the controls, and a note in small muted text.
+  Widget _section(
+    String title,
+    List<Widget> children, {
+    String? note,
+    bool first = false,
+  }) {
+    final tokens = PinPointTokens.of(context);
     return Padding(
-      padding: const EdgeInsets.only(top: 12),
+      padding: EdgeInsets.only(top: first ? 0 : PinPointSizes.sectionGap),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: theme.textTheme.labelLarge),
+          if (!first) ...[const DraftRule(), const SizedBox(height: 10)],
+          CapsText(title.toUpperCase()),
           const SizedBox(height: 6),
           ...children,
           if (note != null)
             Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Text(note, style: theme.textTheme.bodySmall),
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                note,
+                style: tokens.label.copyWith(fontSize: 11, height: 14 / 11),
+              ),
             ),
         ],
       ),
@@ -675,19 +802,21 @@ class _EnvironmentPanelState extends State<EnvironmentPanel> {
   }
 }
 
-/// Places [EnvironmentPanel] on the left while it is open and a mode is
+/// Places [EnvironmentPanel] beside the rail while it is open and a mode is
 /// active. Only the panel takes pointer events.
 class EnvironmentPanelLayer extends StatelessWidget {
   const EnvironmentPanelLayer({
     super.key,
     required this.controller,
     required this.panelOpen,
+    required this.placement,
     required this.themeVariants,
     required this.material3,
   });
 
   final PinPointController controller;
   final ValueNotifier<bool> panelOpen;
+  final RailPlacement placement;
   final List<String> themeVariants;
   final bool material3;
 
@@ -697,19 +826,13 @@ class EnvironmentPanelLayer extends StatelessWidget {
       valueListenable: panelOpen,
       builder: (context, open, _) {
         if (!open || !controller.isActive) return const SizedBox.shrink();
-        return SafeArea(
-          child: Align(
-            alignment: Alignment.topLeft,
-            child: Padding(
-              // Above the bar, which sits bottom-left.
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 88),
-              child: EnvironmentPanel(
-                environment: controller.environment,
-                themeVariants: themeVariants,
-                material3: material3,
-                onClose: () => panelOpen.value = false,
-              ),
-            ),
+        return BesideRail(
+          placement: placement,
+          child: EnvironmentPanel(
+            environment: controller.environment,
+            themeVariants: themeVariants,
+            material3: material3,
+            onClose: () => panelOpen.value = false,
           ),
         );
       },

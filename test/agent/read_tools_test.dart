@@ -87,7 +87,12 @@ void main() {
     await tester.pump();
     expect(
       find.byKey(AgentLayer.marksKey),
-      paints..rect(rect: rect.inflate(2)),
+      // The double outline: four rings, the outer paper one first.
+      paints
+        ..rect(rect: rect.inflate(4.5))
+        ..rect(rect: rect.inflate(2.5))
+        ..rect(rect: rect.inflate(0.5))
+        ..rect(rect: rect.deflate(1)),
     );
     // For 1.5 seconds.
     await tester.pump(const Duration(milliseconds: 1600));

@@ -6,8 +6,11 @@ import '../detect/debug_paint.dart';
 import '../detect/detector.dart';
 import '../detect/findings_controller.dart';
 import '../search/render_search.dart';
+import '../theme/controls.dart';
+import '../theme/marks.dart';
+import '../theme/pinpoint_tokens.dart';
 import 'panel_keys.dart';
-import 'toolbar.dart';
+import 'rail.dart';
 
 /// What the list calls each kind of finding.
 String findingKindLabel(String kind) => switch (kind) {
@@ -22,79 +25,13 @@ String findingKindLabel(String kind) => switch (kind) {
   _ => kind,
 };
 
-/// The findings button, bottom-right beside the launcher, while a mode is
-/// active: a count badge, and a click opens [FindingsPanel].
-class FindingsButton extends StatelessWidget {
-  const FindingsButton({
-    super.key,
-    required this.controller,
-    required this.panelOpen,
-  });
-
-  final PinPointController controller;
-  final ValueNotifier<bool> panelOpen;
-
-  @override
-  Widget build(BuildContext context) {
-    if (!controller.isActive) return const SizedBox.shrink();
-    final colors = Theme.of(context).colorScheme;
-    return SafeArea(
-      child: Align(
-        alignment: Alignment.bottomRight,
-        child: Padding(
-          // Left of the launcher's default corner.
-          padding: const EdgeInsets.only(
-            right: 16 + PinPointLauncher.size + 8,
-            bottom: 16,
-          ),
-          child: ListenableBuilder(
-            listenable: controller.findings,
-            builder: (context, _) {
-              final count = controller.findings.findings.length;
-              return Material(
-                key: FindingsPanel.buttonKey,
-                elevation: 4,
-                color: colors.surface,
-                borderRadius: BorderRadius.circular(22),
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(22),
-                  onTap: () => panelOpen.value = !panelOpen.value,
-                  child: SizedBox(
-                    height: PinPointLauncher.size,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 14),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Badge(
-                            isLabelVisible: count > 0,
-                            label: Text('$count'),
-                            child: Icon(
-                              Icons.bug_report_outlined,
-                              color: colors.primary,
-                              size: 22,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          const Text('Findings'),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 /// The findings list: "Scan this screen", the detector switches, and every
 /// finding grouped by kind. Hovering a finding outlines it on the app;
 /// "Make note" turns it into a draft note. A finding with no widget (an
 /// error from the engine or an uncaught error) has "Copy" instead.
+///
+/// It opens beside the rail, from the rail's Findings item, which has
+/// [buttonKey].
 class FindingsPanel extends StatelessWidget {
   const FindingsPanel({
     super.key,
@@ -107,6 +44,7 @@ class FindingsPanel extends StatelessWidget {
     required this.onClose,
   });
 
+  /// The Findings item of the rail.
   static const Key buttonKey = ValueKey<String>('pinpoint.findings.button');
   static const Key panelKey = ValueKey<String>('pinpoint.findings.panel');
   static const Key scanKey = ValueKey<String>('pinpoint.findings.scan');
@@ -159,8 +97,6 @@ class FindingsPanel extends StatelessWidget {
     ].where((part) => part.isNotEmpty).join('\n\n');
   }
 
-  static const double width = 360;
-
   final FindingsController findings;
 
   /// The notes, to show which findings already have one.
@@ -179,103 +115,108 @@ class FindingsPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final tokens = PinPointTokens.of(context);
     return PanelKeyScope(
-      child: Material(
+      child: DraftSurface(
         key: panelKey,
-        elevation: 6,
-        borderRadius: BorderRadius.circular(12),
-        clipBehavior: Clip.antiAlias,
-        child: SizedBox(
-          width: width,
-          child: ListenableBuilder(
-            listenable: Listenable.merge([findings, notes]),
-            builder: (context, _) {
-              final all = findings.findings;
-              return Column(
-                children: [
-                  _header(theme, all.length),
-                  const Divider(height: 1),
-                  _actions(),
-                  Expanded(
-                    child: ListView(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      children: [
-                        _switches(theme),
-                        const Divider(height: 1),
-                        if (all.isEmpty)
-                          _empty(theme)
-                        else
-                          ..._groups(theme, all),
-                      ],
-                    ),
+        elevation: 3,
+        child: ListenableBuilder(
+          listenable: Listenable.merge([findings, notes]),
+          builder: (context, _) {
+            final all = findings.findings;
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _header(tokens, all.length),
+                Flexible(
+                  child: ListView(
+                    shrinkWrap: true,
+                    padding: EdgeInsets.zero,
+                    children: [
+                      _actions(),
+                      _switches(tokens),
+                      const DraftRule(),
+                      if (all.isEmpty)
+                        _empty(tokens)
+                      else
+                        ..._groups(tokens, all),
+                    ],
                   ),
-                ],
-              );
-            },
-          ),
+                ),
+              ],
+            );
+          },
         ),
       ),
     );
   }
 
-  Widget _header(ThemeData theme, int count) => Padding(
-    padding: const EdgeInsets.fromLTRB(16, 4, 4, 4),
+  Widget _header(PinPointTokens tokens, int count) => Container(
+    height: PinPointSizes.panelHeader,
+    padding: const EdgeInsets.only(left: PinPointSizes.panelPadding, right: 8),
+    decoration: BoxDecoration(
+      border: Border(bottom: BorderSide(color: tokens.ink)),
+    ),
     child: Row(
       children: [
-        Expanded(
-          child: Text(
-            count == 0 ? 'Findings' : 'Findings ($count)',
-            style: theme.textTheme.titleMedium,
-          ),
-        ),
-        IconButton(
+        Text('Findings', style: tokens.title),
+        if (count > 0) ...[const SizedBox(width: 8), CountBadge(count)],
+        const Spacer(),
+        DraftIconButton(
           key: closeKey,
+          icon: PinPointIcons.close,
           tooltip: 'Close',
           onPressed: onClose,
-          icon: const Icon(Icons.close, size: 18),
         ),
       ],
     ),
   );
 
   Widget _actions() => Padding(
-    padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+    padding: const EdgeInsets.all(PinPointSizes.panelPadding),
     child: Wrap(
       spacing: 8,
-      runSpacing: 4,
+      runSpacing: 6,
+      crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        FilledButton.icon(
+        DraftButton.primary(
           key: scanKey,
           onPressed: onScan,
-          icon: const Icon(Icons.search, size: 18),
-          label: const Text('Scan this screen'),
+          icon: Icons.search,
+          label: 'Scan this screen',
         ),
-        OutlinedButton.icon(
+        DraftButton.outline(
           key: auditKey,
           // Semantics stay on for the audit's frame only.
           onPressed: findings.auditing ? null : onAudit,
-          icon: findings.auditing
-              ? const SizedBox.square(
-                  dimension: 14,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Icon(Icons.accessibility_new, size: 18),
-          label: const Text('Check accessibility'),
+          icon: Icons.accessibility_new,
+          label: 'Check accessibility',
         ),
-        TextButton(
+        if (findings.auditing) const DraftSpinner(),
+        DraftButton.link(
           key: clearKey,
           onPressed: findings.clear,
-          child: const Text('Clear'),
+          label: 'Clear',
         ),
       ],
     ),
   );
 
-  Widget _switches(ThemeData theme) => Padding(
-    padding: const EdgeInsets.fromLTRB(4, 4, 4, 4),
+  Widget _switches(PinPointTokens tokens) => Padding(
+    padding: const EdgeInsets.fromLTRB(
+      PinPointSizes.panelPadding,
+      0,
+      PinPointSizes.panelPadding,
+      PinPointSizes.panelPadding,
+    ),
     child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        const DraftRule(),
+        const SizedBox(height: 10),
+        const CapsText('DETECTORS'),
+        const SizedBox(height: 4),
         _switch(
           errorsKey,
           'Capture errors',
@@ -296,30 +237,38 @@ class FindingsPanel extends StatelessWidget {
         ),
         if (findings.rebuildsTakenOver)
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+            padding: const EdgeInsets.only(top: 2),
             child: Text(
               'Rebuild tracking was taken over by DevTools.',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.error,
+              style: tokens.body.copyWith(
+                fontSize: 11,
+                height: 14 / 11,
+                color: tokens.err,
               ),
             ),
           ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
-          child: Wrap(
-            spacing: 6,
-            runSpacing: 4,
-            children: [
-              for (final flag in DebugPaintFlag.values)
-                FilterChip(
-                  key: paintKey(flag),
-                  label: Text(flag.label),
-                  visualDensity: VisualDensity.compact,
-                  selected: findings.debugPaint.contains(flag),
-                  onSelected: (on) => findings.setDebugPaint(flag, on: on),
+        const SizedBox(height: PinPointSizes.sectionGap),
+        const DraftRule(),
+        const SizedBox(height: 10),
+        const CapsText('DEBUG PAINT'),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            for (final flag in DebugPaintFlag.values)
+              DraftChip(
+                key: paintKey(flag),
+                label: flag.label,
+                look: findings.debugPaint.contains(flag)
+                    ? ChipLook.selected
+                    : ChipLook.rest,
+                onTap: () => findings.setDebugPaint(
+                  flag,
+                  on: !findings.debugPaint.contains(flag),
                 ),
-            ],
-          ),
+              ),
+          ],
         ),
       ],
     ),
@@ -330,50 +279,60 @@ class FindingsPanel extends StatelessWidget {
     String label,
     bool value,
     ValueChanged<bool> onChanged,
-  ) => SwitchListTile(
-    key: key,
-    dense: true,
-    visualDensity: VisualDensity.compact,
-    title: Text(label),
-    value: value,
-    onChanged: onChanged,
-  );
-
-  Widget _empty(ThemeData theme) => Center(
-    child: Padding(
-      padding: const EdgeInsets.all(16),
-      child: Text(
-        findings.hasScanned
-            ? 'Nothing found on this screen.'
-            : 'Scan this screen to look for overflow, cut text, oversized '
-                  'images and more. Errors are captured as they happen.',
-        textAlign: TextAlign.center,
-        style: theme.textTheme.bodySmall,
+  ) => ConstrainedBox(
+    constraints: const BoxConstraints(minHeight: PinPointSizes.rowHeight),
+    child: Align(
+      alignment: Alignment.centerLeft,
+      child: DraftCheckbox(
+        key: key,
+        value: value,
+        onChanged: onChanged,
+        label: label,
       ),
     ),
   );
 
-  List<Widget> _groups(ThemeData theme, List<Finding> all) {
+  Widget _empty(PinPointTokens tokens) => Padding(
+    padding: const EdgeInsets.all(PinPointSizes.panelPadding),
+    child: Text(
+      findings.hasScanned
+          ? 'Nothing found on this screen.'
+          : 'Scan this screen to look for overflow, cut text, oversized '
+                'images and more. Errors are captured as they happen.',
+      style: tokens.label,
+    ),
+  );
+
+  List<Widget> _groups(PinPointTokens tokens, List<Finding> all) {
     final byKind = <String, List<Finding>>{};
     for (final finding in all) {
       (byKind[finding.kind] ??= <Finding>[]).add(finding);
     }
     return [
       for (final MapEntry(key: kind, value: group) in byKind.entries) ...[
-        Padding(
+        Container(
           key: groupKey(kind),
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-          child: Text(
-            '${findingKindLabel(kind)} (${group.length})',
-            style: theme.textTheme.labelLarge,
+          height: PinPointSizes.rowHeight,
+          padding: const EdgeInsets.symmetric(
+            horizontal: PinPointSizes.panelPadding,
+          ),
+          alignment: Alignment.centerLeft,
+          decoration: BoxDecoration(
+            border: Border(
+              top: BorderSide(color: tokens.rule),
+              bottom: BorderSide(color: tokens.rule),
+            ),
+          ),
+          child: CapsText(
+            '${findingKindLabel(kind).toUpperCase()} (${group.length})',
           ),
         ),
-        for (final finding in group) _row(theme, finding),
+        for (final finding in group) _row(tokens, finding),
       ],
     ];
   }
 
-  Widget _row(ThemeData theme, Finding finding) {
+  Widget _row(PinPointTokens tokens, Finding finding) {
     final number = _noteNumber(finding);
     final source = finding.source;
     return MouseRegion(
@@ -384,15 +343,17 @@ class FindingsPanel extends StatelessWidget {
           findings.hovered.value = null;
         }
       },
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 4, 8, 4),
+      child: Container(
+        constraints: const BoxConstraints(minHeight: PinPointSizes.rowHeight),
+        padding: const EdgeInsets.fromLTRB(PinPointSizes.panelPadding, 6, 4, 6),
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: tokens.rule)),
+        ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Padding(
-              padding: const EdgeInsets.only(top: 2, right: 8),
-              child: _severityIcon(theme, finding.severity),
-            ),
+            SeverityBadge(severityLook(finding.severity)),
+            const SizedBox(width: 8),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -401,20 +362,24 @@ class FindingsPanel extends StatelessWidget {
                     finding.summary,
                     maxLines: 3,
                     overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodyMedium,
+                    style: tokens.body,
                   ),
                   if (source != null)
-                    Text(
+                    StartEllipsisText(
                       '${source.uri.split('/').last}:${source.line}',
-                      style: theme.textTheme.bodySmall,
+                      style: tokens.value.copyWith(
+                        fontSize: 10,
+                        height: 13 / 10,
+                        color: tokens.muted,
+                      ),
                     ),
                 ],
               ),
             ),
             if (number != null)
               Padding(
-                padding: const EdgeInsets.fromLTRB(8, 2, 8, 0),
-                child: Text(number, style: theme.textTheme.labelMedium),
+                padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
+                child: Text(number, style: tokens.micro),
               )
             else if (finding.element == null) ...[
               // A finding with no widget (an engine assertion, an uncaught
@@ -422,25 +387,24 @@ class FindingsPanel extends StatelessWidget {
               // full error as text.
               Tooltip(
                 message: noWidgetMessage,
-                child: TextButton(
+                child: DraftButton.link(
                   key: noteKey(finding),
                   onPressed: null,
-                  child: const Text('Make note'),
+                  label: 'Make note',
                 ),
               ),
-              IconButton(
+              DraftIconButton(
                 key: copyKey(finding),
                 tooltip: 'Copy error',
-                iconSize: 18,
-                visualDensity: VisualDensity.compact,
+                iconSize: 16,
+                icon: PinPointIcons.contentCopy,
                 onPressed: () => onCopy(finding),
-                icon: const Icon(Icons.copy),
               ),
             ] else
-              TextButton(
+              DraftButton.link(
                 key: noteKey(finding),
                 onPressed: () => onMakeNote(finding),
-                child: const Text('Make note'),
+                label: 'Make note',
               ),
           ],
         ),
@@ -458,33 +422,23 @@ class FindingsPanel extends StatelessWidget {
     return null;
   }
 
-  static Widget _severityIcon(ThemeData theme, Severity severity) =>
+  /// The badge look of a severity.
+  static PinPointSeverityLook severityLook(Severity severity) =>
       switch (severity) {
-        Severity.error => Icon(
-          Icons.error_outline,
-          size: 18,
-          color: theme.colorScheme.error,
-        ),
-        Severity.warning => const Icon(
-          Icons.warning_amber,
-          size: 18,
-          color: Color(0xFFE65100),
-        ),
-        Severity.info => Icon(
-          Icons.info_outline,
-          size: 18,
-          color: theme.colorScheme.primary,
-        ),
+        Severity.error => PinPointSeverityLook.error,
+        Severity.warning => PinPointSeverityLook.warn,
+        Severity.info => PinPointSeverityLook.info,
       };
 }
 
-/// Places [FindingsPanel] on the left while it is open and a mode is
+/// Places [FindingsPanel] beside the rail while it is open and a mode is
 /// active, where the what-if panel goes: the two take turns.
 class FindingsPanelLayer extends StatelessWidget {
   const FindingsPanelLayer({
     super.key,
     required this.controller,
     required this.panelOpen,
+    required this.placement,
     required this.onScan,
     required this.onAudit,
     required this.onMakeNote,
@@ -493,6 +447,7 @@ class FindingsPanelLayer extends StatelessWidget {
 
   final PinPointController controller;
   final ValueNotifier<bool> panelOpen;
+  final RailPlacement placement;
   final VoidCallback onScan;
   final VoidCallback onAudit;
   final void Function(Finding finding) onMakeNote;
@@ -504,22 +459,16 @@ class FindingsPanelLayer extends StatelessWidget {
       valueListenable: panelOpen,
       builder: (context, open, _) {
         if (!open || !controller.isActive) return const SizedBox.shrink();
-        return SafeArea(
-          child: Align(
-            alignment: Alignment.topLeft,
-            child: Padding(
-              // Above the what-if bar, which sits bottom-left.
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 88),
-              child: FindingsPanel(
-                findings: controller.findings,
-                notes: controller.notes,
-                onScan: onScan,
-                onAudit: onAudit,
-                onMakeNote: onMakeNote,
-                onCopy: onCopy,
-                onClose: () => panelOpen.value = false,
-              ),
-            ),
+        return BesideRail(
+          placement: placement,
+          child: FindingsPanel(
+            findings: controller.findings,
+            notes: controller.notes,
+            onScan: onScan,
+            onAudit: onAudit,
+            onMakeNote: onMakeNote,
+            onCopy: onCopy,
+            onClose: () => panelOpen.value = false,
           ),
         );
       },
@@ -531,25 +480,31 @@ class FindingsPanelLayer extends StatelessWidget {
 /// heat is on, tints the rects of the hot spots. A rect is read again from
 /// its render object when the widget is still there, so it follows a
 /// scroll since the scan.
+///
+/// The outline is 2 px, in the colour of the severity (`err`, `warn`,
+/// `info`) over a `paper` halo, and each severity has its own stroke, so the
+/// colour is not the only signal: errors are solid, warnings dashed, hints
+/// dotted.
 class FindingPainter extends CustomPainter {
-  FindingPainter({required this.findings, required this.origin})
-    : super(repaint: Listenable.merge([findings, findings.hovered]));
+  FindingPainter({
+    required this.findings,
+    required this.origin,
+    required this.tokens,
+  }) : super(repaint: Listenable.merge([findings, findings.hovered]));
 
   final FindingsController findings;
 
   /// The painter's own top-left in global logical pixels.
   final Offset Function() origin;
 
-  static const Color color = Color(0xFFE65100);
-
-  /// The tint of a rebuild hot spot.
-  static const Color heat = Color(0xFFD50000);
+  final PinPointTokens tokens;
 
   @override
   void paint(Canvas canvas, Size size) {
     final shift = -origin();
     if (findings.trackRebuilds) {
-      final tint = Paint()..color = heat.withValues(alpha: 0.18);
+      // The tint of a rebuild hot spot.
+      final tint = Paint()..color = tokens.err.withValues(alpha: 0.18);
       for (final finding in findings.findings) {
         if (finding.kind != 'rebuild_heat') continue;
         final rect = _liveRect(finding) ?? finding.rect;
@@ -561,15 +516,22 @@ class FindingPainter extends CustomPainter {
     final rect = _liveRect(finding) ?? finding.rect;
     if (rect == null) return;
     final local = rect.shift(shift);
-    canvas
-      ..drawRect(local, Paint()..color = color.withValues(alpha: 0.15))
-      ..drawRect(
-        local,
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 2
-          ..color = color,
-      );
+    final (Color color, List<double>? dash) = switch (finding.severity) {
+      Severity.error => (tokens.err, null),
+      Severity.warning => (tokens.warn, const <double>[6, 3]),
+      Severity.info => (tokens.info, const <double>[1.5, 2.5]),
+    };
+    canvas.drawRect(local, Paint()..color = color.withValues(alpha: 0.12));
+    strokeHalo(
+      canvas,
+      Path()..addRect(local.deflate(1)),
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2
+        ..color = color,
+      tokens,
+      dash: dash,
+    );
   }
 
   static Rect? _liveRect(Finding finding) {
@@ -583,5 +545,6 @@ class FindingPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(FindingPainter oldDelegate) =>
-      !identical(oldDelegate.findings, findings);
+      !identical(oldDelegate.findings, findings) ||
+      oldDelegate.tokens != tokens;
 }

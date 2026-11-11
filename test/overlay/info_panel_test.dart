@@ -144,6 +144,11 @@ void main() {
   });
 
   testWidgets('close clears the selection', (tester) async {
+    // Wide enough that the panel opens clear of the rail on the right edge.
+    tester.view
+      ..physicalSize = const Size(1200, 800)
+      ..devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
     await tester.pumpWidget(host());
     await selectText(tester);
 

@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pinpoint/pinpoint.dart';
 import 'package:pinpoint/src/overlay/inspector_overlay.dart';
+import 'package:pinpoint/src/overlay/rail.dart';
 import 'package:pinpoint/src/overlay/toolbar.dart';
 
 /// Milestone 1 acceptance tests for the wrapper.
@@ -416,13 +417,18 @@ void main() {
   });
 
   group('launcher', () {
-    testWidgets('shows bottom-right, outside the app boundary', (tester) async {
+    testWidgets('sits at the foot of the rail on the right edge, outside the '
+        'app boundary', (tester) async {
       await tester.pumpWidget(host());
       final rect = tester.getRect(find.byType(PinPointLauncher));
+      final rail = tester.getRect(find.byKey(RailLayer.railKey));
       final screen = tester.view.physicalSize / tester.view.devicePixelRatio;
-      expect(rect.right, lessThan(screen.width));
-      expect(rect.right, greaterThan(screen.width - 40 - rect.width));
-      expect(rect.bottom, greaterThan(screen.height - 40 - rect.height));
+      // 8 px from the edge, and 1 px of border inside the rail's rect.
+      expect(rail.right, screen.width - 8);
+      expect(rect.right, rail.right - 1);
+      expect(rect.bottom, rail.bottom - 1);
+      expect(rect.size, const Size(40, 44));
+      expect(rail.center.dy, closeTo(screen.height / 2, 0.5), reason: 'centred');
       expect(
         find.descendant(
           of: appBoundary(),
@@ -449,7 +455,9 @@ void main() {
       expect(find.byTooltip('Pinpoint (Alt+Shift+C)'), findsOneWidget);
     });
 
-    testWidgets('drags, and stays inside the viewport', (tester) async {
+    testWidgets('drags along the edge only, and stays inside the viewport', (
+      tester,
+    ) async {
       await tester.pumpWidget(host());
       final start = tester.getRect(find.byType(PinPointLauncher));
 
@@ -459,23 +467,38 @@ void main() {
       );
       await tester.pump();
       final moved = tester.getRect(find.byType(PinPointLauncher));
-      expect(moved.topLeft, start.topLeft + const Offset(-200, -100));
+      expect(
+        moved.topLeft,
+        start.topLeft + const Offset(0, -100),
+        reason: 'the rail keeps to the edge',
+      );
       expect(controller.mode, PinPointMode.idle, reason: 'a drag is no tap');
 
       await tester.drag(
         find.byType(PinPointLauncher),
-        const Offset(-5000, -5000),
+        const Offset(0, -5000),
       );
       await tester.pump();
-      final clamped = tester.getRect(find.byType(PinPointLauncher));
-      expect(clamped.left, greaterThanOrEqualTo(0));
-      expect(clamped.top, greaterThanOrEqualTo(0));
+      final top = tester.getRect(find.byKey(RailLayer.railKey));
+      expect(top.top, 0);
+
+      await tester.drag(find.byType(PinPointLauncher), const Offset(0, 5000));
+      await tester.pump();
+      final screen = tester.view.physicalSize / tester.view.devicePixelRatio;
+      final bottom = tester.getRect(find.byKey(RailLayer.railKey));
+      expect(bottom.bottom, screen.height);
     });
 
-    testWidgets('is hidden with showLauncher: false', (tester) async {
+    testWidgets('showLauncher: false hides the rail in idle, and the '
+        'launcher always', (tester) async {
       await tester.pumpWidget(
         host(config: const PinPointConfig(showLauncher: false)),
       );
+      expect(find.byType(PinPointLauncher), findsNothing);
+      expect(find.byKey(RailLayer.railKey), findsNothing);
+      controller.startPicking();
+      await tester.pump();
+      expect(find.byKey(RailLayer.railKey), findsOneWidget);
       expect(find.byType(PinPointLauncher), findsNothing);
     });
   });
@@ -533,12 +556,22 @@ void main() {
       );
     });
 
-    testWidgets('the launcher shows that the app is frozen', (tester) async {
+    testWidgets('the launcher and a system badge show that the app is frozen', (
+      tester,
+    ) async {
       await tester.pumpWidget(host());
       expect(find.byIcon(Icons.ac_unit), findsNothing);
       controller.toggleFreeze();
       await tester.pump();
-      expect(find.byIcon(Icons.ac_unit), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(PinPointLauncher),
+          matching: find.byIcon(Icons.ac_unit),
+        ),
+        findsOneWidget,
+      );
+      expect(find.byKey(SystemBadgeLayer.frozenKey), findsOneWidget);
+      expect(find.text('FROZEN'), findsOneWidget);
     });
 
     testWidgets('P in idle is left to the app', (tester) async {

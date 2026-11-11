@@ -9,6 +9,8 @@ import 'package:pinpoint/src/detect/detector.dart';
 import 'package:pinpoint/src/overlay/environment_panel.dart';
 import 'package:pinpoint/src/overlay/findings_panel.dart';
 import 'package:pinpoint/src/overlay/inspector_overlay.dart';
+import 'package:pinpoint/src/theme/controls.dart';
+import 'package:pinpoint/src/theme/pinpoint_tokens.dart';
 
 import '../support/markers.dart';
 
@@ -93,12 +95,18 @@ void main() {
   Finding overflow() =>
       controller.findings.findings.firstWhere((f) => f.kind == 'overflow');
 
-  testWidgets('the button shows while a mode is active, with a count', (
-    tester,
-  ) async {
+  testWidgets('the rail item shows in idle too, with a count once there are '
+      'findings', (tester) async {
     await pumpHost(tester);
     await narrow(tester);
-    expect(find.byKey(FindingsPanel.buttonKey), findsNothing);
+    expect(find.byKey(FindingsPanel.buttonKey), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(FindingsPanel.buttonKey),
+        matching: find.byType(CountBadge),
+      ),
+      findsNothing,
+    );
 
     await openPanel(tester);
     await scan(tester);
@@ -264,7 +272,7 @@ void main() {
     await tester.pump();
     final finding = controller.findings.findings.single;
     expect(find.byKey(FindingsPanel.rowKey(finding)), findsOneWidget);
-    final button = tester.widget<TextButton>(
+    final button = tester.widget<DraftButton>(
       find.byKey(FindingsPanel.noteKey(finding)),
     );
     expect(button.onPressed, isNull);
@@ -455,7 +463,7 @@ void main() {
       expect(heat.first.data['count'], greaterThanOrEqualTo(12));
       expect(
         find.byKey(InspectorOverlay.findingKey),
-        paints..rect(color: FindingPainter.heat.withValues(alpha: 0.18)),
+        paints..rect(color: PinPointTokens.redline.err.withValues(alpha: 0.18)),
       );
 
       await tester.tap(find.byKey(FindingsPanel.rebuildsKey));
