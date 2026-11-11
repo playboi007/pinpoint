@@ -57,6 +57,9 @@ void main() {
     await tester.tap(find.byType(TextField));
     await tester.pump();
     expect(appField.hasPrimaryFocus, isTrue);
+    // Clear of the launcher at the bottom left: the footer buttons sit at the
+    // panel's bottom edge.
+    controller.panelPosition = const Offset(300, 20);
     controller.startPicking();
     await tester.pump();
     await tester.tapAt(tester.getCenter(appText('Save')));

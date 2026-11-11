@@ -252,7 +252,7 @@ void main() {
       expect(controller.mode, PinPointMode.commenting);
       expect(controller.openNote.value, id);
       expect(find.byType(NoteView), findsOneWidget);
-      expect(find.textContaining('Note 1 · draft'), findsOneWidget);
+      expect(find.textContaining('NOTE 1 · DRAFT'), findsOneWidget);
       expect(
         find.descendant(
           of: find.byKey(NoteView.fieldKey),
@@ -281,7 +281,7 @@ void main() {
       expect(sink.notes.single.comment, 'Wrap it now');
       expect(sink.notes.single.status, NoteStatus.submitted);
       expect(controller.notes.byId(id)!.status, NoteStatus.submitted);
-      expect(find.textContaining('Note 1 · sent'), findsOneWidget);
+      expect(find.textContaining('NOTE 1 · SENT'), findsOneWidget);
     });
 
     testWidgets('Send all submits every draft', (tester) async {
