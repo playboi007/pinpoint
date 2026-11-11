@@ -37,6 +37,7 @@ Result of the "Verify first" lists in `PLAN.md`. Where this file differs from th
 | 24 | Facts found in Session 8 | A lazy list re-uses tree order, so pins need the item index; visibility from offstage marks and clips; Flutter PNGs decode with `dart:io` zlib; MCP over HTTP by hand. |
 | 25 | Facts found in Session 9 | Apple platforms add a `Shortcuts` layer outside web, so a platform switch remounts the builder subtree; reassemble from inside a frame fails in tests; the platform setter throws outside debug. |
 | 26 | Facts found in Session 10 | Overflow diagnostics confirmed in a run; `debugSemantics` maps render objects to semantics nodes; `testWidgets` turns semantics on by default; three more test invariants; label glyphs are painted lighter than their style color. |
+| 27 | Facts found in Session 11 | `Text` and `Text.rich` wrap the span in a root of their own; a widget rebuild writes values back through `updateRenderObject`, parent data only on a widget change; `DropdownButton` needs a Navigator. |
 
 ---
 
@@ -481,6 +482,19 @@ Extra tools exist behind `--enable` (`launch_app`, `list_devices`, `run_tests`, 
 - **[source]** More values `flutter test` checks at the end of a test body, before any tear-down: `debugPrint` (`foundation/debug.dart:41`), and in `debugAssertAllRenderVarsUnset` (`rendering/debug.dart:328`) every debug paint flag and `debugCurrentRepaintColor`, which the repaint rainbow changes on every repaint. Restore them in the body. The tree is unmounted before the check (`flutter_test/lib/src/binding.dart:1960`), so a wrapper's own dispose counts.
 - **[run-vm]** A `TextFormField` label declared `#46464F` is painted `#56555E` in a test (lighter, as if see-through). A contrast check that takes the most common non-text color inside the text's rect takes those glyphs for the background (1.27:1). Pinpoint reads the background from a 3 px ring around the paragraph instead, and skips pixels that are not opaque: where the app's boundary paints nothing, the capture has alpha 0, which reads as black.
 - **[run-vm]** In `flutter test`, `paintImage` calls `debugOnPaintImage` for a `RawImage`, with `debugImageLabel` as the source, so a report can be matched to its `RenderImage` (item 8). `createTestImage` and `Picture.toImage` need `tester.runAsync`, as in item 22.
+
+## 27. Facts found in Session 11
+
+- **[source]** `Text.build` (`widgets/text.dart:735`) gives `RichText` a root `TextSpan(style: effectiveTextStyle, text: data, children: [textSpan])`. For `Text('x', style: s)` the root carries the text and the merged style, so a tweak of the root style shows. For `Text.rich(span)` the user's span is a child of that root: a root style change does not override what the child span sets. Pinpoint makes a text style value read-only when a child span on the way to the first text sets it.
+- **[source]** `RenderObjectElement._performRebuild` (`widgets/framework.dart:6845`) calls `widget.updateRenderObject(this, renderObject)`. So `markNeedsBuild()` on the element that owns a render object makes the widget write every one of its values back. Reset all uses this.
+- **[source]** `ParentDataElement` applies parent data in `notifyClients` (`widgets/framework.dart:6259`), which runs from `updated` (a new widget), not from a rebuild. `markNeedsBuild()` on an `Expanded` does not put its `flex` back; Pinpoint applies the original value itself.
+- **[run-vm]** A `const` child is not built again by its parent's `setState` (same widget instance), so it never resets a tweak. Only a non-const widget, or one whose values changed, writes its values back.
+- **[source]** `RenderParagraph.text` (`rendering/paragraph.dart:422`), `RenderPadding.padding`, `RenderConstrainedBox.additionalConstraints`, `RenderFlex` (`direction`, `mainAxisAlignment`, `crossAxisAlignment`, `mainAxisSize`, `spacing`), `RenderPositionedBox`, `RenderStack`, `RenderOpacity`, `RenderClipRRect.borderRadius`, `RenderAspectRatio`, `RenderWrap` and `RenderImage.fit` all have public setters that mark layout or paint. `Container(color:)` builds `ColoredBox`, whose render object `_RenderColoredBox` is private (`widgets/basic.dart:8430`): no setter. Its color is read from the widget through `debugCreator`, read-only.
+- **[source]** `TextStyle.copyWith` cannot set a field back to null (`height ?? this.height`). Resetting `height` or `letterSpacing` to the font's own needs a new `TextStyle` with every other field copied. `fontFamily` and `fontFamilyFallback` come back already prefixed with `packages/<name>/`.
+- **[source]** `DropdownButton` and `PopupMenuButton` push a route through `Navigator.of`. Pinpoint's panel sits above the Navigator (`MaterialApp.builder`), so they cannot open there. `MenuAnchor` needs only an `Overlay`, which `Overlay.wrap` in `InspectorOverlay` gives.
+- **[run-vm]** `ConstrainedBox` has no const constructor (its constraints are checked in an assert). A `const` widget tree that holds one does not compile.
+- **[run-vm]** The `LayoutBuilder` builder runs again only when its constraints change or its element is marked for build: `markNeedsLayout()` on its render object alone does not run it.
+- **[unverified]** In Chrome: the menus of the Tweak tab, arrow-key nudging in its number fields, the before and after image, and a tweak held under a real `setState`.
 
 ---
 
