@@ -41,6 +41,7 @@ class PinLayer extends StatelessWidget {
                 child: PinMarker(
                   number: pin.number,
                   status: pin.status,
+                  checksPassed: pin.checksPassed,
                   onTap: () => onOpen(pin.id),
                 ),
               ),
@@ -62,7 +63,10 @@ class PinMarker extends StatelessWidget {
     required this.number,
     required this.status,
     required this.onTap,
+    this.checksPassed,
   });
+
+  static const Key checksKey = ValueKey<String>('pinpoint.pin.checks');
 
   /// Width and height.
   static const double size = 22;
@@ -77,6 +81,10 @@ class PinMarker extends StatelessWidget {
   final int number;
   final NoteStatus status;
   final VoidCallback onTap;
+
+  /// The outcome of the note's last `verify_note`, shown as a small badge
+  /// for the user to accept or reopen; null when none ran.
+  final bool? checksPassed;
 
   /// Whether the pin shows a tick or a cross instead of its number.
   static bool showsMark(NoteStatus status) =>
@@ -113,8 +121,15 @@ class PinMarker extends StatelessWidget {
       NoteStatus.rejected => (scheme.error, scheme.onError),
     };
     final mark = status == NoteStatus.rejected ? Icons.close : Icons.check;
+    final checked = checksPassed;
     return Tooltip(
-      message: 'Note $number (${label(status)})',
+      message:
+          'Note $number (${label(status)})'
+          '${checked == null
+              ? ''
+              : checked
+              ? ', checks passed'
+              : ', checks failed'}',
       child: AnimatedOpacity(
         opacity: isFaded(status) ? fadedOpacity : 1,
         duration: fadeDuration,
@@ -133,16 +148,24 @@ class PinMarker extends StatelessWidget {
             child: SizedBox.square(
               dimension: size,
               child: Center(
-                child: showsMark(status)
-                    ? Icon(mark, size: 14, color: ink)
-                    : Text(
-                        '$number',
-                        style: TextStyle(
-                          color: ink,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
+                child: Badge(
+                  key: checked == null ? null : checksKey,
+                  isLabelVisible: checked != null,
+                  smallSize: 8,
+                  backgroundColor: checked == true
+                      ? const Color(0xFF00C853)
+                      : scheme.error,
+                  child: showsMark(status)
+                      ? Icon(mark, size: 14, color: ink)
+                      : Text(
+                          '$number',
+                          style: TextStyle(
+                            color: ink,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
-                      ),
+                ),
               ),
             ),
           ),

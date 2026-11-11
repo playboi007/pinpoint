@@ -18,6 +18,7 @@ class PinPlacement {
     required this.number,
     required this.status,
     required this.rect,
+    this.checksPassed,
   });
 
   final String id;
@@ -30,16 +31,20 @@ class PinPlacement {
   /// The visible part of the anchor's widget, in global logical pixels.
   final Rect rect;
 
+  /// The outcome of the note's last `verify_note`; null when none ran.
+  final bool? checksPassed;
+
   @override
   bool operator ==(Object other) =>
       other is PinPlacement &&
       other.id == id &&
       other.number == number &&
       other.status == status &&
-      other.rect == rect;
+      other.rect == rect &&
+      other.checksPassed == checksPassed;
 
   @override
-  int get hashCode => Object.hash(id, number, status, rect);
+  int get hashCode => Object.hash(id, number, status, rect, checksPassed);
 }
 
 /// Keeps each pin on its widget.
@@ -210,6 +215,7 @@ class PinTracker {
           number: i + 1,
           status: note.status,
           rect: rect,
+          checksPassed: note.checksPassed,
         ),
       );
     }

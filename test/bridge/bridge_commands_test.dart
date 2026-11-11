@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pinpoint/src/bridge/agent_tools.dart';
 import 'package:pinpoint/src/bridge/bridge_server.dart';
+import 'package:pinpoint/src/model/annotation.dart' show annotationSchema;
 
 /// Milestone 12, build step 1: the command channel over real loopback
 /// sockets. A plain Dart loop stands in for the app's long poll, and a
@@ -257,4 +258,100 @@ void main() {
       expect(text, isNot(contains(hasNot)), reason: detail);
     }
   });
+
+  test('verify_note sends the note to the app, stores the result and the '
+      'after screenshot, and keeps the status', () async {
+    final (posted, _) = await send(
+      'POST',
+      '/annotations',
+      body: {
+        'schema': annotationSchema,
+        'id': 'pp_v',
+        'status': 'fixed',
+        'createdAt': '2026-11-11T10:00:00.000Z',
+        'intent': 'bug',
+        'comment': 'The row overflows at 360',
+        'page': {'route': '/zoo'},
+        'anchor': {'file': 'lib/zoo.dart', 'line': 20, 'widget': 'Row'},
+        'environment': {
+          'viewport': {'width': 360, 'height': 800},
+        },
+        'checks': [
+          {'type': 'no_overflow'},
+        ],
+      },
+    );
+    expect(posted, 201);
+
+    late Map<String, Object?> sent;
+    final app = appTakesOne((command) {
+      sent = command['args']! as Map<String, Object?>;
+      return {
+        'ok': true,
+        'result': {
+          'id': 'pp_v',
+          'passed': false,
+          'found': 'lib/zoo.dart:22',
+          'checks': [
+            {
+              'type': 'no_overflow',
+              'passed': false,
+              'message': 'Row overflows by 72 px on the right',
+            },
+          ],
+          'png': _onePixelPng,
+        },
+      };
+    });
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    final result = await tool('verify_note', {'id': 'pp_v'});
+    await app;
+
+    final note = sent['note']! as Map<String, Object?>;
+    expect(note['anchor'], {'file': 'lib/zoo.dart', 'line': 20, 'widget': 'Row'});
+    expect(note['checks'], [
+      {'type': 'no_overflow'},
+    ]);
+    expect(note['environment'], isNotNull);
+    expect((note['page']! as Map)['route'], '/zoo');
+
+    expect(result['isError'], isFalse);
+    final text = textOf(result);
+    expect(text, contains('Checks failed (0 of 1 passed)'));
+    expect(text, contains('FAIL no_overflow: Row overflows by 72 px'));
+    final content = result['content']! as List<Object?>;
+    expect([for (final c in content) (c! as Map)['type']], ['text', 'image']);
+
+    final stored = await bridge.store.read('pp_v');
+    expect(stored!['status'], 'fixed', reason: 'the user accepts, not this');
+    final verification = stored['verification']! as Map<String, Object?>;
+    expect(verification['passed'], isFalse);
+    expect(verification['after'], 'pp_v.after.png');
+    expect(verification['checks'], hasLength(1));
+    expect(
+      (stored['messages']! as List<Object?>).cast<Map<String, Object?>>().last,
+      containsPair('from', 'pinpoint'),
+    );
+    final open = Directory('${root.path}/.pinpoint/open');
+    expect(File('${open.path}/pp_v.after.png').existsSync(), isTrue);
+    final md = File('${open.path}/pp_v.md').readAsStringSync();
+    expect(md, contains('Verification: failed (0 of 1 checks passed'));
+
+    // The after image moves with the note.
+    await tool('update_note', {'id': 'pp_v', 'status': 'resolved'});
+    final resolved = Directory('${root.path}/.pinpoint/resolved');
+    expect(File('${resolved.path}/pp_v.after.png').existsSync(), isTrue);
+    expect(File('${open.path}/pp_v.after.png').existsSync(), isFalse);
+  });
+
+  test('verify_note of a draft or an unknown note never reaches the app', () async {
+    final result = await tool('verify_note', {'id': 'pp_nope'});
+    expect(result['isError'], isTrue);
+    expect(textOf(result), startsWith('No note pp_nope'));
+  });
 }
+
+/// A 1 x 1 PNG.
+const String _onePixelPng =
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQ'
+    'DwAEhQGAhKmMIQAAAABJRU5ErkJggg==';

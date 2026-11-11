@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../agent/checks.dart';
+import '../agent/commands.dart' show AgentCommands;
 import '../core/pinpoint_controller.dart';
 import '../model/annotation.dart';
 
@@ -26,6 +28,25 @@ class CommentForm extends StatelessWidget {
   static const Key draftKey = ValueKey<String>('pinpoint.comment.draft');
   static const Key copyKey = ValueKey<String>('pinpoint.comment.copy');
   static const Key cancelKey = ValueKey<String>('pinpoint.comment.cancel');
+  static const Key addCheckKey = ValueKey<String>('pinpoint.comment.addCheck');
+
+  /// The menu item that adds the check of [type].
+  static Key checkItemKey(String type) =>
+      ValueKey<String>('pinpoint.comment.check.$type');
+
+  /// The chip of the chosen check of [type].
+  static Key checkChipKey(String type) =>
+      ValueKey<String>('pinpoint.comment.checkChip.$type');
+
+  /// What a chosen check reads as, for example `No overflow`.
+  static String checkLabel(Map<String, Object?> check) {
+    final type = check['type'];
+    if (type == 'text_contains') return 'Text contains "${check['text']}"';
+    for (final option in commentChecks) {
+      if (option.type == type) return option.label;
+    }
+    return '$type';
+  }
 
   final PinPointController controller;
 
@@ -107,6 +128,7 @@ class CommentForm extends StatelessWidget {
                 isDense: true,
               ),
             ),
+            _Checks(controller: controller, enabled: !sending),
             CheckboxListTile(
               key: screenshotKey,
               value: draft.includeScreenshot,
@@ -154,6 +176,85 @@ class CommentForm extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+}
+
+/// The chosen checks as chips, and "Add check": what `verify_note` will
+/// measure once the agent says the note is fixed.
+class _Checks extends StatelessWidget {
+  const _Checks({required this.controller, required this.enabled});
+
+  final PinPointController controller;
+  final bool enabled;
+
+  /// The checks the menu offers for the selection: the fixed list, and
+  /// "Text contains" with the selected widget's text when it shows one.
+  List<Map<String, Object?>> _offered() {
+    final element = controller.selection.value?.element;
+    String? text;
+    try {
+      text = element == null ? null : AgentCommands.textOf(element);
+    } catch (_) {
+      text = null;
+    }
+    return [
+      for (final option in commentChecks) option.check,
+      if (text != null && text.trim().isNotEmpty && text != '[masked]')
+        {'type': 'text_contains', 'text': clipText(text.trim(), 60)},
+    ];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final draft = controller.draft;
+    final chosen = draft.checks;
+    final open = [
+      for (final check in _offered())
+        if (!chosen.any((c) => c['type'] == check['type'])) check,
+    ];
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Wrap(
+        spacing: 6,
+        runSpacing: 4,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          for (final check in chosen)
+            InputChip(
+              key: CommentForm.checkChipKey('${check['type']}'),
+              label: Text(CommentForm.checkLabel(check)),
+              visualDensity: VisualDensity.compact,
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              deleteIcon: const Icon(Icons.clear, size: 16),
+              onDeleted: enabled
+                  ? () => draft.removeCheck('${check['type']}')
+                  : null,
+            ),
+          MenuAnchor(
+            menuChildren: [
+              for (final check in open)
+                MenuItemButton(
+                  key: CommentForm.checkItemKey('${check['type']}'),
+                  onPressed: () => draft.addCheck(check),
+                  child: Text(CommentForm.checkLabel(check)),
+                ),
+            ],
+            builder: (context, menu, _) => TextButton.icon(
+              key: CommentForm.addCheckKey,
+              style: const ButtonStyle(
+                visualDensity: VisualDensity.compact,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              onPressed: enabled && open.isNotEmpty
+                  ? () => menu.isOpen ? menu.close() : menu.open()
+                  : null,
+              icon: const Icon(Icons.rule, size: 16),
+              label: const Text('Add check'),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

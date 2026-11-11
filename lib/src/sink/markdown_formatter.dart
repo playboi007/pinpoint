@@ -86,6 +86,7 @@ String markdownFromJson(Map<String, Object?> json) {
   if (whatIfLine(json['environment']) case final whatIf?) out.writeln(whatIf);
   findingLines(json).forEach(out.writeln);
   tweakLines(json).forEach(out.writeln);
+  verificationLines(json).forEach(out.writeln);
 
   final rect = _map(target['rect']);
   final x = _number(rect['x']);
@@ -210,6 +211,35 @@ List<String> findingLines(Map<String, Object?> json) {
     if (kind != null && summary != null)
       _line('Found: $kind${severity == null ? '' : ' ($severity)'}: $summary'),
     if (checks.isNotEmpty) _line('Checks: ${checks.join(', ')}'),
+  ];
+}
+
+/// The outcome of the last `verify_note`: `Verification: failed (0 of 1
+/// checks passed, at 2026-11-11T10:05:00Z)`, then one line per check, for
+/// example `- FAIL no_overflow: Row overflows by 72 px on the right`.
+/// Empty before a verification ran.
+List<String> verificationLines(Map<String, Object?> json) {
+  final verification = _map(json['verification']);
+  final passed = verification['passed'];
+  if (passed is! bool) return const <String>[];
+  final checks = [
+    for (final c in _list(verification['checks']))
+      if (_map(c) case final check when _string(check['type']) != null) check,
+  ];
+  final count = checks.where((c) => c['passed'] == true).length;
+  final at = _string(verification['at']);
+  final after = _string(verification['after']);
+  return [
+    _line(
+      'Verification: ${passed ? 'passed' : 'failed'} ($count of '
+      '${checks.length} checks passed${at == null ? '' : ', at $at'})',
+    ),
+    for (final check in checks)
+      _line(
+        '- ${check['passed'] == true ? 'PASS' : 'FAIL'} ${check['type']}'
+        '${_string(check['message']) == null ? '' : ': ${check['message']}'}',
+      ),
+    if (after != null) 'After screenshot: $after',
   ];
 }
 

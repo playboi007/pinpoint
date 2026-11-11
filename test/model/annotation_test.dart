@@ -123,9 +123,33 @@ void main() {
     expect(actual, expected);
   });
 
-  test('schema is version 5 and keys come in a fixed order', () {
+  test('schema 6: verification only once verify_note ran; round trip', () {
+    expect(example().toJson().containsKey('verification'), isFalse);
+    expect(example().checksPassed, isNull);
+    final verification = {
+      'at': '2026-11-11T10:05:00.000Z',
+      'passed': true,
+      'checks': [
+        {'type': 'no_overflow', 'passed': true, 'message': 'no overflow'},
+      ],
+      'after': 'pp_x.after.png',
+    };
+    final json = example().copyWith(verification: () => verification).toJson();
+    expect(json['verification'], verification);
+    final back = Annotation.fromJson(
+      jsonDecode(jsonEncode(json)) as Map<String, Object?>,
+    )!;
+    expect(back.verification, verification);
+    expect(back.checksPassed, isTrue);
+    expect(
+      back.toMarkdown(),
+      contains('Verification: passed (1 of 1 checks passed'),
+    );
+  });
+
+  test('schema is version 6 and keys come in a fixed order', () {
     final json = example().toJson();
-    expect(json['schema'], 5);
+    expect(json['schema'], 6);
     expect(json.keys.take(6), [
       'schema',
       'id',

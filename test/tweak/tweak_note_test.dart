@@ -45,8 +45,8 @@ void main() {
   );
 
   group('model', () {
-    test('schema 5; tweaks only when there are some; round trip', () {
-      expect(annotationSchema, 5);
+    test('schema 5 and up; tweaks only when there are some; round trip', () {
+      expect(annotationSchema, greaterThanOrEqualTo(5));
       expect(note().toJson().containsKey('tweaks'), isFalse);
       final json = jsonDecode(
         jsonEncode(note(tweaks: [tweak]).toJson()),

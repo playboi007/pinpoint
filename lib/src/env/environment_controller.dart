@@ -127,6 +127,110 @@ class Environment {
     if (timeDilation case final t?) 'timeDilation': _num(t),
   };
 
+  /// The environment a [toJson] map describes: what a note was filed
+  /// under. Throws a [FormatException] for a field it cannot read.
+  static Environment fromJson(Map<String, Object?> json) =>
+      none.applyJson(json);
+
+  /// This environment with the fields in [json] (keys as in [toJson])
+  /// changed; a null value clears a field. Fields not in [json] stay.
+  ///
+  /// Throws a [FormatException] for an unknown field or a value it cannot
+  /// read, so an agent's typo is an error, not a silent no-op.
+  Environment applyJson(Map<String, Object?> json) {
+    var next = this;
+    for (final MapEntry(:key, :value) in json.entries) {
+      Never bad() => throw FormatException('$key: cannot read $value');
+      double number({bool positive = false, bool nonNegative = false}) {
+        if (value is! num) bad();
+        final n = value.toDouble();
+        if (!n.isFinite || (positive && n <= 0) || (nonNegative && n < 0)) {
+          bad();
+        }
+        return n;
+      }
+
+      T byName<T extends Enum>(List<T> values) {
+        for (final v in values) {
+          if (v.name == value) return v;
+        }
+        bad();
+      }
+
+      final clear = value == null;
+      next = switch (key) {
+        'viewport' => next.copyWith(
+          viewport: () => clear ? null : _size(value) ?? bad(),
+        ),
+        'textScale' => next.copyWith(
+          textScale: () => clear ? null : number(positive: true),
+        ),
+        'boldText' => next.copyWith(
+          boldText: () => clear ? null : (value is bool ? value : bad()),
+        ),
+        'safeArea' => next.copyWith(
+          safeArea: () => clear ? null : _insets(value) ?? bad(),
+        ),
+        'keyboardHeight' => next.copyWith(
+          keyboardHeight: () => clear ? null : number(nonNegative: true),
+        ),
+        'textDirection' => next.copyWith(
+          textDirection: () => clear ? null : byName(TextDirection.values),
+        ),
+        'brightness' => next.copyWith(
+          brightness: () => clear ? null : byName(Brightness.values),
+        ),
+        'themeVariant' => next.copyWith(
+          themeVariant: () => clear ? null : (value is String ? value : bad()),
+        ),
+        'seedColor' => next.copyWith(
+          seedColor: () => clear ? null : _color(value) ?? bad(),
+        ),
+        'platform' => next.copyWith(
+          platform: () => clear ? null : byName(TargetPlatform.values),
+        ),
+        'timeDilation' => next.copyWith(
+          timeDilation: () => clear ? null : number(positive: true),
+        ),
+        _ => throw FormatException('unknown environment field: $key'),
+      };
+    }
+    return next;
+  }
+
+  static Size? _size(Object? value) {
+    if (value is! Map<String, Object?>) return null;
+    final width = value['width'];
+    final height = value['height'];
+    if (width is! num || height is! num || width <= 0 || height <= 0) {
+      return null;
+    }
+    return Size(width.toDouble(), height.toDouble());
+  }
+
+  static EdgeInsets? _insets(Object? value) {
+    if (value is! Map<String, Object?>) return null;
+    double side(String name) {
+      final v = value[name];
+      return v is num && v >= 0 ? v.toDouble() : -1;
+    }
+
+    final sides = [side('left'), side('top'), side('right'), side('bottom')];
+    if (sides.any((s) => s < 0)) return null;
+    return EdgeInsets.fromLTRB(sides[0], sides[1], sides[2], sides[3]);
+  }
+
+  /// `#RRGGBB` or `#AARRGGBB`, as [formatColor] writes it.
+  static Color? _color(Object? value) {
+    if (value is! String) return null;
+    final hex = value.startsWith('#') ? value.substring(1) : value;
+    if (!RegExp(r'^[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$').hasMatch(hex)) {
+      return null;
+    }
+    final n = int.parse(hex, radix: 16);
+    return Color(hex.length == 6 ? 0xFF000000 | n : n);
+  }
+
   /// A short line for the chip, for example `360 × 800 · text 1.5× · RTL`.
   String get summary => [
     if (viewport case final v?) sizeLabelOf(v),

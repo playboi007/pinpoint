@@ -216,8 +216,8 @@ Future<void> paintSettled() async {
 }
 
 /// Captures [target] (global logical pixels) from the app's [boundary] at
-/// [pixelRatio], with the outline drawn on. Null when the target is not on
-/// the boundary.
+/// [pixelRatio], with the outline drawn on unless [outline] is false (a
+/// whole-app capture). Null when the target is not on the boundary.
 ///
 /// With [maxWidth], [pixelRatio] is the device pixel ratio: the capture
 /// uses at most 2, lowered so the image is at most [maxWidth] wide.
@@ -229,6 +229,7 @@ Future<Screenshot?> captureScreenshot(
   Rect target, {
   required double pixelRatio,
   int? maxWidth,
+  bool outline = true,
 }) async {
   await paintSettled();
   if (!boundary.attached || !boundary.hasSize) return null;
@@ -259,20 +260,22 @@ Future<Screenshot?> captureScreenshot(
       Offset.zero & Size(full.width.toDouble(), full.height.toDouble()),
     );
     final recorder = ui.PictureRecorder();
-    Canvas(recorder)
+    final canvas = Canvas(recorder)
       ..drawImageRect(
         full,
         source,
         Offset.zero & source.size,
         Paint()..filterQuality = FilterQuality.none,
-      )
-      ..drawRect(
+      );
+    if (outline) {
+      canvas.drawRect(
         plan.outline,
         Paint()
           ..style = PaintingStyle.stroke
           ..strokeWidth = outlineWidthFor(plan.pixelRatio)
           ..color = outlineColor,
       );
+    }
     final picture = recorder.endRecording();
     final ui.Image out;
     try {

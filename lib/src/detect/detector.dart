@@ -267,22 +267,28 @@ FindingScan scanTree(
   List<Detector> detectors, {
   FindingLocator? locator,
   int maxNodes = RenderSearch.defaultMaxNodes,
+  bool includeRoot = false,
 }) {
   final context = ScanContext._(locator ?? FindingLocator());
   final found = <Finding>[];
   var errors = 0;
-  final walk = RenderSearch.visitVisible(root, (node, rect, visible) {
-    context
-      ..rect = rect
-      ..visible = visible;
-    for (final detector in detectors) {
-      try {
-        found.addAll(detector.scan(node, context));
-      } catch (_) {
-        errors++;
+  final walk = RenderSearch.visitVisible(
+    root,
+    (node, rect, visible) {
+      context
+        ..rect = rect
+        ..visible = visible;
+      for (final detector in detectors) {
+        try {
+          found.addAll(detector.scan(node, context));
+        } catch (_) {
+          errors++;
+        }
       }
-    }
-  }, maxNodes: maxNodes);
+    },
+    maxNodes: maxNodes,
+    includeRoot: includeRoot,
+  );
   assert(() {
     if (walk.elapsed.inMilliseconds > 16 || walk.truncated) {
       debugPrint(

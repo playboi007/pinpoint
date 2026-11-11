@@ -140,13 +140,22 @@ abstract final class RenderSearch {
   /// and so is everything a clip hides (list items scrolled out of view).
   /// Bounded and guarded like every walk (engineering rule 4): a node whose
   /// read throws, or a [visit] that throws, skips that node only.
+  ///
+  /// With [includeRoot], [root] is visited too: a check on one widget's
+  /// subtree measures the widget itself.
   static RenderWalk visitVisible(
     RenderObject root,
     void Function(RenderObject node, Rect rect, Rect visible) visit, {
     int maxNodes = defaultMaxNodes,
     int maxDepth = defaultMaxDepth,
+    bool includeRoot = false,
   }) {
-    final walk = _VisibleWalk(visit, maxNodes: maxNodes, maxDepth: maxDepth);
+    final walk = _VisibleWalk(
+      visit,
+      maxNodes: maxNodes,
+      maxDepth: maxDepth,
+      includeRoot: includeRoot,
+    );
     final stopwatch = Stopwatch()..start();
     try {
       if (root.attached) {
@@ -260,7 +269,14 @@ class RenderWalk {
 }
 
 class _VisibleWalk {
-  _VisibleWalk(this.onVisit, {required this.maxNodes, required this.maxDepth});
+  _VisibleWalk(
+    this.onVisit, {
+    required this.maxNodes,
+    required this.maxDepth,
+    this.includeRoot = false,
+  });
+
+  final bool includeRoot;
 
   final void Function(RenderObject node, Rect rect, Rect visible) onVisit;
   final int maxNodes;
@@ -283,7 +299,7 @@ class _VisibleWalk {
     final List<DiagnosticsNode> children;
     try {
       if (!node.attached) return;
-      if (depth > 0) {
+      if (depth > 0 || includeRoot) {
         final rect = MatrixUtils.transformRect(transform, node.paintBounds);
         if (rect.isFinite) {
           final visible = rect.intersect(clip);

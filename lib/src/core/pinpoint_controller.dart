@@ -55,6 +55,37 @@ class CommentDraft extends ChangeNotifier {
     notifyListeners();
   }
 
+  List<Map<String, Object?>> _checks = const <Map<String, Object?>>[];
+
+  /// What Milestone 12's `verify_note` will measure on this note, chosen
+  /// from the form's menu. Cleared with the text after a send.
+  List<Map<String, Object?>> get checks => _checks;
+
+  /// Adds [check], unless one of its type is there already.
+  void addCheck(Map<String, Object?> check) {
+    if (_checks.any((c) => c['type'] == check['type'])) return;
+    _checks = List.unmodifiable([..._checks, check]);
+    notifyListeners();
+  }
+
+  /// Removes the check of [type].
+  void removeCheck(String type) {
+    final next = [
+      for (final c in _checks)
+        if (c['type'] != type) c,
+    ];
+    if (next.length == _checks.length) return;
+    _checks = List.unmodifiable(next);
+    notifyListeners();
+  }
+
+  /// Removes every check.
+  void clearChecks() {
+    if (_checks.isEmpty) return;
+    _checks = const <Map<String, Object?>>[];
+    notifyListeners();
+  }
+
   /// Whether anything but white space is typed.
   bool get hasText => text.text.trim().isNotEmpty;
 

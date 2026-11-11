@@ -52,6 +52,9 @@ class NoteView extends StatefulWidget {
   static const Key deleteKey = ValueKey<String>('pinpoint.note.delete');
   static const Key acceptKey = ValueKey<String>('pinpoint.note.accept');
   static const Key reopenKey = ValueKey<String>('pinpoint.note.reopen');
+  static const Key verificationKey = ValueKey<String>(
+    'pinpoint.note.verification',
+  );
 
   final Annotation note;
 
@@ -150,6 +153,19 @@ class _NoteViewState extends State<NoteView> {
               ),
             ),
         ],
+        if (note.verification case final verification?)
+          Padding(
+            key: NoteView.verificationKey,
+            padding: const EdgeInsets.only(top: 12),
+            child: Text(
+              _verificationText(verification),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: note.checksPassed == true
+                    ? const Color(0xFF2E7D32)
+                    : theme.colorScheme.error,
+              ),
+            ),
+          ),
         if (status == NoteStatus.resolved || status == NoteStatus.fixed)
           Padding(
             padding: const EdgeInsets.only(top: 8),
@@ -206,4 +222,24 @@ class _NoteViewState extends State<NoteView> {
       ],
     );
   }
+}
+
+/// `Checks failed (0 of 1 passed)` and one line per check.
+String _verificationText(Map<String, Object?> verification) {
+  final checks = [
+    for (final c
+        in verification['checks'] is List<Object?>
+            ? verification['checks']! as List<Object?>
+            : const <Object?>[])
+      if (c is Map<String, Object?>) c,
+  ];
+  final passed = verification['passed'] == true;
+  final count = checks.where((c) => c['passed'] == true).length;
+  return [
+    'Checks ${passed ? 'passed' : 'failed'} ($count of ${checks.length} '
+        'passed)',
+    for (final check in checks)
+      '${check['passed'] == true ? '✓' : '✗'} ${check['type']}'
+          '${check['message'] is String ? ': ${check['message']}' : ''}',
+  ].join('\n');
 }

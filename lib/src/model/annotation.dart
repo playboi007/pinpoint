@@ -14,7 +14,9 @@ import '../sink/markdown_formatter.dart';
 /// 3 (Milestone 9): `environment`, the what-if overrides.
 /// 4 (Milestone 10): `finding` and `checks`, for a note made from a finding.
 /// 5 (Milestone 11): `tweaks`, the live edits, and `screenshot.beforeAfter`.
-const int annotationSchema = 5;
+/// 6 (Milestone 12): `verification`, the outcome of `verify_note`, written
+/// by the bridge.
+const int annotationSchema = 6;
 
 /// Largest JSON for a note, without the screenshot, in UTF-8 bytes.
 const int maxPayloadBytes = 8 * 1024;
@@ -103,7 +105,8 @@ class NoteMessage {
 /// only when not empty, [screenshot], which appears only when the note
 /// has one, [environment], which appears only while a what-if override
 /// is active, [finding] and [checks], which appear only on a note made
-/// from a finding, and [tweaks], which appear only while a tweak is active.
+/// from a finding, [tweaks], which appear only while a tweak is active, and
+/// [verification], which appears once `verify_note` ran.
 /// `test/goldens/annotation_schema.json` fixes it.
 class Annotation {
   const Annotation({
@@ -126,6 +129,7 @@ class Annotation {
     this.finding,
     this.checks = const <Map<String, Object?>>[],
     this.tweaks = const <Map<String, Object?>>[],
+    this.verification,
     this.screenshot,
     this.errors = const <String>[],
     this.truncated = const <String>[],
@@ -175,8 +179,20 @@ class Annotation {
   final Map<String, Object?>? finding;
 
   /// What Milestone 12's `verify_note` measures, each with a `type`, for
-  /// example `{type: no_overflow}`. Empty for a note written by hand.
+  /// example `{type: no_overflow}`. Empty when none were chosen.
   final List<Map<String, Object?>> checks;
+
+  /// The last `verify_note` outcome, written by the bridge: `at`,
+  /// `passed`, `checks` (each `type`, `passed`, `message`, `measured`),
+  /// `found` (where the anchor resolved) and `after` (the after
+  /// screenshot's file). Null until a verification ran.
+  final Map<String, Object?>? verification;
+
+  /// Whether the last verification passed; null when none ran.
+  bool? get checksPassed => switch (verification?['passed']) {
+    final bool passed => passed,
+    _ => null,
+  };
 
   /// The live edits on screen when the note was filed (`Tweak.toJson`):
   /// `renderType`, `property`, `from`, `to`, `createdBy` and
@@ -209,6 +225,7 @@ class Annotation {
     Map<String, Object?>? Function()? finding,
     List<Map<String, Object?>>? checks,
     List<Map<String, Object?>>? tweaks,
+    Map<String, Object?>? Function()? verification,
     List<String>? errors,
     List<String>? truncated,
   }) => Annotation(
@@ -231,6 +248,7 @@ class Annotation {
     finding: finding == null ? this.finding : finding(),
     checks: checks ?? this.checks,
     tweaks: tweaks ?? this.tweaks,
+    verification: verification == null ? this.verification : verification(),
     screenshot: screenshot == null ? this.screenshot : screenshot(),
     errors: errors ?? this.errors,
     truncated: truncated ?? this.truncated,
@@ -410,6 +428,10 @@ class Annotation {
               tweak['to'] is String)
             tweak,
       ],
+      verification: switch (json['verification']) {
+        final Map<String, Object?> v when v.isNotEmpty => v,
+        _ => null,
+      },
       target: TargetInfo._fromJson(target),
       anchor: json['anchor'] is Map<String, Object?>
           ? NoteAnchor.fromJson(json['anchor']! as Map<String, Object?>)
@@ -462,6 +484,7 @@ class Annotation {
     'finding': ?finding,
     if (checks.isNotEmpty) 'checks': checks,
     if (tweaks.isNotEmpty) 'tweaks': tweaks,
+    'verification': ?verification,
     'target': target.toJson(),
     'anchor': anchor?.toJson(),
     'messages': [for (final m in messages) m.toJson()],

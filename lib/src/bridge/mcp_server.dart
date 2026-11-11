@@ -5,8 +5,10 @@
 // serves MCP over HTTP on its own port. No dependency is added.
 
 import 'dart:convert';
+import 'dart:typed_data';
 
 import '../model/annotation.dart' show NoteStatus;
+import '../sink/markdown_formatter.dart' show verificationLines;
 import 'agent_tools.dart';
 import 'command_queue.dart';
 import 'note_detail.dart';
@@ -199,6 +201,7 @@ class McpServer {
       'list_notes' => _listNotes(input),
       'get_note' => _getNote(input),
       'update_note' => _updateNote(input),
+      'verify_note' when commands != null => _verifyNote(input),
       final String tool
           when commands != null && agentToolNames.contains(tool) =>
         _agent(tool, input),
@@ -336,6 +339,90 @@ class McpServer {
     return _resultContent(
       result is Map<String, Object?> ? {...result} : result,
     );
+  }
+
+  /// Runs the note's checks in the app (`verify_note`), then stores the
+  /// outcome in the note (`verification`), the after screenshot beside it
+  /// and a one-line message from `pinpoint`.
+  ///
+  /// The status is left alone: `verified` means the user accepted the
+  /// result (Milestone 8), and the pin shows the outcome for them to do so.
+  Future<Map<String, Object?>> _verifyNote(Map<String, Object?> input) async {
+    final id = _id(input);
+    final note = await _sentNote(id);
+    if (note == null) return _notFound(id);
+    final page = note['page'];
+    final answer = await commands!.run('verify_note', {
+      'note': {
+        'id': id,
+        'anchor': note['anchor'],
+        'checks': note['checks'] ?? const <Object?>[],
+        'environment': note['environment'],
+        'page': {if (page is Map<String, Object?>) 'route': page['route']},
+      },
+    }, timeout: agentToolTimeout('verify_note', input));
+    if (answer['ok'] != true) {
+      return _text('${answer['error']}', isError: true);
+    }
+    final result = answer['result'];
+    if (result is! Map<String, Object?>) {
+      return _text('The app gave no result', isError: true);
+    }
+    Uint8List? png;
+    if (result['png'] case final String data) {
+      try {
+        png = base64Decode(data);
+      } on FormatException {
+        png = null;
+      }
+    }
+    final after = png == null ? null : await store.saveAfter(id, png);
+    final checks = result['checks'] is List<Object?>
+        ? result['checks']! as List<Object?>
+        : const <Object?>[];
+    final passed = result['passed'] == true;
+    final count = checks.where((c) => c is Map && c['passed'] == true).length;
+    final verification = <String, Object?>{
+      'at': DateTime.now().toUtc().toIso8601String(),
+      'passed': passed,
+      'checks': checks,
+      'found': result['found'],
+      'after': ?after,
+    };
+    final summary =
+        'Checks ${passed ? 'passed' : 'failed'} ($count of ${checks.length} '
+        'passed)';
+    final updated = await store.update(
+      id,
+      verification: verification,
+      message: summary,
+      from: 'pinpoint',
+    );
+    _log('pinpoint: verified $id: $summary');
+    final lines = [
+      'Note $id: $summary.',
+      for (final line in verificationLines(updated).skip(1)) line,
+      if (result['found'] case final String found) 'Found at $found.',
+      if (result['defaulted'] case final String why) 'Note: $why.',
+      if (!passed)
+        'Fix the code, ask for a hot reload, then call verify_note again.'
+      else
+        'Set the note fixed or resolved; the user accepts it in the app.',
+    ];
+    return {
+      'content': [
+        {'type': 'text', 'text': lines.join('\n')},
+        if (png != null)
+          {
+            'type': 'image',
+            'data': base64Encode(
+              downscalePng(png, maxWidth: mcpMaxImageWidth) ?? png,
+            ),
+            'mimeType': 'image/png',
+          },
+      ],
+      'isError': false,
+    };
   }
 
   /// [result] as text, with its `png` (base64) as an image.

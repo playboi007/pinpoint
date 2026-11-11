@@ -515,13 +515,17 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     if (selection == null) return null;
     try {
       // Pinpoint's own context: the page is read above the app.
-      final note = _collector.collect(
+      final collected = _collector.collect(
         selection,
         controller.draft.text.text,
         controller.draft.intent,
         context: context,
         environment: controller.environment.toJson(),
       );
+      final checks = controller.draft.checks;
+      final note = checks.isEmpty
+          ? collected
+          : collected.copyWith(checks: checks);
       // Every edit on screen, not only the selected widget's: the note says
       // how the screen should look.
       final tweaks = controller.tweaks;
@@ -581,6 +585,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     if (results.every((result) => result.ok)) {
       _pin(note, selection);
       draft.text.clear();
+      draft.clearChecks();
       controller.sendSucceeded();
     } else {
       controller.sendFailed();
@@ -609,6 +614,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     }
     _pin(note, selection);
     draft.text.clear();
+    draft.clearChecks();
     controller.draftSaved();
     _toasts.show(
       'Saved as draft ${controller.notes.numberOf(note.id) ?? ''}. '

@@ -141,7 +141,7 @@ class SourceIndex {
       final location = resolver.locationOf(element);
       return file != null &&
           location != null &&
-          resolver.paths.sameFile(location.uri, file);
+          fileMatches(location.uri, file);
     } catch (_) {
       return false;
     }
@@ -303,7 +303,7 @@ class SourceIndex {
           final location = resolver.locationOf(element);
           if (location != null) {
             for (final search in [...?typed, ...untyped]) {
-              search.offer(element, location, resolver);
+              search.offer(element, location, this);
             }
           }
         }
@@ -339,12 +339,10 @@ class _Search {
   /// Candidates in the same file: element, line, column.
   final List<(Element, int, int?)> _found = <(Element, int, int?)>[];
 
-  void offer(
-    Element element,
-    SourceLocation location,
-    SourceResolver resolver,
-  ) {
-    if (!resolver.paths.sameFile(location.uri, anchor.file!)) return;
+  void offer(Element element, SourceLocation location, SourceIndex index) {
+    // A relative anchor file (written by hand, or with no project root)
+    // matches by the path's tail.
+    if (!index.fileMatches(location.uri, anchor.file!)) return;
     _found.add((element, location.line, location.column));
   }
 

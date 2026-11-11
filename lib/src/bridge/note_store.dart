@@ -174,6 +174,21 @@ class NoteStore {
     return file.existsSync() ? file : null;
   }
 
+  /// Stores [png] as note [id]'s after screenshot, `<id>.after.png`
+  /// beside its JSON, from `verify_note`. Returns the file name, or null
+  /// for an unknown note.
+  Future<String?> saveAfter(String id, Uint8List png) => _serial(() async {
+    final entry = _index[id];
+    if (entry == null) return null;
+    final name = '$id.$_afterExt';
+    await _writeAtomic(File('${entry.folder.path}/$name'), png);
+    return name;
+  });
+
+  /// The after screenshot's extension: a note's files are `.md`, `.json`,
+  /// `.png` and this, and move between folders together.
+  static const String _afterExt = 'after.png';
+
   /// Every note whose status is in [statuses] (all when null) and, when
   /// [origin] is given, that was written on a page of that origin. Oldest
   /// first.
@@ -197,8 +212,8 @@ class NoteStore {
     return notes;
   });
 
-  /// Changes note [id]: its [status], [comment] or [intent], and adds
-  /// [message] from [from]. Moves its files when the status changes folder
+  /// Changes note [id]: its [status], [comment], [intent] or
+  /// [verification], and adds [message] from [from]. Moves its files when the status changes folder
   /// and rewrites its `.md`. Returns the note.
   ///
   /// Throws a [StoreException] (404) for an unknown note.
@@ -209,6 +224,7 @@ class NoteStore {
     String? intent,
     String? message,
     String from = 'user',
+    Map<String, Object?>? verification,
   }) => _serial(() async {
     final entry = _index[id];
     final note = entry == null ? null : await _readJson(entry.folder, id);
@@ -216,6 +232,7 @@ class NoteStore {
       throw StoreException(HttpStatus.notFound, 'No note $id');
     }
     if (status != null) note['status'] = status.name;
+    if (verification != null) note['verification'] = verification;
     if (comment != null) note['comment'] = comment;
     if (intent != null) note['intent'] = intent;
     if (message != null && message.trim().isNotEmpty) {
@@ -359,6 +376,10 @@ class NoteStore {
       await markdown.delete();
     }
     if (old != null && old.folder.path != folder.path) {
+      final after = File('${old.folder.path}/$id.$_afterExt');
+      if (after.existsSync()) {
+        await after.rename('${folder.path}/$id.$_afterExt');
+      }
       await _removeFiles(old.folder, id);
     }
     _index[id] = _Entry(folder, status, _originOf(note));
@@ -375,7 +396,7 @@ class NoteStore {
     Directory? keep,
   }) async {
     if (keep != null && keep.path == folder.path) return;
-    for (final ext in ['md', 'json', 'png']) {
+    for (final ext in ['md', 'json', 'png', _afterExt]) {
       final file = File('${folder.path}/$id.$ext');
       try {
         if (file.existsSync()) await file.delete();

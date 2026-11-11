@@ -1,7 +1,7 @@
 import 'dart:math' as math;
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 
@@ -93,7 +93,7 @@ Iterable<Finding> _check(
   final element = place.element;
   final widget = element == null ? null : locator.widgetNameOf(element);
   final name = widget ?? 'A control';
-  final rect = _globalRect(node, devicePixelRatio);
+  final rect = semanticsGlobalRect(node, devicePixelRatio);
   Finding finding(String kind, String summary, Map<String, Object?> data) =>
       Finding(
         kind: kind,
@@ -135,7 +135,7 @@ Iterable<Finding> _check(
 /// Flutter's own tap target guideline does. Null for a node partly
 /// scrolled out of view or at the window's edge: its size there says
 /// nothing.
-Rect? _globalRect(SemanticsNode node, double devicePixelRatio) {
+Rect? semanticsGlobalRect(SemanticsNode node, double devicePixelRatio) {
   var rect = node.rect;
   SemanticsNode? current = node;
   while (current != null) {
@@ -200,48 +200,117 @@ Future<List<Finding>> contrastFindings(
   RenderRepaintBoundary boundary,
   List<(RenderParagraph, Rect)> paragraphs, {
   required FindingLocator locator,
-}) async {
+}) async => [
+  for (final measure in await measureContrast(boundary, paragraphs))
+    if (measure.ratio < measure.required) _contrastFinding(measure, locator),
+];
+
+/// The contrast of one paragraph, as [measureContrast] measured it.
+@immutable
+class ContrastMeasure {
+  const ContrastMeasure({
+    required this.paragraph,
+    required this.rect,
+    required this.ratio,
+    required this.required,
+    required this.foreground,
+    required this.background,
+    required this.highConfidence,
+  });
+
+  final RenderParagraph paragraph;
+
+  /// The part of the paragraph on screen, in global logical pixels.
+  final Rect rect;
+
+  /// From 1 to 21.
+  final double ratio;
+
+  /// WCAG AA for its size: 4.5, or 3 for large text.
+  final double required;
+
+  final Color foreground;
+  final Color background;
+
+  /// False when the most common ring color covers under 60% of the ring:
+  /// text over an image or a gradient.
+  final bool highConfidence;
+}
+
+/// The contrast of every paragraph in [paragraphs] that can be measured:
+/// one capture of [boundary], the text color against the most common color
+/// in a 3 px ring around each paragraph. A paragraph whose text color is
+/// not painted (under an opacity, a filter, a transition) is left out.
+Future<List<ContrastMeasure>> measureContrast(
+  RenderRepaintBoundary boundary,
+  List<(RenderParagraph, Rect)> paragraphs,
+) async {
   if (paragraphs.isEmpty || !boundary.attached || !boundary.hasSize) {
-    return const <Finding>[];
+    return const <ContrastMeasure>[];
   }
   final toLocal = Matrix4.tryInvert(boundary.getTransformTo(null));
-  if (toLocal == null) return const <Finding>[];
+  if (toLocal == null) return const <ContrastMeasure>[];
   // Logical pixels are enough to tell a background from a text color.
   final image = await boundary.toImage();
   try {
     final bytes = await image.toByteData();
-    if (bytes == null) return const <Finding>[];
-    final findings = <Finding>[];
+    if (bytes == null) return const <ContrastMeasure>[];
+    final measures = <ContrastMeasure>[];
     for (final (paragraph, visible) in paragraphs) {
       try {
-        final finding = _contrast(
+        final measure = _contrast(
           paragraph,
           visible,
           MatrixUtils.transformRect(toLocal, visible),
           bytes,
           image.width,
           image.height,
-          locator,
         );
-        if (finding != null) findings.add(finding);
+        if (measure != null) measures.add(measure);
       } catch (_) {
         // A paragraph that cannot be read is skipped.
       }
     }
-    return findings;
+    return measures;
   } finally {
     image.dispose();
   }
 }
 
-Finding? _contrast(
+Finding _contrastFinding(ContrastMeasure measure, FindingLocator locator) {
+  final place = locator.locate(measure.paragraph);
+  final element = place.element;
+  final widget = element == null ? null : locator.widgetNameOf(element);
+  final rounded = (measure.ratio * 100).roundToDouble() / 100;
+  final required = measure.required;
+  return Finding(
+    kind: 'low_contrast',
+    severity: Severity.warning,
+    summary:
+        '${widget ?? 'Text'} contrast is $rounded:1, under '
+        '${required == 3 ? '3' : '4.5'}:1',
+    element: element,
+    rect: measure.rect,
+    source: place.source,
+    route: place.route,
+    data: {
+      'widget': ?widget,
+      'ratio': rounded,
+      'required': required,
+      'foreground': formatColor(measure.foreground),
+      'background': formatColor(measure.background),
+      'confidence': measure.highConfidence ? 'high' : 'low',
+    },
+  );
+}
+
+ContrastMeasure? _contrast(
   RenderParagraph paragraph,
   Rect global,
   Rect local,
   ByteData pixels,
   int width,
   int height,
-  FindingLocator locator,
 ) {
   final style = paragraph.text.style;
   final color = style?.color;
@@ -312,30 +381,14 @@ Finding? _contrast(
   final bold = (style?.fontWeight?.value ?? 400) >= 700;
   final large = size >= 24 || (bold && size >= 18.66);
   final required = large ? 3.0 : 4.5;
-  if (ratio >= required) return null;
-
-  final place = locator.locate(paragraph);
-  final element = place.element;
-  final widget = element == null ? null : locator.widgetNameOf(element);
-  final rounded = (ratio * 100).roundToDouble() / 100;
-  return Finding(
-    kind: 'low_contrast',
-    severity: Severity.warning,
-    summary:
-        '${widget ?? 'Text'} contrast is $rounded:1, under '
-        '${required == 3 ? '3' : '4.5'}:1',
-    element: element,
+  return ContrastMeasure(
+    paragraph: paragraph,
     rect: global,
-    source: place.source,
-    route: place.route,
-    data: {
-      'widget': ?widget,
-      'ratio': rounded,
-      'required': required,
-      'foreground': formatColor(fore),
-      'background': formatColor(back),
-      'confidence': share / others >= 0.6 ? 'high' : 'low',
-    },
+    ratio: ratio,
+    required: required,
+    foreground: fore,
+    background: back,
+    highConfidence: share / others >= 0.6,
   );
 }
 

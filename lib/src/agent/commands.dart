@@ -1,15 +1,24 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 import '../capture/context_collector.dart';
+import '../capture/screenshot.dart';
 import '../core/pinpoint_controller.dart';
 import '../detect/detector.dart';
+import '../env/environment_controller.dart';
 import '../model/annotation.dart';
 import '../search/pick_result.dart';
 import '../search/render_search.dart';
 import '../search/source_index.dart';
 import '../search/source_resolver.dart';
 import 'agent_control.dart';
+import 'checks.dart';
 
 /// A command failed for a reason the agent should read, for example
 /// `stale handle h3`.
@@ -184,6 +193,7 @@ class AgentCommands {
     final limits = OutputLimits.from(args);
     try {
       final Object result = switch (tool) {
+        'verify_note' => await verifyNote(args, cancel),
         'get_screen' => getScreen(limits),
         'find_widgets' => findWidgets(args, limits),
         'inspect' => inspect(args),
@@ -193,6 +203,311 @@ class AgentCommands {
       return AgentControl.ok(result);
     } on AgentError catch (failure) {
       return AgentControl.error(failure.message);
+    }
+  }
+
+  /// How long a command waits for the app to settle after a change.
+  static const Duration settleTimeout = Duration(seconds: 3);
+
+  /// Runs a note's checks (plan Milestone 12, step 7): applies the note's
+  /// environment, goes to its route when its widget is not on screen,
+  /// waits for idle, finds the widget by its anchor, runs each check and
+  /// takes an "after" screenshot. Then it puts the environment, the route
+  /// and every scroll position back, whatever happened.
+  Future<Map<String, Object?>> verifyNote(
+    Map<String, Object?> args,
+    AgentCancel cancel,
+  ) async {
+    final note = args['note'];
+    if (note is! Map<String, Object?>) {
+      throw const AgentError('note is required');
+    }
+    final anchorJson = note['anchor'];
+    final anchor = anchorJson is Map<String, Object?>
+        ? NoteAnchor.fromJson(anchorJson)
+        : null;
+    var checks = [
+      for (final check
+          in note['checks'] is List<Object?>
+              ? note['checks']! as List<Object?>
+              : const <Object?>[])
+        if (check is Map<String, Object?> && check['type'] is String) check,
+    ];
+    final defaulted = checks.isEmpty;
+    if (defaulted) {
+      checks = const [
+        {'type': 'visible'},
+      ];
+    }
+    final Environment environment;
+    try {
+      final json = note['environment'];
+      environment = Environment.fromJson(
+        json is Map<String, Object?> ? json : const {},
+      );
+    } on FormatException catch (error) {
+      throw AgentError("the note's environment: ${error.message}");
+    }
+    final page = note['page'];
+    final route =
+        anchor?.route ??
+        (page is Map<String, Object?> && page['route'] is String
+            ? page['route']! as String
+            : null);
+
+    await prepareToDrive();
+    final before = controller.environment.value;
+    final scroll = scrollSnapshot();
+    var pushed = false;
+    try {
+      // The note is checked as it was filed: under its environment.
+      controller.environment.value = environment;
+      await waitIdle(settleTimeout, cancel);
+      // Watch out for: after a hot reload the lines have moved. The anchor
+      // goes through the nearest-line matching of SourceIndex.resolve,
+      // never through its stored line alone.
+      Element? target = _resolveAnchor(anchor);
+      if (target == null && route != null && route != currentRoute()) {
+        pushed = await pushRoute(route);
+        await waitIdle(settleTimeout, cancel);
+        target = _resolveAnchor(anchor);
+      }
+      if (target != null) {
+        await ensureVisible(target);
+        await waitIdle(settleTimeout, cancel);
+      }
+      cancel.check();
+      final root = appRoot;
+      final runner = CheckRunner(
+        appRoot: root,
+        content: contentRoot,
+        resolver: resolver(),
+        devicePixelRatio: devicePixelRatio,
+      );
+      final results = await runner.run(target, checks);
+      cancel.check();
+      final png = await capturePng(
+        target == null ? null : renderObjectOf(target),
+      );
+      return {
+        'id': note['id'],
+        'passed': results.every((r) => r.passed),
+        'found': target == null ? null : sourceOf(target),
+        'checks': [for (final r in results) r.toJson()],
+        if (defaulted) 'defaulted': 'the note has no checks; checked visible',
+        'environment': environment.toJson(),
+        'png': ?png,
+      };
+    } finally {
+      // Restored on every path, a failure or Esc included.
+      if (pushed) await popRoute();
+      controller.environment.value = before;
+      await _frame();
+      restoreScroll(scroll);
+      await waitIdle(settleTimeout, AgentCancel());
+    }
+  }
+
+  Element? _resolveAnchor(NoteAnchor? anchor) {
+    if (anchor == null || !anchor.resolvable) return null;
+    return sourceIndex().resolve(anchor, root: contentRoot);
+  }
+
+  /// `file:line` of [element]'s constructor call, or null.
+  String? sourceOf(Element element) {
+    final location = resolver().locationOf(element);
+    if (location == null) return null;
+    return '${resolver().paths.relativePath(location.uri)}:${location.line}';
+  }
+
+  /// The device pixel ratio, read from Pinpoint's own context.
+  double get devicePixelRatio =>
+      MediaQuery.maybeDevicePixelRatioOf(pageContext()) ?? 1;
+
+  /// Gets the app ready for a driving command. Picking mode's pointer trap
+  /// would swallow synthetic events (watch out for), so picking stops
+  /// first. While the user writes a note, the agent waits its turn.
+  Future<void> prepareToDrive() async {
+    switch (controller.mode) {
+      case PinPointMode.idle:
+        return;
+      case PinPointMode.picking:
+        controller.stop();
+        // The trap goes in the frame the stop scheduled.
+        await _frame();
+      case PinPointMode.commenting:
+      case PinPointMode.sending:
+        throw const AgentError(
+          'the user is writing a note in Pinpoint; try again when they are '
+          'done',
+        );
+    }
+  }
+
+  /// Returns when no frame is scheduled and no animation runs, twice in a
+  /// row, or false at [timeout]. A frame the app draws anyway is waited
+  /// for; none is forced while idle (engineering rule 2), and a looping
+  /// spinner ends at the timeout instead of hanging.
+  Future<bool> waitIdle(Duration timeout, AgentCancel cancel) async {
+    final expired = Completer<void>();
+    final timer = Timer(timeout, expired.complete);
+    try {
+      final scheduler = SchedulerBinding.instance;
+      var quiet = 0;
+      while (!expired.isCompleted) {
+        cancel.check();
+        if (scheduler.hasScheduledFrame ||
+            scheduler.schedulerPhase != SchedulerPhase.idle ||
+            scheduler.transientCallbackCount > 0) {
+          quiet = 0;
+          await Future.any([scheduler.endOfFrame, expired.future]);
+          continue;
+        }
+        if (++quiet >= 2) return true;
+        await Future.any([
+          Future<void>.delayed(const Duration(milliseconds: 16)),
+          expired.future,
+        ]);
+      }
+      return false;
+    } finally {
+      timer.cancel();
+    }
+  }
+
+  /// Waits for the frame a change scheduled; returns at once when none is.
+  static Future<void> _frame() async {
+    final scheduler = SchedulerBinding.instance;
+    if (scheduler.hasScheduledFrame ||
+        scheduler.schedulerPhase != SchedulerPhase.idle) {
+      await scheduler.endOfFrame;
+    }
+  }
+
+  /// Pushes [path] as if the platform asked, through the navigation
+  /// channel: `WidgetsBinding.handlePushRoute` is protected and
+  /// visible-for-testing (docs/api-notes.md, item 12). Named-route apps and
+  /// Router apps both listen to it. Returns whether someone handled it.
+  static Future<bool> pushRoute(String path) => _navigation(
+    MethodCall('pushRouteInformation', <String, Object?>{
+      'location': path,
+      'state': null,
+    }),
+  );
+
+  /// Pops the current route as the back button does.
+  static Future<bool> popRoute() => _navigation(const MethodCall('popRoute'));
+
+  static Future<bool> _navigation(MethodCall call) {
+    const codec = JSONMethodCodec();
+    final done = Completer<bool>();
+    // channelBuffers.push, not BinaryMessenger.handlePlatformMessage,
+    // which is deprecated (docs/api-notes.md, item 12).
+    ServicesBinding.instance.channelBuffers.push(
+      SystemChannels.navigation.name,
+      codec.encodeMethodCall(call),
+      (reply) {
+        if (done.isCompleted) return;
+        try {
+          done.complete(reply != null && codec.decodeEnvelope(reply) == true);
+        } catch (_) {
+          done.complete(false);
+        }
+      },
+    );
+    return done.future;
+  }
+
+  /// Every scroll position in the app and its offset, to put back after a
+  /// command that moves things (verify, stress).
+  List<(ScrollableState, double)> scrollSnapshot() {
+    final found = <(ScrollableState, double)>[];
+    var visited = 0;
+    void visit(Element element) {
+      if (++visited > 20000) return;
+      if (element is StatefulElement && element.state is ScrollableState) {
+        final state = element.state as ScrollableState;
+        try {
+          if (state.position.hasPixels) {
+            found.add((state, state.position.pixels));
+          }
+        } catch (_) {
+          // No position yet.
+        }
+      }
+      element.visitChildren(visit);
+    }
+
+    try {
+      visit(contentRoot);
+    } catch (_) {
+      // The app is not on screen: nothing to put back.
+    }
+    return found;
+  }
+
+  /// Puts every scroll position of [snapshot] that is still there back.
+  static void restoreScroll(List<(ScrollableState, double)> snapshot) {
+    for (final (state, pixels) in snapshot) {
+      if (!state.mounted) continue;
+      try {
+        final position = state.position;
+        if (!position.hasContentDimensions) continue;
+        position.jumpTo(
+          pixels.clamp(position.minScrollExtent, position.maxScrollExtent),
+        );
+      } catch (_) {
+        // Detached meanwhile.
+      }
+    }
+  }
+
+  /// Scrolls every scrollable above [element] so it shows. Uses
+  /// `findAncestorStateOfType`, which subscribes nothing (engineering rule
+  /// 3); `Scrollable.ensureVisible` would depend on the scope.
+  Future<void> ensureVisible(Element element) async {
+    final renderObject = renderObjectOf(element);
+    if (renderObject == null) return;
+    if (RenderSearch.visibleRectOf(renderObject) case final shown?
+        when shown.width > 0 && shown.height > 0) {
+      final rect = RenderSearch.globalRectOf(renderObject);
+      // Already wholly on screen.
+      if (rect != null &&
+          shown.width >= rect.width - 0.5 &&
+          shown.height >= rect.height - 0.5) {
+        return;
+      }
+    }
+    var context = element;
+    for (var steps = 0; steps < 8; steps++) {
+      final scrollable = context.findAncestorStateOfType<ScrollableState>();
+      if (scrollable == null) break;
+      if (!renderObject.attached) break;
+      await scrollable.position.ensureVisible(renderObject, alignment: 0.5);
+      context = scrollable.context as Element;
+    }
+  }
+
+  /// A PNG (base64) of [target] outlined, or of the whole app with no
+  /// target, at most [maxWidth] wide. Null when the capture fails.
+  Future<String?> capturePng(RenderObject? target, {int maxWidth = 800}) async {
+    try {
+      final boundary = appRoot;
+      if (boundary is! RenderRepaintBoundary) return null;
+      final rect = target == null
+          ? RenderSearch.globalRectOf(boundary)
+          : RenderSearch.globalRectOf(target);
+      if (rect == null) return null;
+      final shot = await captureScreenshot(
+        boundary,
+        rect,
+        pixelRatio: devicePixelRatio,
+        maxWidth: maxWidth,
+        outline: target != null,
+      ).timeout(const Duration(seconds: 5));
+      return shot == null ? null : base64Encode(shot.png);
+    } catch (_) {
+      return null;
     }
   }
 

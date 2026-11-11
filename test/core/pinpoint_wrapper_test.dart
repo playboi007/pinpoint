@@ -556,9 +556,10 @@ void main() {
     await tester.pump();
     final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
     addTearDown(mouse.removePointer);
-    // Away from the panel, which opens next to the selection.
-    await mouse.addPointer(location: const Offset(700, 500));
-    await mouse.moveTo(const Offset(720, 520));
+    // Away from the panel, which opens next to the selection (right of
+    // x 440, down to about y 540 with the checks row).
+    await mouse.addPointer(location: const Offset(280, 500));
+    await mouse.moveTo(const Offset(300, 520));
     await tester.pump();
     expect(controller.selection.value, isNotNull);
     expect(controller.hovered.value, isNotNull);

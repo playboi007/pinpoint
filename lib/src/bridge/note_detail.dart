@@ -140,6 +140,7 @@ String _standard(Map<String, Object?> note) {
   if (whatIfLine(note['environment']) case final whatIf?) lines.add(whatIf);
   lines.addAll(findingLines(note));
   lines.addAll(tweakLines(note));
+  lines.addAll(verificationLines(note));
   if (_string(shot['file']) case final file?) {
     lines.add(
       'Screenshot: $file (attached, at most 800 px wide)'
