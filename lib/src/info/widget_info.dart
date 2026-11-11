@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart';
 
 import '../search/render_search.dart';
+import 'extractors/align_extractor.dart';
 import 'extractors/constrained_box_extractor.dart';
 import 'extractors/decoration_extractor.dart';
 import 'extractors/flex_extractor.dart';
@@ -194,6 +195,7 @@ class WidgetInfo {
     decorationSection,
     coloredBoxSection,
     flexSection,
+    alignSection,
   ];
 
   /// Values a parent keeps on its child, read from the child.
