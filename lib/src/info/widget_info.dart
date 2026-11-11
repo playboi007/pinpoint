@@ -12,6 +12,7 @@ import 'extractors/opacity_extractor.dart';
 import 'extractors/padding_extractor.dart';
 import 'extractors/paragraph_extractor.dart';
 import 'extractors/stack_extractor.dart';
+import 'extractors/wrap_extractor.dart';
 
 /// Reads one section of [WidgetInfo] from a render object, or returns null
 /// when the render object is not of its type.
@@ -204,6 +205,7 @@ class WidgetInfo {
     opacitySection,
     clipSection,
     aspectRatioSection,
+    wrapSection,
   ];
 
   /// Values a parent keeps on its child, read from the child.
