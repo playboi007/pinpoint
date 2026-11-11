@@ -5,6 +5,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 
+import '../core/app_semantics.dart';
 import '../detect/a11y_audit.dart';
 import '../detect/detector.dart';
 import '../detect/overflow_detector.dart';
@@ -431,6 +432,8 @@ class CheckRunner {
     // Semantics are on for this check only: on web they cost a parallel
     // DOM tree (Milestone 10). The handle is disposed on every path.
     final handle = SemanticsBinding.instance.ensureSemantics();
+    // The wrapper hides the app's semantics while a mode is active.
+    final done = AppSemantics.read();
     try {
       // The tree is built in the next frame. A check runs on demand, so
       // forcing that one frame is fine (engineering rule 2).
@@ -468,6 +471,7 @@ class CheckRunner {
         measured: _num(rounded),
       );
     } finally {
+      done();
       handle.dispose();
     }
   }

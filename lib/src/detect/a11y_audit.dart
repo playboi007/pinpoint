@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 
+import '../core/app_semantics.dart';
 import '../info/widget_info.dart' show formatColor;
 import '../search/render_search.dart';
 import 'detector.dart';
@@ -27,6 +28,8 @@ Future<List<Finding>> runAccessibilityAudit(
   bool contrast = true,
 }) async {
   final handle = SemanticsBinding.instance.ensureSemantics();
+  // The wrapper hides the app's semantics while a mode is active.
+  final done = AppSemantics.read();
   try {
     // The semantics tree is built in the next frame. The audit is on
     // demand, so forcing that one frame is fine (engineering rule 2).
@@ -44,6 +47,7 @@ Future<List<Finding>> runAccessibilityAudit(
     }
     return dedupeFindings(findings);
   } finally {
+    done();
     handle.dispose();
   }
 }

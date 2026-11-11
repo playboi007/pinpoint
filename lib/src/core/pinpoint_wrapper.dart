@@ -9,6 +9,7 @@ import '../env/environment_controller.dart';
 import '../env/environment_host.dart';
 import '../overlay/inspector_overlay.dart';
 import '../search/source_resolver.dart';
+import 'app_semantics.dart';
 import 'hook_registry.dart';
 import 'keymap.dart';
 import 'pinpoint_config.dart';
@@ -284,8 +285,22 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
                 // muted ticker keeps its start time, so on resume an
                 // animation jumps ahead by the frozen time: a spinner looks
                 // continuous, a one-shot transition may finish at once.
-                builder: (context, child) =>
-                    TickerMode(enabled: !_controller.frozen, child: child!),
+                builder: (context, child) => TickerMode(
+                  enabled: !_controller.frozen,
+                  // Always present too; only `excluding` changes. While a
+                  // mode is active the app has no semantics, so a quick
+                  // click on web is a pointer event the trap takes, not a
+                  // semantics tap sent past it (see AppSemantics). Readers
+                  // of the app's semantics show them again for their read.
+                  child: ValueListenableBuilder<int>(
+                    valueListenable: AppSemantics.readers,
+                    builder: (context, readers, child) => ExcludeSemantics(
+                      excluding: _controller.isActive && readers == 0,
+                      child: child!,
+                    ),
+                    child: child,
+                  ),
+                ),
                 // Innermost, so Pinpoint's wrappers stay out of the chain.
                 child: KeyedSubtree(key: _contentKey, child: app),
               ),
