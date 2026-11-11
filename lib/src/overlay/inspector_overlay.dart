@@ -173,6 +173,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
       _pin(note, pick);
       unawaited(_sync?.save(note));
     },
+    stateAdapters: () => widget.config.stateAdapters,
   );
 
   /// Takes the agent's commands from the bridge while control is on; null

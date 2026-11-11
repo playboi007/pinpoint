@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:developer' as developer;
 
 import 'package:http/http.dart' as http;
 
@@ -135,5 +137,76 @@ class LongPollTransport implements CommandTransport {
       if (!done.isCompleted) done.complete();
     });
     return done.future;
+  }
+}
+
+/// Whether `ext.pinpoint.command` is registered in this isolate.
+bool get debugRegisteredPinpointExtension =>
+    ServiceExtensionTransport._registered;
+
+/// A spike (plan Milestone 12, step 2): commands as a VM service extension,
+/// `ext.pinpoint.command`, which the bridge would call over the debug
+/// connection. No polling and no CORS, but it needs the debug service
+/// address, and on web it is registered only while a debugger is attached
+/// (`flutter run -d chrome`; docs/api-notes.md, item 14). So the long poll
+/// stays the default, and the bridge does not call this yet.
+///
+/// Parameters are strings: `tool`, and `args` as JSON. The answer is the
+/// command's answer as JSON.
+class ServiceExtensionTransport implements CommandTransport {
+  /// The extension's name.
+  static const String method = 'ext.pinpoint.command';
+
+  /// `registerExtension` has no unregister, and throws on a second
+  /// registration: register once per isolate and route to the current
+  /// handler.
+  static bool _registered = false;
+  static CommandHandler? _handler;
+
+  bool _running = false;
+
+  @override
+  bool get running => _running;
+
+  @override
+  void start(CommandHandler handler) {
+    _running = true;
+    _handler = handler;
+    if (_registered) return;
+    _registered = true;
+    developer.registerExtension(method, (name, params) async {
+      return developer.ServiceExtensionResponse.result(
+        await handle(name, params),
+      );
+    });
+  }
+
+  @override
+  void stop() {
+    _running = false;
+    _handler = null;
+  }
+
+  /// Answers one call of the extension, as JSON.
+  static Future<String> handle(String name, Map<String, String> params) async {
+    final handler = _handler;
+    if (handler == null) {
+      return jsonEncode({'ok': false, 'error': 'agent control is disabled'});
+    }
+    final tool = params['tool'];
+    if (tool == null || tool.isEmpty) {
+      return jsonEncode({'ok': false, 'error': 'tool is required'});
+    }
+    Map<String, Object?> args = const {};
+    final raw = params['args'];
+    if (raw != null && raw.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map<String, Object?>) args = decoded;
+      } on FormatException {
+        return jsonEncode({'ok': false, 'error': 'args is not JSON'});
+      }
+    }
+    return jsonEncode(await handler(tool, args));
   }
 }

@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart' show ThemeData;
 
+import '../agent/state_dump.dart';
 import '../sink/pinpoint_sink.dart';
 import 'keymap.dart';
 
@@ -20,7 +21,12 @@ class PinPointConfig {
     this.maxScreenshotWidth = 1600,
     this.themeVariants = const <String, ThemeData>{},
     this.allowAgentControl = true,
+    this.stateAdapters = const <StateAdapter>[],
   }) : assert(maxScreenshotWidth > 0);
+
+  /// Adds the app's own state (Bloc, Riverpod, Provider) to the agent's
+  /// `get_state` dump.
+  final List<StateAdapter> stateAdapters;
 
   /// Whether the overlay offers "Allow agent control", which lets a coding
   /// agent operate the app through the bridge (tap, type, navigate, verify

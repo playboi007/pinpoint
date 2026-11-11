@@ -3,6 +3,7 @@
 /// Wrap the app in [PinPointWrapper] from `MaterialApp.builder`.
 library;
 
+export 'src/agent/state_dump.dart' show StateAdapter;
 export 'src/core/keymap.dart' show PinPointShortcut;
 export 'src/core/pinpoint_config.dart';
 export 'src/core/pinpoint_controller.dart'

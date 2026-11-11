@@ -24,6 +24,7 @@ import '../search/source_index.dart';
 import '../search/source_resolver.dart';
 import 'agent_control.dart';
 import 'checks.dart';
+import 'state_dump.dart';
 import 'stress_matrix.dart';
 import 'synthetic_input.dart';
 
@@ -170,7 +171,11 @@ class AgentCommands {
     required this.resolver,
     required this.pageContext,
     this.onDraft,
+    this.stateAdapters,
   });
+
+  /// The app's state adapters for `get_state`.
+  final List<StateAdapter> Function()? stateAdapters;
 
   /// Keeps a draft note the stress matrix filed: pins it and stores it on
   /// the bridge. Null: the note only goes into the controller's book.
@@ -219,6 +224,12 @@ class AgentCommands {
         'scan' => await scan(args, limits),
         'screenshot' => await screenshot(args),
         'stress_matrix' => await stressMatrix(args, limits, cancel),
+        'get_state' => stateDump(
+          element(args),
+          adapters: stateAdapters?.call() ?? const <StateAdapter>[],
+          items: limits.items,
+          chars: limits.chars,
+        ),
         'get_screen' => getScreen(limits),
         'find_widgets' => findWidgets(args, limits),
         'inspect' => inspect(args),
@@ -859,8 +870,7 @@ class AgentCommands {
       where: text == null && key == null
           ? null
           : (element) {
-              if (key != null &&
-                  !(element.widget.key?.toString().contains(key) ?? false)) {
+              if (key != null && !keyMatches(element.widget.key, key)) {
                 return false;
               }
               if (text != null) {
@@ -880,6 +890,14 @@ class AgentCommands {
     }
 
     return [...matches.where(visible), ...matches.where((e) => !visible(e))];
+  }
+
+  /// Whether [widgetKey] is the key the agent named: its text as given
+  /// (`[<'save'>]`) or the value inside it (`save`).
+  static bool keyMatches(Key? widgetKey, String key) {
+    if (widgetKey == null) return false;
+    final text = widgetKey.toString();
+    return text == key || text == "[<'$key'>]" || text == '[<$key>]';
   }
 
   /// `wait_idle`: whether the app settled within `timeout_ms` (default
