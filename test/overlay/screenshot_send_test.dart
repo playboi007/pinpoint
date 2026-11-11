@@ -209,6 +209,9 @@ void main() {
     expect(sink.notes, hasLength(1), reason: 'captured, the sink waits');
     expect(controller.mode, PinPointMode.sending);
     expect(screen.contains(tester.getCenter(box)), isTrue);
+    // The loading toast shows while the sink waits.
+    expect(find.byKey(ToastLayer.sendingKey), findsOneWidget);
+    expect(find.textContaining('Sending note 1'), findsOneWidget);
 
     sink.gate!.complete();
     await tester.pump();

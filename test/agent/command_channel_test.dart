@@ -155,7 +155,8 @@ void main() {
   testWidgets('the switch turns control on, the chip shows it in idle, and '
       'Esc turns it off', (tester) async {
     await pumpScreen(tester, const _Screen());
-    expect(find.byKey(AgentLayer.toggleKey), findsNothing);
+    // The rail's switch is there in idle, off.
+    expect(find.byKey(AgentLayer.toggleKey), findsOneWidget);
     controller.startPicking();
     await tester.pump();
     await tester.tap(find.byKey(AgentLayer.toggleKey));
@@ -166,7 +167,7 @@ void main() {
     await tester.pump();
     // Visibly on when it is on, idle included.
     expect(find.byKey(AgentLayer.bannerKey), findsOneWidget);
-    expect(find.text('Agent control on · Esc stops'), findsOneWidget);
+    expect(find.text('AGENT CONTROL ON · ESC STOPS'), findsOneWidget);
     expect(find.byKey(AgentLayer.toggleKey), findsOneWidget);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);

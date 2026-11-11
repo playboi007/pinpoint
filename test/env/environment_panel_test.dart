@@ -64,12 +64,19 @@ void main() {
   Environment env() => controller.environment.value;
 
   group('the bar', () {
-    testWidgets('is hidden while idle with nothing overridden', (tester) async {
+    testWidgets('is hidden with nothing overridden, idle or not', (
+      tester,
+    ) async {
       await pumpHost(tester);
       expect(find.byKey(EnvironmentBar.barKey), findsNothing);
       controller.startPicking();
       await tester.pump();
-      expect(find.byKey(EnvironmentBar.barKey), findsOneWidget);
+      expect(find.byKey(EnvironmentBar.barKey), findsNothing);
+      expect(
+        find.byKey(EnvironmentBar.toggleKey),
+        findsOneWidget,
+        reason: 'the What-if item of the rail',
+      );
     });
 
     testWidgets('stays while idle with an override, names it, and resets in '
@@ -82,7 +89,8 @@ void main() {
       await tester.pump();
       expect(controller.isActive, isFalse);
       expect(find.byKey(EnvironmentBar.barKey), findsOneWidget);
-      expect(find.textContaining('360 × 800 · text 1.5×'), findsOneWidget);
+      expect(find.text('360 × 800'), findsOneWidget);
+      expect(find.text('text 1.5×'), findsOneWidget);
 
       await tester.tap(find.byKey(EnvironmentBar.resetKey));
       await tester.pump();
@@ -270,10 +278,10 @@ void main() {
         theme: ThemeData(useMaterial3: false, primarySwatch: Colors.green),
       );
       await openPanel(tester);
-      final chip = tester.widget<ChoiceChip>(
+      final chip = tester.widget<SeedSwatchChip>(
         find.byKey(EnvironmentPanel.option('seed', formatSeed(seedColors[0]))),
       );
-      expect(chip.onSelected, isNull, reason: 'disabled in Material 2');
+      expect(chip.onTap, isNull, reason: 'disabled in Material 2');
       expect(find.textContaining('Material 3 only'), findsOneWidget);
     });
 

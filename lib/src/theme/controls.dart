@@ -734,13 +734,13 @@ class DraftChip extends StatelessWidget {
         return Container(
           height: PinPointSizes.controlHeight,
           padding: padding,
-          alignment: Alignment.center,
           decoration: BoxDecoration(
             color: fill,
             borderRadius: BorderRadius.circular(_radius),
             border: Border.all(color: border, width: width),
           ),
-          child: content,
+          // The chip takes its content's width, as the disabled one does.
+          child: Center(widthFactor: 1, child: content),
         );
       },
     );
@@ -819,10 +819,12 @@ class _DraftCheckboxState extends State<DraftCheckbox> {
                       : null,
                 ),
                 const SizedBox(width: 6),
-                Text(
-                  widget.label,
-                  style: tokens.body.copyWith(
-                    color: enabled ? tokens.ink : tokens.faint,
+                Flexible(
+                  child: Text(
+                    widget.label,
+                    style: tokens.body.copyWith(
+                      color: enabled ? tokens.ink : tokens.faint,
+                    ),
                   ),
                 ),
               ],
