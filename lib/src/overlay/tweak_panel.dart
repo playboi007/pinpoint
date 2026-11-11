@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -45,6 +46,11 @@ class TweakTab extends StatefulWidget {
   /// The key of the step button for [step] (1, 4 or 8).
   static Key stepKey(int step) => ValueKey<String>('pinpoint.tweak.step.$step');
 
+  /// The key of the button that resets [property] in [section].
+  static Key resetKey(String section, String property) =>
+      ValueKey<String>('pinpoint.tweak.$section.$property.reset');
+
+  static const Key resetAllKey = ValueKey<String>('pinpoint.tweak.resetAll');
   static const Key emptyKey = ValueKey<String>('pinpoint.tweak.empty');
   static const Key chainKey = ValueKey<String>('pinpoint.tweak.chain');
 
@@ -110,6 +116,16 @@ class _TweakTabState extends State<TweakTab> {
             ),
           ),
         for (final target in targets) _section(theme, target),
+        if (!widget.session.isEmpty)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              key: TweakTab.resetAllKey,
+              onPressed: widget.session.resetAll,
+              icon: const Icon(Icons.restart_alt, size: 16),
+              label: Text('Reset all ${widget.session.length}'),
+            ),
+          ),
         Padding(
           padding: const EdgeInsets.only(top: 8),
           child: Text(
@@ -190,7 +206,27 @@ class _TweakTabState extends State<TweakTab> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           editor,
-          if (tweak != null) Text('was ${tweak.fromLabel}', style: muted),
+          if (tweak != null)
+            Row(
+              children: [
+                Expanded(child: Text('was ${tweak.fromLabel}', style: muted)),
+                TextButton(
+                  key: TweakTab.resetKey(target.section.title, property.name),
+                  style: TextButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  onPressed: () => widget.session.reset(tweak),
+                  child: const Text('Reset'),
+                ),
+              ],
+            ),
+          // Watch out (plan): a widget that builds every frame resets the
+          // value every frame; the session stops fighting it.
+          if (tweak != null && tweak.animating)
+            Text(
+              'This widget is animating; tweak cannot hold.',
+              style: muted?.copyWith(color: theme.colorScheme.error),
+            ),
           if (note != null) Text(note, style: muted),
         ],
       ),
@@ -850,4 +886,125 @@ class _BorderField extends StatelessWidget {
       ],
     );
   }
+}
+
+/// "N tweaks active", top center, in every mode while any edit is active,
+/// so a changed screen is never taken for the real one. Its button resets
+/// them all.
+class TweakChip extends StatelessWidget {
+  const TweakChip({super.key, required this.session});
+
+  static const Key chipKey = ValueKey<String>('pinpoint.tweak.chip');
+  static const Key resetKey = ValueKey<String>('pinpoint.tweak.chip.reset');
+
+  final TweakSession session;
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: session,
+    builder: (context, _) {
+      final n = session.length;
+      if (n == 0) return const SizedBox.shrink();
+      final colors = Theme.of(context).colorScheme;
+      final animating = session.tweaks.any((t) => t.animating);
+      return SafeArea(
+        child: Align(
+          alignment: Alignment.topCenter,
+          child: Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Material(
+              key: chipKey,
+              elevation: 3,
+              color: colors.secondaryContainer,
+              borderRadius: BorderRadius.circular(16),
+              child: Padding(
+                padding: const EdgeInsets.only(left: 12),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      animating ? Icons.warning_amber : Icons.tune,
+                      size: 16,
+                      color: colors.onSecondaryContainer,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      n == 1 ? '1 tweak active' : '$n tweaks active',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: colors.onSecondaryContainer,
+                      ),
+                    ),
+                    IconButton(
+                      key: resetKey,
+                      tooltip: 'Reset every tweak',
+                      visualDensity: VisualDensity.compact,
+                      onPressed: session.resetAll,
+                      icon: const Icon(Icons.close, size: 16),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    },
+  );
+}
+
+/// A dotted outline around every edited render object, in every mode.
+///
+/// Repaints when [outlines] changes; the session reads them after each
+/// frame the app draws, so it adds no frames of its own.
+class TweakOutlinePainter extends CustomPainter {
+  TweakOutlinePainter({required this.outlines, required this.origin})
+    : super(repaint: outlines);
+
+  final ValueListenable<List<Rect>> outlines;
+
+  /// The painter's own top-left in global logical pixels.
+  final Offset Function() origin;
+
+  static const Color color = Color(0xFF6A1B9A);
+  static const double dash = 3;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rects = outlines.value;
+    if (rects.isEmpty) return;
+    final shift = -origin();
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5
+      ..color = color;
+    for (final rect in rects) {
+      canvas.drawPath(_dotted(rect.shift(shift)), paint);
+    }
+  }
+
+  static Path _dotted(Rect r) {
+    final path = Path();
+    void line(Offset a, Offset b) {
+      final length = (b - a).distance;
+      if (length == 0) return;
+      final dir = (b - a) / length;
+      for (var d = 0.0; d < length; d += 2 * dash) {
+        final end = d + dash > length ? length : d + dash;
+        path
+          ..moveTo(a.dx + dir.dx * d, a.dy + dir.dy * d)
+          ..lineTo(a.dx + dir.dx * end, a.dy + dir.dy * end);
+      }
+    }
+
+    line(r.topLeft, r.topRight);
+    line(r.topRight, r.bottomRight);
+    line(r.bottomRight, r.bottomLeft);
+    line(r.bottomLeft, r.topLeft);
+    return path;
+  }
+
+  @override
+  bool shouldRepaint(TweakOutlinePainter oldDelegate) =>
+      oldDelegate.outlines != outlines;
 }

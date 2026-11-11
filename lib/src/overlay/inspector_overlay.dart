@@ -38,6 +38,7 @@ import 'pin_tracker.dart';
 import 'ruler_painter.dart';
 import 'toast_layer.dart';
 import 'toolbar.dart';
+import 'tweak_panel.dart';
 
 /// Pinpoint's own UI layer, painted above the app.
 ///
@@ -64,6 +65,9 @@ class InspectorOverlay extends StatefulWidget {
 
   /// Key of the `CustomPaint` that outlines the hovered finding.
   static const Key findingKey = ValueKey<String>('pinpoint.finding');
+
+  /// Key of the `CustomPaint` that outlines tweaked widgets.
+  static const Key tweakOutlineKey = ValueKey<String>('pinpoint.tweakOutline');
 
   final PinPointController controller;
 
@@ -873,6 +877,13 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
                               ),
                             ),
                             CustomPaint(
+                              key: InspectorOverlay.tweakOutlineKey,
+                              painter: TweakOutlinePainter(
+                                outlines: widget.controller.tweaks.outlines,
+                                origin: () => _originOf(paintContext),
+                              ),
+                            ),
+                            CustomPaint(
                               key: InspectorOverlay.findingKey,
                               painter: FindingPainter(
                                 findings: widget.controller.findings,
@@ -917,6 +928,8 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
                       controller: widget.controller,
                       panelOpen: _findingsPanel,
                     ),
+                    // In idle too while any tweak is active.
+                    TweakChip(session: widget.controller.tweaks),
                     // In idle too while an override is active.
                     EnvironmentBar(
                       controller: widget.controller,

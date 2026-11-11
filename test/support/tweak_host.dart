@@ -20,6 +20,9 @@ Future<void> selectForTweak(
   bool openTab = true,
 }) async {
   final element = tester.element(finder);
+  // The panel of an earlier selection can sit over the next target (a
+  // tweak pins it); without a selection there is no panel.
+  controller.clearSelection();
   if (!controller.isActive) controller.startPicking();
   await tester.pump();
   await tester.tapAt(tester.getCenter(finder));
