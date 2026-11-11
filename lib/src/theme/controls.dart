@@ -364,23 +364,21 @@ class DraftButton extends StatelessWidget {
             return Container(
               height: height,
               padding: padding,
-              alignment: Alignment.center,
               decoration: BoxDecoration(
                 color: active ? tokens.accentInk : tokens.accent,
                 border: Border.all(color: tokens.ink),
               ),
-              child: content,
+              child: Center(widthFactor: 1, child: content),
             );
           case _ButtonLook.outline:
             return Container(
               height: height,
               padding: const EdgeInsets.symmetric(horizontal: 10),
-              alignment: Alignment.center,
               decoration: BoxDecoration(
                 color: active ? tokens.accentBg : null,
                 border: Border.all(color: enabled ? tokens.ink : tokens.field),
               ),
-              child: content,
+              child: Center(widthFactor: 1, child: content),
             );
           case _ButtonLook.link:
             // The underline is a 1 px border under the line box, about 3 px
@@ -388,12 +386,14 @@ class DraftButton extends StatelessWidget {
             return Container(
               height: height,
               padding: const EdgeInsets.symmetric(horizontal: 10),
-              alignment: Alignment.center,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  border: Border(bottom: BorderSide(color: textColor)),
+              child: Center(
+                widthFactor: 1,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    border: Border(bottom: BorderSide(color: textColor)),
+                  ),
+                  child: content,
                 ),
-                child: content,
               ),
             );
         }
