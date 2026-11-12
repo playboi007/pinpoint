@@ -9,6 +9,12 @@ import '../env/environment_controller.dart';
 import '../env/environment_host.dart';
 import '../overlay/inspector_overlay.dart';
 import '../search/source_resolver.dart';
+import '../trace/sources/error_source.dart';
+import '../trace/sources/finding_source.dart';
+import '../trace/sources/key_source.dart';
+import '../trace/sources/pointer_source.dart';
+import '../trace/sources/route_source.dart';
+import '../trace/sources/text_source.dart';
 import '../trace/trace_session.dart';
 import 'app_semantics.dart';
 import 'hook_registry.dart';
@@ -147,13 +153,32 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
     final rebuildHook = _rebuildHook;
     if (hooks == null || rebuildHook == null) return;
     if (!widget.config.trace.enabled) return;
+    final resolver = SourceResolver.forConfig(widget.config);
+    final routes = RouteSource(appKey: _appKey);
     TraceSession(
       owner: this,
       config: widget.config.trace,
       rebuildHook: rebuildHook,
       content: () => _contentKey.currentContext as Element?,
-      resolver: SourceResolver.forConfig(widget.config),
+      resolver: resolver,
       recorder: TraceSession.current?.recorder,
+      builtIn: [
+        PointerSource(
+          appKey: _appKey,
+          contentKey: _contentKey,
+          resolver: resolver,
+          onUp: routes.tapped,
+        ),
+        KeySource(),
+        TextSource(
+          contentKey: _contentKey,
+          resolver: resolver,
+          agentTyping: () => _controller.agent.driving == 'enter_text',
+        ),
+        routes,
+        ErrorSource(),
+        FindingSource(findings: () => _controller.findings, resolver: resolver),
+      ],
     );
   }
 
@@ -223,6 +248,11 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
       editingText: editingText,
       composing: editingText && _controller.draft.composing,
     );
+    // The key source shares this one handler (no second one). Pinpoint's
+    // own keys, and keys typed into its fields, are not recorded.
+    if (TraceSession.ownedBy(this)?.source('key') case final KeySource keys) {
+      keys.record(event, ours: action != null || _focusInPinpoint());
+    }
     if (action == null) return false;
     // Act once per press, except navigation, which a held key repeats.
     // Repeats are claimed either way, below.
