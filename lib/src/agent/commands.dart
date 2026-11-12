@@ -18,10 +18,14 @@ import '../detect/overflow_detector.dart';
 import '../detect/truncation_detector.dart';
 import '../env/environment_controller.dart';
 import '../model/annotation.dart';
+import '../model/tape.dart';
 import '../search/pick_result.dart';
 import '../search/render_search.dart';
 import '../search/source_index.dart';
 import '../search/source_resolver.dart';
+import '../sink/bridge_client.dart';
+import '../sink/http_sink.dart' show HttpSinkException;
+import '../tape/tape_recorder.dart' show TapeSince;
 import '../trace/cause_zone.dart';
 import '../trace/note_trace.dart';
 import '../trace/trace_causes.dart';
@@ -188,7 +192,11 @@ class AgentCommands {
     required this.pageContext,
     this.onDraft,
     this.stateAdapters,
+    this.bridge,
   });
+
+  /// The bridge, for tapes (PLAN-v2 Milestone 15); null without one.
+  final BridgeClient? Function()? bridge;
 
   /// The app's state adapters for `get_state`.
   final List<StateAdapter> Function()? stateAdapters;
@@ -335,6 +343,7 @@ class AgentCommands {
       'watch' => watch(args),
       'unwatch' => unwatch(args),
       'mark' => mark(args),
+      'save_tape' => await saveTape(args),
       'why' => why(args),
       'caused_by' => causedBy(args),
       _ => throw AgentError('unknown tool: $tool'),
@@ -424,6 +433,32 @@ class AgentCommands {
       'watches': [for (final w in session.watchSource.watches) w.id],
       'level3': session.detailStatus(),
     };
+  }
+
+  /// `save_tape`: a tape of the run from `since`, stored on the bridge
+  /// (PLAN-v2 Milestone 15). Answers its summary only: a tool answer never
+  /// carries a body (rule 16).
+  Future<Map<String, Object?>> saveTape(Map<String, Object?> args) async {
+    final session = _trace();
+    final client = bridge?.call();
+    if (client == null) {
+      throw const AgentError('save_tape needs the bridge: no bridge is set');
+    }
+    final name = args['name'];
+    final Tape tape;
+    try {
+      tape = session.saveTape(
+        since: TapeSince.parse(args['since']),
+        name: name is String && name.isNotEmpty ? name : null,
+      );
+    } on FormatException catch (error) {
+      throw AgentError(error.message);
+    }
+    try {
+      return await client.saveTape(tape);
+    } on HttpSinkException catch (error) {
+      throw AgentError('the bridge did not take the tape: ${error.message}');
+    }
   }
 
   /// `why`: walks back from one event to the entry that started it

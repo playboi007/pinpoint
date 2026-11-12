@@ -24,6 +24,13 @@ class FakeBridge {
   final Map<String, int> _changed = {};
   final Set<String> _deleted = {};
 
+  /// Tapes as the app posted them: `{tape, bodies}` by id.
+  final Map<String, Map<String, Object?>> tapes = {};
+
+  /// Events of replay runs, by run id, and their last status.
+  final Map<String, List<Map<String, Object?>>> runEvents = {};
+  final Map<String, Map<String, Object?>> runStatus = {};
+
   int count(String request) => requests.where((r) => r == request).length;
 
   /// What `verify_note` stores: the result, and Pinpoint's message.
@@ -69,6 +76,33 @@ class FakeBridge {
     final id = path.startsWith('/annotations/')
         ? path.substring('/annotations/'.length)
         : null;
+    if (path == '/tapes' && request.method == 'POST') {
+      final body = jsonDecode(request.body) as Map<String, Object?>;
+      final tape = body['tape']! as Map<String, Object?>;
+      tapes[tape['id']! as String] = body;
+      return _json({
+        'id': tape['id'],
+        'kind': tape['kind'],
+        'inputs': (tape['inputs']! as List<Object?>).length,
+        'requests': (tape['net']! as List<Object?>).length,
+      });
+    }
+    if (path.startsWith('/tapes/') && request.method == 'GET') {
+      final tape = tapes[path.substring('/tapes/'.length)];
+      return tape == null ? _json({'error': 'No tape'}, 404) : _json(tape);
+    }
+    final run = RegExp(r'^/runs/([^/]+)/(events|status)$').firstMatch(path);
+    if (run != null && request.method == 'POST') {
+      final body = jsonDecode(request.body) as Map<String, Object?>;
+      if (run[2] == 'events') {
+        (runEvents[run[1]!] ??= []).addAll(
+          (body['events']! as List<Object?>).cast<Map<String, Object?>>(),
+        );
+      } else {
+        runStatus[run[1]!] = body;
+      }
+      return _json({'ok': true});
+    }
     switch ((request.method, path)) {
       case ('GET', '/health'):
         return _json({'ok': true});

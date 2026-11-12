@@ -16,6 +16,8 @@ class TraceConfig {
     this.causes = true,
     this.bodies = true,
     this.redact = TraceRedact.defaults,
+    this.storage = false,
+    this.matchIgnore = const <String>[],
   }) : assert(maxEvents > 0),
        assert(maxBytes > 0);
 
@@ -64,4 +66,16 @@ class TraceConfig {
   /// `*secret*`); keep them with `[...TraceRedact.defaults, 'x-session']`.
   /// `*` matches any text at the start or end of a name.
   final List<String> redact;
+
+  /// Whether a tape keeps a copy of `localStorage` and `sessionStorage`
+  /// at app start, and a replay after a restart puts it back (PLAN-v2
+  /// Milestone 15, step 4). Off by default: storage holds session tokens.
+  /// Without it, a replay starts from the storage the browser has now.
+  final bool storage;
+
+  /// Body fields and URL parameters left out of a request's key when a
+  /// tape is matched (step 8): a time stamp or a random request id that
+  /// differs on every run. Names match exactly, at any depth of a JSON
+  /// body. Parameters named in [redact] are always left out.
+  final List<String> matchIgnore;
 }

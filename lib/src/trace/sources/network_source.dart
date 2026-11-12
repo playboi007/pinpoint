@@ -35,6 +35,7 @@ class NetworkSource extends TraceSource {
     this.bodies = true,
     this.redact = const TraceRedact(),
     this.ignoreOrigins = const <String>{},
+    this.tap,
     NetworkHooks? platformHooks,
   }) : _platform = platformHooks ?? createNetworkHooks();
 
@@ -49,6 +50,9 @@ class NetworkSource extends TraceSource {
 
   /// Origins never recorded: the bridge's (rule 14).
   final Set<String> ignoreOrigins;
+
+  /// Sees each request with its raw URL and body: the tape recorder.
+  NetTap? tap;
 
   NetRecorder? _net;
   bool _installed = false;
@@ -77,6 +81,7 @@ class NetworkSource extends TraceSource {
       bodies: bodies,
       redact: redact,
       ignoreOrigins: ignoreOrigins,
+      tap: tap,
     );
     _installed = _platform.install(net, _hooks);
   }

@@ -9,10 +9,12 @@ import '../detect/detector_hooks.dart';
 import '../detect/findings_controller.dart';
 import '../env/environment_controller.dart';
 import '../env/environment_host.dart';
+import '../model/tape.dart';
 import '../overlay/inspector_overlay.dart';
 import '../search/render_search.dart';
 import '../search/source_resolver.dart';
 import '../sink/bridge_client.dart';
+import '../tape/browser_page.dart';
 import '../trace/redact.dart';
 import '../trace/sources/error_source.dart';
 import '../trace/sources/finding_source.dart';
@@ -169,6 +171,8 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
       content: () => _contentKey.currentContext as Element?,
       resolver: resolver,
       recorder: TraceSession.current?.recorder,
+      tapes: TraceSession.current?.tapes,
+      pageStart: _pageStart,
       adapters: () => widget.config.stateAdapters,
       builtIn: [
         PointerSource(
@@ -196,6 +200,31 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
       ],
     );
     session.thumbnail = _thumbnail;
+  }
+
+  /// The page now, for the start of a tape (PLAN-v2 Milestone 15, step 1).
+  /// Storage is copied only at app start ([t] 0) and only with
+  /// `TraceConfig.storage`: it holds session tokens.
+  TapeStart _pageStart({required int t, required int seq}) {
+    final dispatcher = PlatformDispatcher.instance;
+    final view = dispatcher.implicitView;
+    final ratio = view?.devicePixelRatio;
+    final page = browserPage();
+    final environment = _controller.environment.value;
+    return TapeStart(
+      t: t,
+      seq: seq,
+      wallTime: DateTime.now().toUtc().toIso8601String(),
+      url: page.url,
+      width: view == null ? null : view.physicalSize.width / ratio!,
+      height: view == null ? null : view.physicalSize.height / ratio!,
+      pixelRatio: ratio,
+      locale: dispatcher.locale.toLanguageTag(),
+      environment: environment.isEmpty ? null : environment.toJson(),
+      storage: t == 0 && widget.config.trace.storage && page.available
+          ? page.readStorage()
+          : null,
+    );
   }
 
   /// The bridge's origin: its traffic (pins, drafts, the long poll) is

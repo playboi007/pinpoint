@@ -25,8 +25,14 @@ class NetRecorder {
     NetBodies? store,
     this.redact = const TraceRedact(),
     this.ignoreOrigins = const <String>{},
+    this.tap,
   }) : readBodies = bodies,
        store = store ?? NetBodies();
+
+  /// Sees every recorded request with its raw URL and body, and its answer
+  /// (the tape recorder, Milestone 15). With a tap, kept bodies go to the
+  /// tap and not to [store]: a body is held once.
+  NetTap? tap;
 
   final TraceRecorder recorder;
 
@@ -95,7 +101,13 @@ class NetRecorder {
       },
       cause: cause,
     );
-    return NetCall._(this, event, cause, upper, shownUrl);
+    final call = NetCall._(this, event, cause, upper, shownUrl);
+    try {
+      tap?.requested(call, url, body);
+    } catch (_) {
+      // The recorder only observes (rule 11).
+    }
+    return call;
   }
 
   bool _ignored(String url) {
@@ -105,6 +117,16 @@ class NetRecorder {
       return ignoreOrigins.contains('${uri.scheme}://${uri.authority}');
     } catch (_) {
       return false;
+    }
+  }
+
+  void _tell(void Function(NetTap tap) call) {
+    final tap = this.tap;
+    if (tap == null) return;
+    try {
+      call(tap);
+    } catch (_) {
+      // The recorder only observes (rule 11).
     }
   }
 
@@ -146,6 +168,25 @@ class NetRecorder {
   }
 }
 
+/// Sees each recorded request and its answer, with what events do not
+/// hold: the raw URL and the request body (for the request key), and the
+/// answer's bytes (for a tape).
+abstract interface class NetTap {
+  /// A request started. [url] and [body] are raw: use them for a key
+  /// only, never keep them in clear (rule 16).
+  void requested(NetCall call, String url, List<int>? body);
+
+  /// The answer's headers arrived ([NetCall.response] is set).
+  void answered(NetCall call);
+
+  /// The answer's body ended. [body] is null when it was not read or not
+  /// kept whole ([NetCall.notKept] says why).
+  void ended(NetCall call, Uint8List? body);
+
+  /// The request failed ([NetCall.error] is set).
+  void failed(NetCall call);
+}
+
 /// One request in flight. Its answer events carry the cause of the call,
 /// also when the browser reports the answer outside every zone.
 class NetCall {
@@ -168,6 +209,11 @@ class NetCall {
 
   NetHash? _hash;
   BytesBuilder? _kept;
+  String? _skipped;
+
+  /// Why the body was not read or kept whole, or null when it was: the
+  /// tape cannot serve such an answer.
+  String? get notKept => _skipped;
   int _size = 0;
   bool _ended = false;
 
@@ -200,7 +246,12 @@ class NetCall {
       },
       cause: cause,
     );
-    if (skip != null) return false;
+    _skipped = skip;
+    _net._tell((tap) => tap.answered(this));
+    if (skip != null) {
+      _net._tell((tap) => tap.ended(this, null));
+      return false;
+    }
     _hash = NetHash();
     _kept = BytesBuilder(copy: false);
     return true;
@@ -232,21 +283,31 @@ class NetCall {
     if (notRead != null) {
       event.data['body'] = 'not read: $notRead';
       _kept = null;
+      _skipped = notRead;
+      _net._tell((tap) => tap.ended(this, null));
       return;
     }
     event.data['size'] = _size;
     event.data['hash'] = hash.hex;
-    if (_size > NetRecorder.maxBody) event.data['truncated'] = true;
+    if (_size > NetRecorder.maxBody) {
+      event.data['truncated'] = true;
+      _skipped = 'larger than 256 KB';
+    }
     final kept = _kept?.takeBytes();
-    if (kept != null) _net.store.keep(event.seq, kept);
     _kept = null;
+    if (kept == null) return;
+    if (_net.tap == null) {
+      _net.store.keep(event.seq, kept);
+    } else {
+      _net._tell((tap) => tap.ended(this, _skipped == null ? kept : null));
+    }
   }
 
   /// The request failed before an answer: records `net.error`.
   void fail(String error) {
     if (response != null || _ended) return;
     _ended = true;
-    _net.recorder.add(
+    this.error = _net.recorder.add(
       TraceKind.netError,
       data: {
         'req': request.seq,
@@ -257,7 +318,11 @@ class NetCall {
       },
       cause: cause,
     );
+    _net._tell((tap) => tap.failed(this));
   }
+
+  /// The `net.error` event, once the request failed.
+  TraceEvent? error;
 }
 
 /// FNV-1a, 32 bits, as 8 hex digits: the same on the VM and in a browser,

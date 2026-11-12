@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 
 import '../bridge/bridge_protocol.dart';
 import '../model/annotation.dart';
+import '../model/tape.dart';
 import 'http_sink.dart';
 import 'pinpoint_sink.dart';
 
@@ -194,6 +195,30 @@ class BridgeClient {
   /// fails every command the app has not answered.
   Future<void> setAgentControl({required bool enabled}) =>
       _send('POST', _at('$commandsPath/control'), body: {'enabled': enabled});
+
+  /// Stores [tape] and its bodies on the bridge (PLAN-v2 Milestone 15).
+  /// Returns its summary as the bridge has it.
+  Future<Map<String, Object?>> saveTape(Tape tape) => _send(
+    'POST',
+    _at(tapesPath),
+    body: {'tape': tape.toJson(), 'bodies': tape.bodiesToJson()},
+    timeout: const Duration(seconds: 60),
+  );
+
+  /// The tape [id] with its bodies, or null when the bridge has none.
+  Future<Tape?> loadTape(String id) async {
+    try {
+      final json = await _send(
+        'GET',
+        _at('$tapesPath/$id'),
+        timeout: const Duration(seconds: 60),
+      );
+      return Tape.fromJson(json['tape'], bodies: json['bodies']);
+    } on HttpSinkException catch (error) {
+      if (error.statusCode == 404) return null;
+      rethrow;
+    }
+  }
 
   static List<Annotation> _notes(Object? list) => [
     for (final note in list is List<Object?> ? list : const <Object?>[])

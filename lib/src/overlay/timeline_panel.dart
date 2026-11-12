@@ -31,6 +31,9 @@ class TimelinePanel extends StatefulWidget {
 
   static const Key buttonKey = ValueKey<String>('pinpoint.timeline.button');
   static const Key panelKey = ValueKey<String>('pinpoint.timeline.panel');
+  /// The "Clear recording" button.
+  static const Key clearKey = ValueKey<String>('pinpoint.timeline.clear');
+
   static const Key markKey = ValueKey<String>('pinpoint.timeline.mark');
   static const Key closeKey = ValueKey<String>('pinpoint.timeline.close');
 
@@ -196,6 +199,14 @@ class _TimelinePanelState extends State<TimelinePanel> {
               ),
             ),
           const Spacer(),
+          // For the moment the user typed something they do not want kept:
+          // the record and the tape stores go at once (PLAN-v2 Milestone
+          // 15, step 6).
+          DraftButton.link(
+            key: TimelinePanel.clearKey,
+            onPressed: () => setState(_session.clearRecording),
+            label: 'Clear',
+          ),
           DraftButton.link(
             key: TimelinePanel.markKey,
             onPressed: () => setState(() => _session.mark()),

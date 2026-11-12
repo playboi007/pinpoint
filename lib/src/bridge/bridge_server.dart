@@ -14,6 +14,7 @@ import 'command_queue.dart';
 import 'hot_reload.dart';
 import 'mcp_server.dart';
 import 'note_store.dart';
+import 'tape_store.dart';
 
 /// Why the bridge could not start.
 class BridgeStartException implements Exception {
@@ -107,11 +108,15 @@ class PinPointBridge {
   /// Agent commands on their way to the app (Milestone 12).
   final CommandQueue commands;
 
+  /// Tapes on disk (PLAN-v2 Milestone 15).
+  late final TapeStore tapes = TapeStore(store.root);
+
   final List<String> _allowedOrigins;
   late final McpServer _mcp = McpServer(
     store,
     commands: commands,
     reloader: HotReloader(store.root),
+    tapes: tapes,
     log: _log,
   );
   final void Function(String line) _log;
@@ -151,6 +156,9 @@ class PinPointBridge {
           path == mcpPath ||
           path == commandsPath ||
           path.startsWith('$commandsPath/') ||
+          path == tapesPath ||
+          path.startsWith('$tapesPath/') ||
+          path.startsWith('$runsPath/') ||
           noteId != null;
       if (request.method == 'OPTIONS' && known) {
         // A browser sends this before every JSON POST, PATCH and DELETE.
@@ -247,6 +255,9 @@ class PinPointBridge {
     if (path == commandsPath || path.startsWith('$commandsPath/')) {
       return _command(request, path);
     }
+    if (path == tapesPath || path.startsWith('$tapesPath/')) {
+      return _tape(request, path);
+    }
     switch ((method, path)) {
       case ('POST', mcpPath):
         return _mcpCall(request);
@@ -281,6 +292,41 @@ class PinPointBridge {
       _ => 'GET, POST, OPTIONS',
     });
     _error(response, HttpStatus.methodNotAllowed, 'Method not allowed');
+  }
+
+  /// Tapes from the app (PLAN-v2 Milestone 15): `POST /tapes` stores one,
+  /// `GET /tapes/<id>` gives it back with its bodies for a replay.
+  Future<void> _tape(HttpRequest request, String path) async {
+    final response = request.response;
+    final method = request.method;
+    if (path == tapesPath) {
+      if (method != 'POST') {
+        response.headers.set('allow', 'POST, OPTIONS');
+        return _error(response, HttpStatus.methodNotAllowed, 'Use POST');
+      }
+      final body = await _jsonBody(request, max: maxTapeBytes);
+      if (body == null) return;
+      try {
+        final summary = await tapes.save(body['tape'], body['bodies']);
+        _log('pinpoint: tape ${summary['id']} saved (${summary['kind']})');
+        return _json(response, HttpStatus.ok, summary);
+      } on TapeStoreException catch (error) {
+        return _error(response, error.status, error.message);
+      }
+    }
+    final id = path.substring(tapesPath.length + 1);
+    if (method != 'GET') {
+      response.headers.set('allow', 'GET, OPTIONS');
+      return _error(response, HttpStatus.methodNotAllowed, 'Use GET');
+    }
+    final tape = await tapes.read(id, withBodies: true);
+    if (tape == null) {
+      return _error(response, HttpStatus.notFound, 'No tape $id');
+    }
+    _json(response, HttpStatus.ok, {
+      'tape': tape.toJson(),
+      'bodies': tape.bodiesToJson(),
+    });
   }
 
   /// The app's side of the command channel: its long poll, its answers,
@@ -397,7 +443,10 @@ class PinPointBridge {
   }
 
   /// The request's JSON object, or null after answering with the error.
-  Future<Map<String, Object?>?> _jsonBody(HttpRequest request) async {
+  Future<Map<String, Object?>?> _jsonBody(
+    HttpRequest request, {
+    int max = maxBodyBytes,
+  }) async {
     final response = request.response;
     if (request.headers.contentType?.mimeType != ContentType.json.mimeType) {
       _error(
@@ -407,7 +456,7 @@ class PinPointBridge {
       );
       return null;
     }
-    final body = await _readBody(request);
+    final body = await _readBody(request, max: max);
     if (body == null) {
       // Cap the body: base64 makes the screenshot a third larger, and an
       // endless body must not fill the memory. Close the connection after
@@ -416,7 +465,7 @@ class PinPointBridge {
       _error(
         response,
         HttpStatus.requestEntityTooLarge,
-        'The note is over ${maxBodyBytes ~/ (1024 * 1024)} MB',
+        'The body is over ${max ~/ (1024 * 1024)} MB',
       );
       return null;
     }
@@ -541,28 +590,29 @@ class PinPointBridge {
       _allowedOrigins.contains('*') ||
       _allowedOrigins.contains(origin);
 
-  /// The whole body, or null when it is over [maxBodyBytes].
+  /// The whole body, or null when it is over [max].
   ///
-  /// Past the cap the rest is read and dropped, up to [_drainLimit]. A
+  /// Past the cap the rest is read and dropped, up to four times [max]. A
   /// server that closes a connection with unread data resets it, and the
-  /// client then loses the 413 too. Past [_drainLimit] it stops reading.
-  static Future<Uint8List?> _readBody(HttpRequest request) async {
-    if (request.contentLength > _drainLimit) return null;
+  /// client then loses the 413 too. Past that it stops reading.
+  static Future<Uint8List?> _readBody(
+    HttpRequest request, {
+    int max = maxBodyBytes,
+  }) async {
+    final drain = 4 * max;
+    if (request.contentLength > drain) return null;
     final bytes = BytesBuilder(copy: false);
     var total = 0;
     await for (final chunk in request) {
       total += chunk.length;
-      if (total <= maxBodyBytes) {
+      if (total <= max) {
         bytes.add(chunk);
-      } else if (total > _drainLimit) {
+      } else if (total > drain) {
         break;
       }
     }
-    return total > maxBodyBytes ? null : bytes.takeBytes();
+    return total > max ? null : bytes.takeBytes();
   }
-
-  /// How much of a body over [maxBodyBytes] is read only to drop it.
-  static const int _drainLimit = 4 * maxBodyBytes;
 
   static bool _isPng(Uint8List bytes) {
     const signature = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];

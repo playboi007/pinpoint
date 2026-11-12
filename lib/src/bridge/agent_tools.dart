@@ -30,6 +30,7 @@ const List<String> agentToolNames = [
   'watch',
   'unwatch',
   'mark',
+  'save_tape',
   'why',
   'caused_by',
 ];
@@ -43,6 +44,7 @@ Duration agentToolTimeout(String tool, Map<String, Object?> args) {
       return Duration(milliseconds: wait + 5000);
     case 'verify_note':
     case 'scroll_to':
+    case 'save_tape':
       return const Duration(seconds: 60);
     case 'stress_matrix':
       return const Duration(seconds: 240);
@@ -556,6 +558,21 @@ final List<Map<String, Object?>> agentTools = [
         'type': 'string',
         'description': 'For example "the list is empty here".',
       },
+    },
+  ),
+  _tool(
+    'save_tape',
+    'Save what happened as a tape',
+    'Saves the inputs and network answers of the run as a tape on the '
+        'bridge, so the run can happen again with replay. since: "start" '
+        '(the default: a full tape from app start, replayed after a '
+        'restart), "mark", "mark:N" or seconds back (a segment, replayed '
+        'from where the app is). A tape over the body limit, or made with '
+        'TraceConfig.bodies false, is a segment; partial says what was '
+        'lost. Answers the summary only; bodies stay in .pinpoint/tapes/.',
+    {
+      'since': {'description': '"start", "mark", "mark:2", 30 or "30s".'},
+      'name': {'type': 'string', 'description': 'A short name.'},
     },
   ),
 ];

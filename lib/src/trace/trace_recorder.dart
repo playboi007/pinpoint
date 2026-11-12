@@ -187,8 +187,27 @@ class TraceRecorder {
     while (_bytes > maxBytes && _length > 1) {
       _dropOldest();
     }
+    for (final listener in _listeners) {
+      try {
+        listener(event);
+      } catch (_) {
+        // A listener only observes too.
+      }
+    }
     return event;
   }
+
+  final List<void Function(TraceEvent event)> _listeners =
+      <void Function(TraceEvent event)>[];
+
+  /// Calls [listener] with each new event, after it is held. The tape
+  /// recorder keeps inputs this way, apart from the ring buffer
+  /// (Milestone 15, step 3). A listener must be as cheap as [add].
+  void addListener(void Function(TraceEvent event) listener) =>
+      _listeners.add(listener);
+
+  void removeListener(void Function(TraceEvent event) listener) =>
+      _listeners.remove(listener);
 
   void _keep(TraceCause cause, TraceEvent first) {
     cause

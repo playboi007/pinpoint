@@ -5,10 +5,15 @@ import 'package:flutter/widgets.dart';
 
 import '../agent/state_dump.dart';
 import '../core/rebuild_hook.dart';
+import '../model/tape.dart';
 import '../model/trace_event.dart';
 import '../search/source_resolver.dart';
+import '../tape/net_matcher.dart';
+import '../tape/tape_recorder.dart';
 import 'frame_clock.dart';
+import 'redact.dart';
 import 'sources/frame_source.dart';
+import 'sources/network_source.dart';
 import 'sources/rebuild_source.dart';
 import 'trace_config.dart';
 import 'trace_recorder.dart';
@@ -47,14 +52,31 @@ class TraceSession {
     required this.resolver,
     List<TraceSource> builtIn = const <TraceSource>[],
     TraceRecorder? recorder,
+    TapeRecorder? tapes,
     Object? owner,
     List<StateAdapter> Function()? adapters,
+    TapeStart Function({required int t, required int seq})? pageStart,
   }) : recorder =
            recorder ??
            TraceRecorder(
              maxEvents: config.maxEvents,
              maxBytes: config.maxBytes,
            ) {
+    // Kept across a wrapper mounted again, like the recorder: a full tape
+    // needs everything since app start.
+    this.tapes =
+        tapes ??
+        TapeRecorder(
+          this.recorder,
+          matcher: NetMatcher(
+            redact: TraceRedact(config.redact),
+            ignore: config.matchIgnore,
+          ),
+          bodiesRead: config.bodies,
+          appStart: pageStart?.call(t: 0, seq: 1),
+        );
+    this.pageStart = pageStart;
+    this.tapes.start();
     rebuildSource = RebuildSource(
       hook: rebuildHook,
       content: content,
@@ -81,6 +103,7 @@ class TraceSession {
       ..frameOf = (() => clock.frame)
       ..readCauses = config.causes;
     for (final source in _sources) {
+      if (source is NetworkSource) source.tap = this.tapes;
       if (source.level < 3) _start(source);
     }
     clock.addListener(_afterFrame);
@@ -110,6 +133,35 @@ class TraceSession {
 
   final TraceConfig config;
   final TraceRecorder recorder;
+
+  /// Inputs and exchanges since app start, for tapes (PLAN-v2 Milestone
+  /// 15).
+  late final TapeRecorder tapes;
+
+  /// The page now, for the start of a segment tape. Null: an empty start.
+  TapeStart Function({required int t, required int seq})? pageStart;
+
+  /// A tape of the run from [since], or a [FormatException] for a mark
+  /// that is not held.
+  Tape saveTape({TapeSince since = TapeSince.start, String? name}) =>
+      tapes.save(
+        since: since,
+        name: name,
+        startAt:
+            pageStart ??
+            ({required int t, required int seq}) => TapeStart(
+              t: t,
+              seq: seq,
+              wallTime: DateTime.now().toUtc().toIso8601String(),
+            ),
+      );
+
+  /// "Clear recording": drops the record and the tape stores at once.
+  void clearRecording() {
+    recorder.clear();
+    tapes.clear();
+    thumbnails.clear();
+  }
 
   /// Resolves widgets to the sources events carry, so a reader of the
   /// record (the Info tab's "Caused") matches them the same way.
@@ -358,6 +410,7 @@ class TraceSession {
       _stop(source);
     }
     _demand.clear();
+    tapes.stop();
     _disposed = true;
     clock.dispose();
     if (identical(current, this)) current = null;

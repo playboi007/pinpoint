@@ -182,6 +182,10 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
       unawaited(_sync?.save(note));
     },
     stateAdapters: () => widget.config.stateAdapters,
+    bridge: () => BridgeClient.find(
+      url: widget.config.bridgeUrl,
+      sinks: widget.config.sinks,
+    ),
   );
 
   /// Takes the agent's commands from the bridge while control is on; null

@@ -115,6 +115,22 @@ void main() {
     expect(TimelinePanel.open.value, isFalse);
     expect(debugOnRebuildDirtyWidget, isNull);
   });
+
+  testWidgets('Clear drops the record and the tape stores at once (PLAN-v2 '
+      'Milestone 15, step 6)', (tester) async {
+    await pumpApp(tester);
+    await tester.tap(find.byKey(TimelinePanel.buttonKey));
+    await tester.pump();
+    await tester.tap(find.byKey(TimelinePanel.markKey));
+    await tester.pump();
+    expect(TraceSession.current!.saveTape().marks, isNotEmpty);
+    await tester.tap(find.byKey(TimelinePanel.clearKey));
+    await tester.pump();
+    expect(recorder.lastOf(TraceKind.mark), isNull);
+    expect(TraceSession.current!.saveTape().marks, isEmpty);
+    controller.stop();
+    await tester.pump(const Duration(seconds: 2));
+  });
 }
 
 class _Screen extends StatefulWidget {

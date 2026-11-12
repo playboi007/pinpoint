@@ -17,6 +17,7 @@ import 'note_detail.dart';
 import 'note_store.dart';
 import 'png_resize.dart';
 import 'probe_scan.dart';
+import 'tape_store.dart';
 
 /// The MCP protocol versions this server speaks, newest first.
 const List<String> mcpProtocolVersions = [
@@ -43,9 +44,12 @@ class McpServer {
     this.store, {
     this.commands,
     this.reloader,
+    this._tapes,
     this.version = '0.0.1',
     this._log = _noLog,
   });
+
+  final TapeStore? _tapes;
 
   final NoteStore store;
 
@@ -54,6 +58,9 @@ class McpServer {
 
   /// Gives the agent `hot_reload`; null: no such tool.
   final HotReloader? reloader;
+
+  /// Tapes on disk (PLAN-v2 Milestone 15).
+  late final TapeStore tapes = _tapes ?? TapeStore(store.root);
 
   final void Function(String line) _log;
 
@@ -211,6 +218,31 @@ class McpServer {
       },
     },
     {
+      'name': 'list_tapes',
+      'title': 'List tapes',
+      'description':
+          'The tapes on the bridge, newest first: id, kind (full from app '
+          'start, or segment from a mark), inputs, requests, marks, body '
+          'size, and partial when a limit dropped data. A note with a tape '
+          'says "has tape" and names it. No body is ever shown.',
+      'inputSchema': {'type': 'object', 'properties': <String, Object?>{}},
+    },
+    {
+      'name': 'get_tape',
+      'title': 'Read a tape',
+      'description':
+          'One tape in short: its summary, start page, marks, route order, '
+          'inputs (step, kind, widget, how many answers it waits for) and '
+          'requests (method, masked URL, status). No body.',
+      'inputSchema': {
+        'type': 'object',
+        'properties': {
+          'id': {'type': 'string', 'description': 'For example tp_…'},
+        },
+        'required': ['id'],
+      },
+    },
+    {
       'name': 'list_probes',
       'title': 'List probe lines',
       'description':
@@ -240,6 +272,8 @@ class McpServer {
       'get_note' => _getNote(input),
       'update_note' => _updateNote(input),
       'list_probes' => _listProbes(),
+      'list_tapes' => _listTapes(),
+      'get_tape' => _getTape(input),
       'verify_note' when commands != null => _verifyNote(input),
       'hot_reload' when reloader != null => _hotReload(input),
       final String tool
@@ -362,6 +396,60 @@ class McpServer {
     for (final p in probes.take(10)) '  ${p.file}:${p.line}',
     if (probes.length > 10) '  … and ${probes.length - 10} more',
   ].join('\n');
+
+  /// `list_tapes`: every tape's summary, newest first. Never a body.
+  Future<Map<String, Object?>> _listTapes() async {
+    final list = await tapes.list();
+    if (list.isEmpty) {
+      return _text(
+        'No tapes. Save one with save_tape, or ask the user to attach what '
+        'happened to a note.',
+      );
+    }
+    return _text(
+      [
+        '${list.length} tape${list.length == 1 ? '' : 's'}:',
+        for (final summary in list.take(mcpMaxListed)) jsonEncode(summary),
+      ].join('\n'),
+    );
+  }
+
+  /// `get_tape`: one tape's summary, its marks and its inputs in short.
+  /// Masked headers stay masked and no body is shown (rule 16).
+  Future<Map<String, Object?>> _getTape(Map<String, Object?> input) async {
+    final id = input['id'];
+    if (id is! String) throw const _InvalidParams('id is required');
+    final tape = await tapes.read(id);
+    if (tape == null) return _text('No tape $id', isError: true);
+    final summary = await tapes.summary(id);
+    return _text(
+      jsonEncode({
+        ...?summary,
+        'start': {
+          'url': tape.start.url,
+          'width': tape.start.width,
+          'height': tape.start.height,
+          'storage': tape.start.storage == null ? 'not kept' : 'kept',
+        },
+        'marks': [for (final m in tape.marks) m.toJson()],
+        'routes': tape.routes,
+        'inputs': [
+          for (final i in tape.inputs.take(60))
+            '${i.step} ${i.kind.substring('input.'.length)} '
+                '${i.data['phase'] ?? ''}${i.widget == null ? '' : ' ${i.widget}'}'
+                '${i.after.isEmpty ? '' : ' after ${i.after.length} answers'}',
+          if (tape.inputs.length > 60) '… ${tape.inputs.length - 60} more',
+        ],
+        'requests': [
+          for (final e in tape.net.take(60))
+            '${e.n} ${e.method} ${e.url} → ${e.error ?? e.status ?? '-'}'
+                '${e.unsupported == null ? '' : ' (passes through: '
+                          '${e.unsupported})'}',
+          if (tape.net.length > 60) '… ${tape.net.length - 60} more',
+        ],
+      }),
+    );
+  }
 
   /// `list_probes`: the `PinPoint.probe(` lines left under `lib/`.
   Future<Map<String, Object?>> _listProbes() async {

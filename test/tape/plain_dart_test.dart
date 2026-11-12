@@ -37,4 +37,5 @@ void main() {
 const List<String> plainTapeFiles = [
   'lib/src/model/tape.dart',
   'lib/src/tape/net_matcher.dart',
+  'lib/src/tape/tape_recorder.dart',
 ];

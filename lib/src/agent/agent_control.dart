@@ -82,6 +82,7 @@ class AgentControl extends ChangeNotifier {
     'watch',
     'unwatch',
     'mark',
+    'save_tape',
     'why',
     'caused_by',
   };
