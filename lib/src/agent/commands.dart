@@ -332,9 +332,9 @@ class AgentCommands {
         'target must be an object: file, line, type, text, key, index',
       );
     }
-    final found = matching(target);
     final at = target['index'];
     final index = at is int ? at : 0;
+    final found = matching(target, take: index + 1);
     if (index < 0 || index >= found.length) {
       throw AgentError(
         found.isEmpty
@@ -949,7 +949,7 @@ class AgentCommands {
     Map<String, Object?> args,
     OutputLimits limits,
   ) {
-    final ordered = matching(args);
+    final ordered = matching(args, take: limits.items);
     final shown = ordered.take(limits.items).toList();
     return {
       'widgets': describeAll(shown, limits),
@@ -959,7 +959,15 @@ class AgentCommands {
 
   /// The elements under [root] (the app when null) that fit the query in
   /// [args] (`file`, `line`, `type`, `text`, `key`), visible ones first.
-  List<Element> matching(Map<String, Object?> args, {Element? root}) {
+  ///
+  /// With [take], only the first [take] places are sorted: a visible rect
+  /// walks every ancestor, so it is not measured for matches that cannot
+  /// be among them (a `Text` query can match thousands).
+  List<Element> matching(
+    Map<String, Object?> args, {
+    Element? root,
+    int? take,
+  }) {
     final file = _string(args['file']);
     final line = args['line'];
     final type = _string(args['type']);
@@ -998,7 +1006,16 @@ class AgentCommands {
           RenderSearch.visibleRectOf(renderObject) != null;
     }
 
-    return [...matches.where(visible), ...matches.where((e) => !visible(e))];
+    final shown = <Element>[];
+    final rest = <Element>[];
+    for (final element in matches) {
+      if (take != null && shown.length >= take) {
+        rest.add(element);
+      } else {
+        (visible(element) ? shown : rest).add(element);
+      }
+    }
+    return [...shown, ...rest];
   }
 
   /// Whether [widgetKey] is the key the agent named: its text as given
@@ -1363,7 +1380,11 @@ class AgentCommands {
     for (var step = 0; step < steps; step++) {
       cancel.check();
       if (!scrollable.mounted) throw const AgentError('the list went away');
-      final found = matching(args, root: scrollable.context as Element);
+      final found = matching(
+        args,
+        root: scrollable.context as Element,
+        take: 1,
+      );
       if (found.isNotEmpty) {
         final target = found.first;
         await ensureVisible(target);

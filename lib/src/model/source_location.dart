@@ -53,7 +53,21 @@ class SourceLocation {
 /// - `package:…` URIs and plain paths: unchanged.
 ///
 /// A trailing slash is dropped.
+///
+/// Cached: `isLocal` asks this for every widget a scan or an agent tool
+/// meets, and a URI parse each time cost most of a `get_screen` on web.
 String normalizeSourcePath(String input) {
+  final cached = _normalized[input];
+  if (cached != null) return cached;
+  if (_normalized.length >= _maxNormalized) _normalized.clear();
+  return _normalized[input] = _normalize(input);
+}
+
+/// Source files in an app are a few thousand at most.
+const int _maxNormalized = 8192;
+final Map<String, String> _normalized = <String, String>{};
+
+String _normalize(String input) {
   var path = input.trim();
   if (path.startsWith('file:') || path.startsWith(_webTestScheme)) {
     final uri = Uri.tryParse(path);
