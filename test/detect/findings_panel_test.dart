@@ -12,11 +12,12 @@ import 'package:pinpoint/src/overlay/inspector_overlay.dart';
 import 'package:pinpoint/src/theme/controls.dart';
 import 'package:pinpoint/src/theme/pinpoint_tokens.dart';
 
+import '../support/fake_sink.dart';
 import '../support/markers.dart';
 
 const String _file = 'test/detect/findings_panel_test.dart';
 
-/// Milestone 10, build step 3: the findings list and "Make note".
+/// Milestone 10, build step 3: the findings list and "Send note".
 void main() {
   late PinPointController controller;
   late ValueNotifier<bool> showRow;
@@ -35,14 +36,20 @@ void main() {
   final long = 'A title much too long for one line of this page ' * 3;
 
   /// A page with a row that overflows below 432 px wide and a cut title.
-  Future<void> pumpHost(WidgetTester tester) async {
+  Future<void> pumpHost(
+    WidgetTester tester, {
+    List<PinPointSink> sinks = const <PinPointSink>[],
+  }) async {
     tester.view.physicalSize = const Size(1200, 1000) * 3;
     tester.view.devicePixelRatio = 3;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(
       MaterialApp(
-        builder: (context, child) =>
-            PinPointWrapper(controller: controller, child: child),
+        builder: (context, child) => PinPointWrapper(
+          controller: controller,
+          config: PinPointConfig(sinks: sinks),
+          child: child,
+        ),
         home: Scaffold(
           body: Padding(
             padding: const EdgeInsets.all(16),
@@ -186,8 +193,8 @@ void main() {
     expect(controller.findings.hovered.value, isNull);
   });
 
-  testWidgets('Make note creates a draft with the comment, a check and the '
-      'environment pre-filled', (tester) async {
+  testWidgets('Send note makes a note with the comment, a check and the '
+      'environment pre-filled; with no sink it stays a draft', (tester) async {
     await pumpHost(tester);
     await narrow(tester);
     await openPanel(tester);
@@ -215,15 +222,52 @@ void main() {
     // The mode and the list stay, for the next finding.
     expect(controller.mode, PinPointMode.picking);
     expect(find.byKey(FindingsPanel.panelKey), findsOneWidget);
-    // The row now names its note instead of offering another.
+    // Not sent (no sink here): the row offers to send the draft, not to
+    // make another note.
     expect(find.byKey(FindingsPanel.noteKey(finding)), findsNothing);
+    expect(find.text('Send draft 1'), findsOneWidget);
+  });
+
+  testWidgets('acceptance: Send note sends the note at once, so the agent '
+      'sees it; after a failed send, the draft is sent from its row', (
+    tester,
+  ) async {
+    final sink = FakeSink();
+    await pumpHost(tester, sinks: [sink]);
+    await narrow(tester);
+    await openPanel(tester);
+    await scan(tester);
+    final row = overflow();
+    final title = controller.findings.findings.firstWhere(
+      (f) => f.kind == 'truncated_text',
+    );
+
+    await tester.tap(find.byKey(FindingsPanel.noteKey(row)));
+    await tester.pumpAndSettle();
+    final sent = controller.notes.notes.single;
+    expect(sent.status, NoteStatus.submitted, reason: 'no second click');
+    expect(sink.notes.single.status, NoteStatus.submitted);
     expect(
       find.descendant(
-        of: find.byKey(FindingsPanel.rowKey(finding)),
+        of: find.byKey(FindingsPanel.rowKey(row)),
         matching: find.text('Note 1'),
       ),
       findsOneWidget,
     );
+
+    // The bridge is down: the note stays a draft, and its row says so.
+    sink.error = 'connection refused';
+    await tester.tap(find.byKey(FindingsPanel.noteKey(title)));
+    await tester.pumpAndSettle();
+    expect(controller.notes.drafts, hasLength(1));
+    expect(find.text('Send draft 2'), findsOneWidget);
+
+    sink.error = null;
+    await tester.tap(find.byKey(FindingsPanel.sendDraftKey(title)));
+    await tester.pumpAndSettle();
+    expect(controller.notes.drafts, isEmpty);
+    expect(sink.notes.last.status, NoteStatus.submitted);
+    expect(controller.notes.notes, hasLength(2), reason: 'no extra note');
   });
 
   testWidgets('a truncated text note is a suggestion with its own check', (

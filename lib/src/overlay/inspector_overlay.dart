@@ -803,10 +803,27 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     }, debugLabel: 'pinpoint.rescanFindings');
   }
 
-  /// Makes [finding] a draft note on its nearest local widget, with the
-  /// summary as the comment, the matching check for Milestone 12, and the
-  /// current environment. The mode and the list stay, for the next one.
+  /// Findings whose note is being made: a second click while the first
+  /// one captures its screenshot must not make a second note.
+  final Set<String> _notingFindings = <String>{};
+
+  /// Makes [finding] a note on its nearest local widget, with the summary
+  /// as the comment, the matching check for Milestone 12, and the current
+  /// environment, and sends it. Such a note is complete, never half
+  /// written, so it does not wait as a draft for a second click: the agent
+  /// sees it at once. When a sink fails it stays a draft, on the bridge
+  /// too, and the row offers "Send draft N". The mode and the list stay,
+  /// for the next one.
   Future<void> _noteFromFinding(Finding finding) async {
+    if (!_notingFindings.add(finding.key)) return;
+    try {
+      await _makeAndSendNote(finding);
+    } finally {
+      _notingFindings.remove(finding.key);
+    }
+  }
+
+  Future<void> _makeAndSendNote(Finding finding) async {
     final element = finding.element;
     final root = widget.appKey.currentContext;
     final boundary = widget.contentKey.currentContext;
@@ -852,11 +869,13 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
       if (!mounted) return;
     }
     _pin(note, pick);
-    _toasts.show(
-      'Saved as draft ${controller.notes.numberOf(note.id) ?? ''}. '
-      'The agent sees it once you send it.',
-    );
-    unawaited(_sync?.save(note));
+    await _sendNotes([note.id]);
+    if (!mounted) return;
+    // Not sent: keep it as a draft on the bridge, to send later.
+    final kept = controller.notes.byId(note.id);
+    if (kept != null && kept.status == NoteStatus.draft) {
+      unawaited(_sync?.save(kept));
+    }
   }
 
   /// [note] with a screenshot of the selection. When the capture fails, the
@@ -1168,6 +1187,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
                       onAudit: () => unawaited(_auditAccessibility()),
                       onMakeNote: (finding) =>
                           unawaited(_noteFromFinding(finding)),
+                      onSendDraft: (id) => unawaited(_sendNotes([id])),
                       onCopy: (finding) => unawaited(_copyFinding(finding)),
                     ),
                     // In idle too while any tweak is active.

@@ -5,6 +5,7 @@ import '../core/pinpoint_controller.dart';
 import '../detect/debug_paint.dart';
 import '../detect/detector.dart';
 import '../detect/findings_controller.dart';
+import '../model/annotation.dart';
 import '../search/render_search.dart';
 import '../theme/controls.dart';
 import '../theme/marks.dart';
@@ -27,8 +28,11 @@ String findingKindLabel(String kind) => switch (kind) {
 
 /// The findings list: "Scan this screen", the detector switches, and every
 /// finding grouped by kind. Hovering a finding outlines it on the app;
-/// "Make note" turns it into a draft note. A finding with no widget (an
-/// error from the engine or an uncaught error) has "Copy" instead.
+/// "Send note" turns it into a note and sends it, so the agent sees it at
+/// once: it is complete (comment, check, environment), never half written.
+/// A note that is still a draft (the send failed, or the agent's stress
+/// matrix filed it) has "Send draft N". A finding with no widget (an error
+/// from the engine or an uncaught error) has "Copy" instead.
 ///
 /// It opens beside the rail, from the rail's Findings item, which has
 /// [buttonKey].
@@ -40,6 +44,7 @@ class FindingsPanel extends StatelessWidget {
     required this.onScan,
     required this.onAudit,
     required this.onMakeNote,
+    required this.onSendDraft,
     required this.onCopy,
     required this.onClose,
   });
@@ -67,9 +72,13 @@ class FindingsPanel extends StatelessWidget {
   static Key rowKey(Finding finding) =>
       ValueKey<String>('pinpoint.findings.row.${finding.key}');
 
-  /// The "Make note" button of [finding].
+  /// The "Send note" button of [finding].
   static Key noteKey(Finding finding) =>
       ValueKey<String>('pinpoint.findings.note.${finding.key}');
+
+  /// The "Send draft N" button of [finding], when its note is a draft.
+  static Key sendDraftKey(Finding finding) =>
+      ValueKey<String>('pinpoint.findings.sendDraft.${finding.key}');
 
   /// The "Copy" button of [finding], shown when it has no widget.
   static Key copyKey(Finding finding) =>
@@ -107,7 +116,11 @@ class FindingsPanel extends StatelessWidget {
   /// Runs the accessibility audit.
   final VoidCallback onAudit;
 
+  /// Makes a note from a finding and sends it.
   final void Function(Finding finding) onMakeNote;
+
+  /// Sends the draft note with this id.
+  final void Function(String id) onSendDraft;
 
   /// Puts [copyText] of a finding with no widget on the clipboard.
   final void Function(Finding finding) onCopy;
@@ -333,7 +346,8 @@ class FindingsPanel extends StatelessWidget {
   }
 
   Widget _row(PinPointTokens tokens, Finding finding) {
-    final number = _noteNumber(finding);
+    final note = _noteOf(finding);
+    final number = note == null ? null : notes.numberOf(note.id);
     final source = finding.source;
     return MouseRegion(
       key: rowKey(finding),
@@ -376,10 +390,19 @@ class FindingsPanel extends StatelessWidget {
                 ],
               ),
             ),
-            if (number != null)
+            if (note != null && note.status == NoteStatus.draft)
+              DraftButton.link(
+                key: sendDraftKey(finding),
+                onPressed: () => onSendDraft(note.id),
+                label: 'Send draft ${number ?? ''}'.trim(),
+              )
+            else if (note != null)
               Padding(
                 padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
-                child: Text(number, style: tokens.micro),
+                child: Text(
+                  number == null ? 'Noted' : 'Note $number',
+                  style: tokens.micro,
+                ),
               )
             else if (finding.element == null) ...[
               // A finding with no widget (an engine assertion, an uncaught
@@ -390,7 +413,7 @@ class FindingsPanel extends StatelessWidget {
                 child: DraftButton.link(
                   key: noteKey(finding),
                   onPressed: null,
-                  label: 'Make note',
+                  label: 'Send note',
                 ),
               ),
               DraftIconButton(
@@ -404,7 +427,7 @@ class FindingsPanel extends StatelessWidget {
               DraftButton.link(
                 key: noteKey(finding),
                 onPressed: () => onMakeNote(finding),
-                label: 'Make note',
+                label: 'Send note',
               ),
           ],
         ),
@@ -412,12 +435,10 @@ class FindingsPanel extends StatelessWidget {
     );
   }
 
-  /// `Note 3` when a note was made from [finding], else null.
-  String? _noteNumber(Finding finding) {
+  /// The note made from [finding], or null.
+  Annotation? _noteOf(Finding finding) {
     for (final note in notes.notes) {
-      if (note.finding?['key'] != finding.key) continue;
-      final number = notes.numberOf(note.id);
-      return number == null ? 'Noted' : 'Note $number';
+      if (note.finding?['key'] == finding.key) return note;
     }
     return null;
   }
@@ -442,6 +463,7 @@ class FindingsPanelLayer extends StatelessWidget {
     required this.onScan,
     required this.onAudit,
     required this.onMakeNote,
+    required this.onSendDraft,
     required this.onCopy,
   });
 
@@ -451,6 +473,7 @@ class FindingsPanelLayer extends StatelessWidget {
   final VoidCallback onScan;
   final VoidCallback onAudit;
   final void Function(Finding finding) onMakeNote;
+  final void Function(String id) onSendDraft;
   final void Function(Finding finding) onCopy;
 
   @override
@@ -467,6 +490,7 @@ class FindingsPanelLayer extends StatelessWidget {
             onScan: onScan,
             onAudit: onAudit,
             onMakeNote: onMakeNote,
+            onSendDraft: onSendDraft,
             onCopy: onCopy,
             onClose: () => panelOpen.value = false,
           ),
