@@ -19,6 +19,9 @@ abstract final class TraceKind {
   /// The value of the focused text field changed.
   static const String text = 'input.text';
 
+  /// A `message` event on `window` (Milestone 14).
+  static const String message = 'input.message';
+
   /// A frame the app drew.
   static const String frame = 'frame';
 
@@ -133,8 +136,8 @@ class TraceEvent {
   /// For example `input.pointer` or `build`. See [TraceKind].
   final String kind;
 
-  /// The id of the entry that started this work (Milestone 14); null until
-  /// then.
+  /// The id of the entry that started this work (Milestone 14); null
+  /// without `PinPoint.run`.
   final int? cause;
 
   /// The type name of the widget involved, when known. Not final: a source

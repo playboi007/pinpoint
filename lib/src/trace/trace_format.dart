@@ -92,7 +92,8 @@ String traceSummary(TraceEvent event) {
     case TraceKind.probe:
       return '${d['name'] ?? '?'} ${_pairs(d['values'])}$where';
     case TraceKind.error:
-      return '${d['type'] ?? 'error'}: ${d['message'] ?? ''}$where';
+      final uncaught = d['uncaught'] == true ? ' (uncaught)' : '';
+      return '${d['type'] ?? 'error'}$uncaught: ${d['message'] ?? ''}$where';
     case TraceKind.finding:
       return '${d['kind'] ?? '?'}: ${d['summary'] ?? ''}';
     case TraceKind.mark:
@@ -131,9 +132,11 @@ String _pairs(Object? values) {
       .join(' ');
 }
 
-/// One compact line: `412  +3.21s  f233  build  Counter (counter.dart:12)`.
+/// One compact line: `412  +3.21s  f233  c37  build  Counter
+/// (counter.dart:12)`. The cause (`c37`) shows when there is one.
 String traceLine(TraceEvent event, {int width = 200}) => clipText(
   '${event.seq}  ${formatTraceTime(event.t)}  f${event.frame}  '
+  '${event.cause == null ? '' : 'c${event.cause}  '}'
   '${event.kind}  ${traceSummary(event)}',
   width,
 );
@@ -405,6 +408,8 @@ Map<String, Object?> traceAnswer(TraceRecorder recorder, TraceQuery query) {
     'partial': partial,
     if (partial) 'reason': recorder.partialReason,
     if (notes.isNotEmpty) 'notes': notes,
+    // Said once per answer, not per event (PLAN-v2 Milestone 14, step 7).
+    'hint': ?recorder.causeHint,
   };
   if (query.full) {
     final shown = inWindow.length <= query.limit

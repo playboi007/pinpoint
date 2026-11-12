@@ -1,7 +1,10 @@
 // Plain Dart: no `dart:ui` and no `package:flutter` (PLAN-v2 rule 13), so
 // the limits are tested without a widget tree.
 
+import 'dart:collection';
+
 import '../model/trace_event.dart';
+import 'cause_zone.dart';
 
 /// A bounded record of what the app did (PLAN-v2 Milestone 13).
 ///
@@ -40,6 +43,37 @@ class TraceRecorder {
 
   /// The frame number for a new event. The frame source sets it.
   int Function() frameOf;
+
+  /// Whether an event takes its cause from the zone it is added in
+  /// (`TraceConfig.causes`).
+  bool readCauses = true;
+
+  /// Most causes kept; the oldest go first. Only causes with an event are
+  /// kept, so this grows with what was recorded, not with every entry.
+  static const int maxCauses = 4096;
+
+  final LinkedHashMap<int, TraceCause> _causes =
+      LinkedHashMap<int, TraceCause>();
+
+  /// The cause [id], or null when it is not kept.
+  TraceCause? causeOf(int id) => _causes[id];
+
+  /// The causes kept, oldest first.
+  Iterable<TraceCause> get causes => _causes.values;
+
+  /// Whether events get causes: `PinPoint.run` started the cause zone and
+  /// `TraceConfig.causes` is on (PLAN-v2 Milestone 14, step 7).
+  bool get causesRecorded => readCauses && CauseZone.current != null;
+
+  /// Why events have no cause, for the tools; null when they do.
+  String? get causeHint {
+    if (causesRecorded) return null;
+    if (!readCauses) return 'no causes: TraceConfig.causes is false';
+    final reason = CauseZone.unavailable;
+    return reason == null
+        ? 'no causes: wrap runApp in PinPoint.run'
+        : 'no causes: $reason';
+  }
 
   // The run's own clock: a recorder made on start counts from zero.
   final Stopwatch _watch = Stopwatch()..start();
@@ -109,23 +143,32 @@ class TraceRecorder {
 
   /// Records one event. [data] must already be small JSON values (see
   /// [traceValues]); it is kept as given.
+  ///
+  /// The event's cause is [cause], or the cause of the zone it is added in
+  /// (PLAN-v2 Milestone 14, step 5). Give [cause] for work that runs
+  /// outside the zone of what started it, such as a response that a
+  /// browser callback reports.
   TraceEvent add(
     String kind, {
     Map<String, Object?> data = const <String, Object?>{},
     String? widget,
     String? source,
-    int? cause,
+    TraceCause? cause,
   }) {
+    final from = readCauses ? (cause ?? CauseZone.currentCause) : null;
+    // Pinpoint's own work is not a cause (rule 14).
+    final owner = from == null || from.internal ? null : from;
     final event = TraceEvent(
       seq: _nextSeq++,
       t: _ms(),
       frame: frameOf(),
       kind: kind,
-      cause: cause,
+      cause: owner?.id,
       widget: widget,
       source: source,
       data: data,
     );
+    if (owner != null && owner.firstSeq == null) _keep(owner, event);
     if (_length == maxEvents) _dropOldest();
     _ring[(_head + _length) % maxEvents] = event;
     _length++;
@@ -135,6 +178,19 @@ class TraceRecorder {
       _dropOldest();
     }
     return event;
+  }
+
+  void _keep(TraceCause cause, TraceEvent first) {
+    cause
+      ..firstSeq = first.seq
+      ..t = first.t - (CauseZone.clockMs - cause.startedMs);
+    // An entry the zone could not name (a key event on web comes through
+    // `run`) is named by its first input.
+    if (cause.kind == CauseKind.other && TraceKind.isInput(first.kind)) {
+      cause.kind = first.kind.substring('input.'.length);
+    }
+    _causes[cause.id] = cause;
+    if (_causes.length > maxCauses) _causes.remove(_causes.keys.first);
   }
 
   void _dropOldest() {
@@ -209,5 +265,6 @@ class TraceRecorder {
     _bytes = 0;
     _dropped = 0;
     _coverage.clear();
+    _causes.clear();
   }
 }

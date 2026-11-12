@@ -77,7 +77,9 @@ class TraceSession {
       ...builtIn,
       ...config.sources,
     ];
-    this.recorder.frameOf = () => clock.frame;
+    this.recorder
+      ..frameOf = (() => clock.frame)
+      ..readCauses = config.causes;
     for (final source in _sources) {
       if (source.level < 3) _start(source);
     }

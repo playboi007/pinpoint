@@ -12,6 +12,7 @@ class TraceConfig {
     this.maxEvents = TraceRecorder.defaultMaxEvents,
     this.maxBytes = TraceRecorder.defaultMaxBytes,
     this.sources = const <TraceSource>[],
+    this.causes = true,
   }) : assert(maxEvents > 0),
        assert(maxBytes > 0);
 
@@ -31,4 +32,18 @@ class TraceConfig {
 
   /// The app's own sources, started with the built-in ones by their level.
   final List<TraceSource> sources;
+
+  /// Whether events name the entry that started them (PLAN-v2 Milestone
+  /// 14). Needs `PinPoint.run` around `runApp`; pass the same config there:
+  ///
+  /// ```dart
+  /// const trace = TraceConfig();
+  /// void main() => PinPoint.run(() => runApp(const MyApp()), trace: trace);
+  /// ```
+  ///
+  /// The zone cannot start later, so it is the one costly part that runs
+  /// for the whole run: one child zone per entry (a pointer packet, a
+  /// frame). False: `PinPoint.run` calls its body with no zone, and events
+  /// have no cause.
+  final bool causes;
 }

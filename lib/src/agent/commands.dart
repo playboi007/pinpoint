@@ -22,6 +22,7 @@ import '../search/pick_result.dart';
 import '../search/render_search.dart';
 import '../search/source_index.dart';
 import '../search/source_resolver.dart';
+import '../trace/cause_zone.dart';
 import '../trace/trace_format.dart';
 import '../trace/trace_session.dart';
 import '../trace/watch.dart';
@@ -219,7 +220,17 @@ class AgentCommands {
   /// A step that is not ready ([AgentNotReady]) is tried again by
   /// [_againSoon]. One that is ready runs at once: nothing waits for an
   /// app that has nothing left to do.
+  ///
+  /// Each command is a cause of its own (PLAN-v2 Milestone 14): what the
+  /// agent's tap starts names the agent, not the long poll that brought
+  /// it.
   Future<Map<String, Object?>> run(
+    String tool,
+    Map<String, Object?> args,
+    AgentCancel cancel,
+  ) => CauseZone.enter(CauseKind.agent, () => _run(tool, args, cancel));
+
+  Future<Map<String, Object?>> _run(
     String tool,
     Map<String, Object?> args,
     AgentCancel cancel,

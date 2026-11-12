@@ -11,7 +11,9 @@ import 'screens/html_view_screen.dart';
 import 'screens/long_list_screen.dart';
 import 'screens/nested_navigator_screen.dart';
 
-void main() => runApp(const ExampleApp());
+// PinPoint.run: every recorded event names the tap, frame or key that
+// started it (PLAN-v2 Milestone 14).
+void main() => PinPoint.run(() => runApp(const ExampleApp()));
 
 class ExampleApp extends StatelessWidget {
   const ExampleApp({super.key, this.controller});
