@@ -512,6 +512,13 @@ Extra tools exist behind `--enable` (`launch_app`, `list_devices`, `run_tests`, 
 - **[run-vm]** A screen with a looping animation never reaches idle; each settle wait of a driving command then runs to its limit. The settle limit is 1 second (a route transition takes 300 ms).
 - **[unverified]** In Chrome: the long poll's XHR is aborted by `Client.close()`; `AppLifecycleState.hidden` arrives when the tab is hidden; synthetic taps, `enter_text` with the DOM input, and navigation in a real tab; `ext.pinpoint.command` with DWDS attached.
 
+
+## 29. Facts found in Session 14
+
+- **[run-chrome]** Web hot reload (DDC, Flutter 3.47.5): a new instance field with an initializer is `undefined` in a `State` that existed before the reload, and the first use throws `TypeError: Cannot read properties of undefined`. A `static final` field is set on its first read, so it works. A hot restart fixes the instance field. Seen on `_notingFindings` in `InspectorOverlay`.
+- **[run-chrome]** An error thrown in an `async` handler that nobody awaits (`unawaited(...)` from `onPressed`) shows only in the browser console: no toast, and the "Capture errors" detector did not list it.
+- **[run-chrome]** `flutter run -d chrome` starts Chrome with `--remote-debugging-port`. Over that port, `Profiler`, `Page.captureScreenshot` and `Input.dispatchMouseEvent` work on the app's tab without taking window focus. A Chrome window that other windows cover fully on macOS is `hidden`, so the command poll stops.
+
 ---
 
 ## Other plan errors and gaps found while scaffolding

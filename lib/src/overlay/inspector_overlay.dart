@@ -805,7 +805,11 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
 
   /// Findings whose note is being made: a second click while the first
   /// one captures its screenshot must not make a second note.
-  final Set<String> _notingFindings = <String>{};
+  ///
+  /// Static on purpose: on web, a hot reload does not run the initializer
+  /// of a new instance field for a state that already exists (the field
+  /// is undefined, and the click threw). A static is set on first read.
+  static final Set<String> _notingFindings = <String>{};
 
   /// Makes [finding] a note on its nearest local widget, with the summary
   /// as the comment, the matching check for Milestone 12, and the current
