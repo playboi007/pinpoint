@@ -83,8 +83,11 @@ String traceSummary(TraceEvent event) {
           '${sources is List<Object?> ? ': ${sources.join(', ')}' : ''}'
           '$reason';
     case TraceKind.detailOff:
-      final reason = d['reason'] is String ? ': ${d['reason']}' : '';
-      return 'level 3 off$reason';
+      final sources = d['sources'];
+      final reason = d['reason'] is String ? '; ${d['reason']}' : '';
+      return 'level 3 off'
+          '${sources is List<Object?> ? ': ${sources.join(', ')}' : ''}'
+          '$reason';
   }
   return '${widget ?? ''}${_pairs(d)}$where'.trim();
 }

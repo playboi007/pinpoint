@@ -22,6 +22,8 @@ import '../search/pick_result.dart';
 import '../search/render_search.dart';
 import '../search/source_index.dart';
 import '../search/source_resolver.dart';
+import '../trace/trace_format.dart';
+import '../trace/trace_session.dart';
 import 'agent_control.dart';
 import 'checks.dart';
 import 'state_dump.dart';
@@ -314,8 +316,44 @@ class AgentCommands {
       'find_widgets' => findWidgets(args, limits),
       'inspect' => inspect(args),
       'flash' => flash(args),
+      'get_trace' => getTrace(args),
+      'trace_detail' => traceDetail(args),
       _ => throw AgentError('unknown tool: $tool'),
     };
+  }
+
+  /// The running flight recorder, or an error the agent can act on.
+  static TraceSession _trace() =>
+      TraceSession.current ??
+      (throw const AgentError(
+        'the flight recorder is off (PinPointConfig.trace: '
+        'TraceConfig(enabled: false))',
+      ));
+
+  /// `get_trace`: the recorded events as compact lines (PLAN-v2
+  /// Milestone 13).
+  Map<String, Object?> getTrace(Map<String, Object?> args) {
+    try {
+      return traceAnswer(_trace().recorder, TraceQuery.fromArgs(args));
+    } on FormatException catch (error) {
+      throw AgentError(error.message);
+    }
+  }
+
+  /// `trace_detail`: starts or stops level 3 for the agent, and says which
+  /// sources run.
+  Map<String, Object?> traceDetail(Map<String, Object?> args) {
+    final on = args['on'];
+    if (on is! bool) throw const AgentError('on is required: true or false');
+    final session = _trace();
+    if (on) {
+      session
+        ..demand(TraceDemand.agent)
+        ..retryRebuilds();
+    } else {
+      session.release(TraceDemand.agent);
+    }
+    return session.detailStatus();
   }
 
   /// Tools a `run_steps` step may call. Not `inspect`, `screenshot`,
@@ -337,6 +375,7 @@ class AgentCommands {
     'back',
     'set_environment',
     'reset_environment',
+    'get_trace',
   };
 
   /// The most steps in one `run_steps`.

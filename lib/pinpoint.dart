@@ -30,7 +30,12 @@ export 'src/model/annotation.dart'
         SiblingsInfo,
         SourceRef,
         TargetInfo;
+export 'src/model/trace_event.dart'
+    show TraceEvent, TraceKind, traceValue, traceValues;
 export 'src/sink/clipboard_sink.dart' show ClipboardSink;
 export 'src/sink/http_sink.dart' show HttpSink, HttpSinkException;
 export 'src/sink/pinpoint_sink.dart' show PinPointSink;
 export 'src/theme/pinpoint_tokens.dart' show PinPointPalette;
+export 'src/trace/trace_config.dart';
+export 'src/trace/trace_recorder.dart' show TraceRecorder;
+export 'src/trace/trace_source.dart' show FrameWork, TraceSource;

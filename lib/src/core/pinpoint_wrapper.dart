@@ -9,11 +9,13 @@ import '../env/environment_controller.dart';
 import '../env/environment_host.dart';
 import '../overlay/inspector_overlay.dart';
 import '../search/source_resolver.dart';
+import '../trace/trace_session.dart';
 import 'app_semantics.dart';
 import 'hook_registry.dart';
 import 'keymap.dart';
 import 'pinpoint_config.dart';
 import 'pinpoint_controller.dart';
+import 'rebuild_hook.dart';
 
 /// Hosts Pinpoint around an app.
 ///
@@ -61,6 +63,10 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
   PinPointController? _ownController;
   HookRegistry? _hooks;
 
+  /// The one `debugOnRebuildDirtyWidget` callback, shared by the rebuild
+  /// heat detector and the trace's rebuild source.
+  RebuildHook? _rebuildHook;
+
   /// Sets platform and slow motion; null while disabled.
   EnvironmentGlobals? _globals;
 
@@ -98,6 +104,10 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
       // The controller, and with it the environment, may have changed.
       _watchEnvironment();
       _watchFindings();
+      if (widget.config.trace.enabled != oldWidget.config.trace.enabled) {
+        TraceSession.stopOwnedBy(this);
+        _startTrace();
+      }
     }
   }
 
@@ -110,6 +120,7 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
     _detectors?.dispose();
     _detectors = DetectorHooks(
       registry: hooks,
+      rebuildHook: _rebuildHook,
       findings: findings,
       appRoot: () => _appKey.currentContext?.findRenderObject(),
       locator: () => FindingLocator(
@@ -121,17 +132,40 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
 
   void _installHooks() {
     final hooks = _hooks = HookRegistry()..addKeyHandler(_handleKey);
+    _rebuildHook = RebuildHook(hooks);
     _globals = EnvironmentGlobals(hooks);
     _watchEnvironment();
     _watchFindings();
+    _startTrace();
+  }
+
+  /// Starts the flight recorder and its level 1 sources (PLAN-v2
+  /// Milestone 13), unless `TraceConfig.enabled` is false. A wrapper
+  /// mounted again keeps the record of the one before it.
+  void _startTrace() {
+    final hooks = _hooks;
+    final rebuildHook = _rebuildHook;
+    if (hooks == null || rebuildHook == null) return;
+    if (!widget.config.trace.enabled) return;
+    TraceSession(
+      owner: this,
+      config: widget.config.trace,
+      rebuildHook: rebuildHook,
+      content: () => _contentKey.currentContext as Element?,
+      resolver: SourceResolver.forConfig(widget.config),
+      recorder: TraceSession.current?.recorder,
+    );
   }
 
   /// Restores every global slot, the environment's and the detectors'
   /// included.
   void _uninstallHooks() {
     _unwatchEnvironment();
+    // Before the registry: the sources give their slots back first.
+    TraceSession.stopOwnedBy(this);
     _detectors?.dispose();
     _detectors = null;
+    _rebuildHook = null;
     _globals = null;
     final platform = debugDefaultTargetPlatformOverride;
     _hooks?.dispose();

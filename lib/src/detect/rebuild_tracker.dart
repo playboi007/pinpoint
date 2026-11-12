@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart';
 
 import '../core/hook_registry.dart';
+import '../core/rebuild_hook.dart';
 import '../search/render_search.dart';
 import 'detector.dart';
 
@@ -9,14 +10,17 @@ import 'detector.dart';
 ///
 /// The hook is called for every rebuild, so it only counts: source
 /// locations are resolved in [findings], when the list asks for them.
+///
+/// It shares the one Pinpoint callback in the slot with the trace's
+/// rebuild source through [RebuildHook].
 class RebuildTracker {
-  RebuildTracker({required HookRegistry registry, Duration Function()? clock})
-    : _clock = clock ?? _monotonic,
-      _slot = registry.slot<RebuildDirtyWidgetCallback?>(
-        key: #pinpointRebuildDirty,
-        read: () => debugOnRebuildDirtyWidget,
-        write: (value) => debugOnRebuildDirtyWidget = value,
-      );
+  RebuildTracker({
+    HookRegistry? registry,
+    RebuildHook? hook,
+    Duration Function()? clock,
+  }) : assert(registry != null || hook != null),
+       _clock = clock ?? _monotonic,
+       _hook = hook ?? RebuildHook(registry!);
 
   /// How far back counts reach.
   static const int windowSeconds = 5;
@@ -28,8 +32,8 @@ class RebuildTracker {
   static Duration _monotonic() => _watch.elapsed;
 
   final Duration Function() _clock;
-  final GlobalSlot<RebuildDirtyWidgetCallback?> _slot;
-  late final RebuildDirtyWidgetCallback _hook = _onRebuild;
+  final RebuildHook _hook;
+  late final RebuildDirtyWidgetCallback _listener = _onRebuild;
   final Map<Element, _Heat> _heat = Map<Element, _Heat>.identity();
   bool _installed = false;
 
@@ -37,8 +41,7 @@ class RebuildTracker {
 
   /// Whether someone else wrote the slot after us. DevTools does: turning
   /// its rebuild tracking off sets the slot to null.
-  bool get takenOver =>
-      _installed && !identical(debugOnRebuildDirtyWidget, _hook);
+  bool get takenOver => _installed && _hook.takenOver;
 
   /// Starts counting. Returns false, and writes nothing, when the slot is
   /// already taken: DevTools' "track rebuilds" asserts that the slot is
@@ -46,10 +49,8 @@ class RebuildTracker {
   /// writes an empty slot.
   bool install() {
     if (_installed && !takenOver) return true;
-    final current = debugOnRebuildDirtyWidget;
-    if (current != null && !identical(current, _hook)) return false;
+    if (!_hook.add(_listener)) return false;
     _installed = true;
-    _slot.set(_hook);
     return true;
   }
 
@@ -57,7 +58,7 @@ class RebuildTracker {
   /// left to them.
   void uninstall() {
     _installed = false;
-    _slot.release();
+    _hook.remove(_listener);
     _heat.clear();
   }
 

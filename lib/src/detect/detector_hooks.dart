@@ -1,6 +1,7 @@
 import 'package:flutter/rendering.dart';
 
 import '../core/hook_registry.dart';
+import '../core/rebuild_hook.dart';
 import 'debug_paint.dart';
 import 'detector.dart';
 import 'error_capture.dart';
@@ -17,6 +18,7 @@ class DetectorHooks {
     required this.findings,
     required RenderObject? Function() appRoot,
     required FindingLocator Function() locator,
+    RebuildHook? rebuildHook,
   }) : errors = ErrorCapture(
          registry: registry,
          onFindings: findings.addCaptured,
@@ -27,7 +29,10 @@ class DetectorHooks {
          onFindings: findings.addCaptured,
          appRoot: appRoot,
        ),
-       rebuilds = RebuildTracker(registry: registry),
+       rebuilds = RebuildTracker(
+         registry: registry,
+         hook: rebuildHook ?? RebuildHook(registry),
+       ),
        paint = DebugPaintToggles(registry) {
     findings.addListener(_apply);
     _apply();

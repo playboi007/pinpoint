@@ -23,6 +23,8 @@ const List<String> agentToolNames = [
   'verify_note',
   'stress_matrix',
   'run_steps',
+  'get_trace',
+  'trace_detail',
 ];
 
 /// How long the bridge waits for the app's answer to [tool].
@@ -411,5 +413,58 @@ final List<Map<String, Object?>> agentTools = [
       },
     },
     ['steps'],
+  ),
+  _tool(
+    'get_trace',
+    'Read what happened',
+    'The flight recorder: what the app did, one compact line per event '
+        '(seq, time, frame, kind, what), equal lines and repeating blocks '
+        'folded with ×n. Taps, keys, text, routes, errors, findings, '
+        'probes and marks are always recorded; rebuilds (build) and '
+        'watched state (state) only while level 3 runs (trace_detail). '
+        'partial: true means a limit dropped older events; notes say where '
+        'rebuilds were not recorded. Frames are counted, not listed, '
+        'unless kinds asks for frame.',
+    {
+      'since': {
+        'description':
+            'A seq (412), seconds back ("30s") or "mark" (the last mark).',
+      },
+      'until': {'description': 'Same forms as since.'},
+      'kinds': {
+        'type': 'array',
+        'items': {'type': 'string'},
+        'description':
+            'Kinds or prefixes: input, input.pointer, build, state, probe, '
+            'route, error, finding, mark, frame, detail.',
+      },
+      'widget': {
+        'type': 'string',
+        'description': 'Part of a widget type or of its source file.',
+      },
+      'cause': {'type': 'integer'},
+      'limit': {
+        'type': 'integer',
+        'description': 'Most lines (default 50, newest kept).',
+      },
+      'detail': {
+        'type': 'string',
+        'enum': ['compact', 'full'],
+        'description': 'full: whole events as JSON.',
+      },
+    },
+  ),
+  _tool(
+    'trace_detail',
+    'Record rebuilds and state',
+    'Starts or stops level 3 recording for you: rebuilds per widget per '
+        'frame and watches. Costly per event, so turn it off when done. '
+        'Answers which sources run; when another tool (DevTools "track '
+        'rebuilds") holds the rebuild slot, it says so and the other level '
+        '3 sources still run.',
+    {
+      'on': {'type': 'boolean'},
+    },
+    ['on'],
   ),
 ];
