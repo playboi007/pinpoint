@@ -519,6 +519,20 @@ Extra tools exist behind `--enable` (`launch_app`, `list_devices`, `run_tests`, 
 - **[run-chrome]** An error thrown in an `async` handler that nobody awaits (`unawaited(...)` from `onPressed`) shows only in the browser console: no toast, and the "Capture errors" detector did not list it.
 - **[run-chrome]** `flutter run -d chrome` starts Chrome with `--remote-debugging-port`. Over that port, `Profiler`, `Page.captureScreenshot` and `Input.dispatchMouseEvent` work on the app's tab without taking window focus. A Chrome window that other windows cover fully on macOS is `hidden`, so the command poll stops.
 
+## 30. Facts found in Session 15 (for `PLAN-v2.md`)
+
+All **[source]**, none run. `PLAN-v2.md` "Verify by running" lists what Session 16 must run.
+
+- The engine calls each binding callback through the zone that was current when the callback was set: `_invoke1` in `bin/cache/pkg/sky_engine/lib/ui/hooks.dart:452`, and `invoke1` in `bin/cache/flutter_web_sdk/lib/_engine/engine/platform_dispatcher.dart:1740`. When that zone is already current, the callback is called directly, with no zone call.
+- A custom zone's `runUnaryGuarded` calls `runUnary` (`dart-sdk/lib/async/zone.dart:708`), so a `ZoneSpecification.runUnary` handler sees every engine entry.
+- `await` listens with `_Future._thenAwait` (`dart-sdk/lib/async/future_impl.dart:420`): "The system created listeners are not registered in the zone". A `registerUnaryCallback` handler does not see `await`. The continuation still runs in the zone where the `await` was, so zone values cross the gap.
+- `SchedulerBinding.addPostFrameCallback` (`scheduler/binding.dart:818`) stores the callback with no zone. It runs in the zone of the frame that calls it.
+- `BuildOwner.scheduleBuildFor` (`widgets/framework.dart:2950`) calls `debugPrintStack` with the element in the label when `debugPrintScheduleBuildForStacks` is true. It runs in the caller's zone.
+- `PointerRouter.addGlobalRoute` (`gestures/pointer_router.dart:60`) sees every pointer event.
+- `BindingBase.debugZoneErrorsAreFatal` and `debugCheckZone` (`foundation/binding.dart:438`): the binding and `runApp` must be in the same zone, or Flutter prints "Zone mismatch".
+- On web, `package:http` 1.6.0 calls `fetch` (`lib/src/browser_client.dart:36`); `dio_web_adapter` 2.2.0 uses `XMLHttpRequest` (`lib/src/adapter_impl.dart:36`).
+- Flutter Tools pins `dwds` 27.1.2. Its `lib/src/services/chrome/chrome_proxy_service.dart` has `addBreakpoint` (410), `addBreakpointWithScriptUri` (439), `evaluateInFrame` (698) and `getStack` (825). `getRetainingPath` and `getInstances` are only in the base `proxy_service.dart`; treat them as not supported on web.
+
 ---
 
 ## Other plan errors and gaps found while scaffolding
