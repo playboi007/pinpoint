@@ -48,12 +48,17 @@ class HookRegistry {
   /// can mount a new wrapper State before it disposes the old one. The
   /// newest holder owns the slot and keeps the original value, so the old
   /// State's dispose does not undo the new State's write.
+  ///
+  /// [same] tells whether two values are the same; default `identical`.
+  /// A JS value read twice in a wasm build is two Dart objects, so a JS
+  /// global (`window.fetch`, rule 17) compares with `strictEquals`.
   GlobalSlot<T> slot<T>({
     required Object key,
     required T Function() read,
     required void Function(T value) write,
+    bool Function(T a, T b)? same,
   }) {
-    final slot = GlobalSlot<T>._(key, read, write);
+    final slot = GlobalSlot<T>._(key, read, write, same);
     _restores.add(slot.release);
     return slot;
   }
@@ -74,7 +79,7 @@ class HookRegistry {
 
 /// One global slot from [HookRegistry.slot].
 class GlobalSlot<T> {
-  GlobalSlot._(this._key, this._read, this._write);
+  GlobalSlot._(this._key, this._read, this._write, this._same);
 
   /// The holder of each global, by key.
   static final Map<Object, GlobalSlot<Object?>> _holders =
@@ -83,6 +88,9 @@ class GlobalSlot<T> {
   final Object _key;
   final T Function() _read;
   final void Function(T value) _write;
+  final bool Function(T a, T b)? _same;
+
+  bool _isSame(T a, T b) => _same?.call(a, b) ?? identical(a, b);
 
   bool _held = false;
   late T _previous;
@@ -102,11 +110,11 @@ class GlobalSlot<T> {
     if (holder != null &&
         !identical(holder, this) &&
         holder._held &&
-        identical(_read(), holder._ours)) {
+        holder._isSame(_read(), holder._ours)) {
       // Take over: the other holder no longer restores anything.
       _previous = holder._previous as T;
       holder._held = false;
-    } else if (!_held || !identical(_read(), _ours)) {
+    } else if (!_held || !_isSame(_read(), _ours)) {
       // First write, or someone outside Pinpoint wrote the slot since our
       // last write: theirs is what comes back on release.
       _previous = _read();
@@ -123,6 +131,6 @@ class GlobalSlot<T> {
     if (!_held) return;
     _held = false;
     if (identical(_holders[_key], this)) _holders.remove(_key);
-    if (identical(_read(), _ours)) _write(_previous);
+    if (_isSame(_read(), _ours)) _write(_previous);
   }
 }

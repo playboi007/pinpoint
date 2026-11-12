@@ -15,6 +15,7 @@ import '../search/source_resolver.dart';
 import '../trace/sources/error_source.dart';
 import '../trace/sources/finding_source.dart';
 import '../trace/sources/key_source.dart';
+import '../trace/sources/network_source.dart';
 import '../trace/sources/pointer_source.dart';
 import '../trace/sources/route_source.dart';
 import '../trace/sources/text_source.dart';
@@ -181,6 +182,7 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
         ),
         routes,
         ErrorSource(),
+        NetworkSource(hooks: hooks, bodies: widget.config.trace.bodies),
         FindingSource(findings: () => _controller.findings, resolver: resolver),
       ],
     );

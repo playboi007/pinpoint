@@ -13,6 +13,7 @@ class TraceConfig {
     this.maxBytes = TraceRecorder.defaultMaxBytes,
     this.sources = const <TraceSource>[],
     this.causes = true,
+    this.bodies = true,
   }) : assert(maxEvents > 0),
        assert(maxBytes > 0);
 
@@ -46,4 +47,11 @@ class TraceConfig {
   /// frame). False: `PinPoint.run` calls its body with no zone, and events
   /// have no cause.
   final bool causes;
+
+  /// Whether the network source reads answers (level 2): to hash them, so
+  /// rules can tell a repeated answer, and to keep up to 256 KB each for a
+  /// tape. Bodies hold personal data and cost memory; they stay in the app
+  /// and never go into an event. False: no response is ever cloned, and
+  /// events have no body hash.
+  final bool bodies;
 }

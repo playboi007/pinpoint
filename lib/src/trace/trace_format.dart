@@ -8,6 +8,31 @@ import 'trace_recorder.dart';
 /// `+3.21s`: [ms] since the run started.
 String formatTraceTime(int ms) => '+${(ms / 1000).toStringAsFixed(2)}s';
 
+/// `1.2 KB` for 1234 bytes.
+String formatBytes(int bytes) => bytes < 1024
+    ? '$bytes B'
+    : bytes < 1024 * 1024
+    ? '${(bytes / 1024).toStringAsFixed(1)} KB'
+    : '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+
+/// A URL without its scheme, and without the host when it is the page's
+/// own: `/existing?type=faq`, `api.test/items`.
+String shortUrl(String url) {
+  final uri = Uri.tryParse(url);
+  if (uri == null ||
+      !uri.hasScheme ||
+      uri.scheme == 'data' ||
+      uri.scheme == 'blob') {
+    return url;
+  }
+  final path =
+      '${uri.path.isEmpty ? '/' : uri.path}'
+      '${uri.hasQuery ? '?${uri.query}' : ''}';
+  final base = Uri.base;
+  if (base.hasAuthority && uri.authority == base.authority) return path;
+  return '${uri.authority}$path';
+}
+
 /// `home.dart:120` from `lib/screens/home.dart:120:12`.
 String shortSource(String source) {
   final parts = source.split(':');
@@ -96,6 +121,23 @@ String traceSummary(TraceEvent event) {
       return '${d['type'] ?? 'error'}$uncaught: ${d['message'] ?? ''}$where';
     case TraceKind.finding:
       return '${d['kind'] ?? '?'}: ${d['summary'] ?? ''}';
+    case TraceKind.netRequest:
+      final size = d['size'] is int ? ' ${formatBytes(d['size']! as int)}' : '';
+      return '${d['method'] ?? '?'} ${shortUrl('${d['url'] ?? ''}')}$size'
+          '$agent';
+    case TraceKind.netResponse:
+      final size = d['size'] is int ? ' ${formatBytes(d['size']! as int)}' : '';
+      final cut = d['truncated'] == true ? ' (truncated)' : '';
+      return '${d['status'] ?? '?'} ${d['method'] ?? '?'} '
+          '${shortUrl('${d['url'] ?? ''}')} ${d['ms'] ?? '?'}ms$size$cut'
+          '${d['req'] is int ? ' (req ${d['req']})' : ''}';
+    case TraceKind.netError:
+      return '${d['error'] ?? 'failed'} ${d['method'] ?? '?'} '
+          '${shortUrl('${d['url'] ?? ''}')}'
+          '${d['req'] is int ? ' (req ${d['req']})' : ''}';
+    case TraceKind.message:
+      final size = d['size'] is int ? ' ${formatBytes(d['size']! as int)}' : '';
+      return 'from ${d['origin'] ?? '?'}$size ${d['data'] ?? ''}'.trimRight();
     case TraceKind.mark:
       final text = d['text'];
       final by = d['by'] is String ? ' by ${d['by']}' : '';
@@ -123,6 +165,14 @@ String traceFoldKey(TraceEvent event) => switch (event.kind) {
   TraceKind.frame => 'frame ${event.data['builds'] ?? ''}',
   TraceKind.pointer when event.data['phase'] == 'move' =>
     'move ${event.widget ?? ''}',
+  // A loop asks the same thing again: fold on method and URL, not on the
+  // time it took or the request it answers.
+  TraceKind.netRequest || TraceKind.netError =>
+    '${event.kind} ${event.data['method']} '
+        '${event.data['url']}',
+  TraceKind.netResponse =>
+    'net.response ${event.data['status']} '
+        '${event.data['method']} ${event.data['url']} ${event.data['hash']}',
   _ => '${event.kind} ${traceSummary(event)}',
 };
 

@@ -22,6 +22,16 @@ abstract final class TraceKind {
   /// A `message` event on `window` (Milestone 14).
   static const String message = 'input.message';
 
+  /// A request started (`fetch` or XHR on web).
+  static const String netRequest = 'net.request';
+
+  /// The headers of an answer arrived. The body's size and hash are added
+  /// when it has been read.
+  static const String netResponse = 'net.response';
+
+  /// A request failed with no answer: a network error, abort or timeout.
+  static const String netError = 'net.error';
+
   /// A frame the app drew.
   static const String frame = 'frame';
 
