@@ -69,6 +69,23 @@ PinPoint.probe('existing.ensureLoaded', {'type': type, 'loaded': _loadedForType}
 
 The recorder changes timing a little. If a bug goes away with Pinpoint on, turn the recorder off first: `PinPointConfig(trace: TraceConfig(enabled: false))`. With Pinpoint off, nothing is recorded and `PinPoint.probe` returns at once.
 
+## Causes and network (v2, Milestone 14)
+
+Wrap `runApp` in `PinPoint.run`, and every event names the entry that started it: a tap, a frame, a key, a `window` message, or an agent command. `get_trace` shows it as `c37` on each line.
+
+```dart
+void main() => PinPoint.run(() => runApp(const MyApp()));
+```
+
+- **Call it first in `main`.** Put `WidgetsFlutterBinding.ensureInitialized()` inside it too. Flutter prints "Zone mismatch" when the binding is set up in one zone and `runApp` runs in another. When the binding already exists, `PinPoint.run` runs the app with no zone, records no causes, and prints one hint.
+- **What it costs.** One child zone per entry from the engine (a pointer packet, a frame), for the whole run: the zone cannot start later. `PinPoint.run(..., trace: const TraceConfig(causes: false))` turns it off; pass the same `TraceConfig` you give `PinPointConfig.trace`.
+- **Errors nobody caught** (an `async` handler nobody awaits) become `error` events with their cause, and still reach the app's own handler. On web they otherwise show only in the browser console.
+- **Requests.** On web, `fetch` (`package:http`) and `XMLHttpRequest` (Dio) give `net.request`, then `net.response` or `net.error`, with the cause of the call. The app gets the browser's own promise and response. Bodies are read from a clone to hash them, and kept up to 256 KB each for tapes; large, binary and event-stream answers are never cloned. `TraceConfig(bodies: false)` reads no body.
+- **Secrets.** Header values and URL parameters named in `TraceConfig.redact` are masked before an event exists. The defaults are `authorization`, `cookie`, `set-cookie`, and any name with `token`, `key` or `secret` in it. Traffic to the bridge is never recorded.
+- **Agent tools.** `why({seq})` walks back from one event to the tap or frame that started it, and through the frames that led there; `loop: true` when each frame repeats the same work. `caused_by({target})` counts what a widget's subtree started. The Timeline groups events by cause, and the Info tab says what the picked widget caused in the last 5 seconds.
+
+Limits: a post-frame callback runs with the cause of the frame that calls it. A frame is linked to every cause that ran since the frame before it, and `why` picks the one that set state, answered a request or took input. A timer or a stream keeps the cause of the moment it was made; `why` shows the age of an old cause.
+
 ## What it will do
 
 - Inspect mode: hover to outline a widget, click to select it.
@@ -187,7 +204,7 @@ cd example && flutter run -d chrome --wasm
 
 ## Example screens
 
-Counter and spinner, long list, dialog and bottom sheet, nested navigator, `CustomPaint`, form with text fields and a custom `SaveBar` widget, `HtmlElementView` (web only), and a What-if probe that prints what the app inherits.
+Counter and spinner, long list, dialog and bottom sheet, nested navigator, `CustomPaint`, form with text fields and a custom `SaveBar` widget, `HtmlElementView` (web only), and a What-if probe that prints what the app inherits. The bug zoo has one planted problem of each kind, and the planted loop screen schedules a load from `build`: try `why` on its fifth request.
 
 ## License
 

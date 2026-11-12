@@ -563,6 +563,31 @@ Session 16 of PLAN-v2 (spikes and cost table) was not run first: the user starte
 - VM wall time for 120 frames, on against off: from 0.95 to 1.6 times between runs with nothing changed. Too noisy for a 3 % budget; the test does not check it.
 - `get_screen` median: 8.9 ms on, 9.8 ms off (not slower).
 
+## 32. Facts found in Session 17 (PLAN-v2 Milestone 14, causes and network)
+
+**Chrome tests work here.** `flutter test --platform chrome <file>` runs a `@TestOn('browser')` file in headless Chrome, and `--wasm` runs it under dart2wasm. The VM run skips such a file. Blob URLs stand in for a local test server: same origin, real headers, a real body stream.
+
+- **[run-web]** A `fetch` replaced from Dart (`globalContext['fetch'] = f.toJS`) is the one `package:http` 1.6 `BrowserClient` calls, in DDC and in wasm (`test/trace/web/network_web_test.dart`). `Zone.current` inside the replaced function is the caller's zone. Answers two "Verify by running" boxes for the test runner; a real app is still a manual check.
+- **[run-web]** A `then` attached to the browser's promise before the app gets it runs first. `response.clone()` there leaves `bodyUsed` false for the app, and the app's bytes, headers, status and stream are the same with the source on and off.
+- **[run-web]** `XMLHttpRequest.prototype.open(m, u, undefined)` is a synchronous request: the spec turns an `undefined` async into `false`. A wrapper must call the original with the caller's arity; `toJSCaptureThis` with optional parameters gives `null` for a left-out argument.
+- **[run-web]** `window.postMessage` from script reaches the app's own listener with the page's origin, the origin the message source records.
+- **[run-web]** In wasm, a JS value read twice can be two Dart objects, so `identical` cannot tell whether a JS global still holds ours. `HookRegistry.slot` takes `same:`; the network slots use `strictEquals`. The "stop gives fetch back" test passes in DDC and wasm.
+- **[run-vm]** Inside a cause, `Zone.current` is the cause's child zone, never the binding zone. So the engine's shortcut (`hooks.dart:452`: call directly when the target zone is current) fires only for code that runs in the binding zone itself, and a nested dispatch reaches the zone handler. **Plan wording differs:** Pinpoint gives a nested entry the running cause, which is what the plan wants.
+- **[source]** `debugCheckZone` compares `Zone.current != _debugBindingZone` (`foundation/binding.dart:500`). In `main() async { ensureInitialized(); await x; runApp(...); }` the continuation would be an entry, fork a cause, and print "Zone mismatch". The zone makes no cause until `WidgetsBinding.instance.rootElement` exists. **[run-vm]** `test/trace/cause_zone_test.dart`.
+- **[source]** `onDrawFrame` is called while the phase is still `midFrameMicrotasks`; the draw call joins the begin-frame cause. On web, key data comes through `invoke(() => callback(...))` (`run`, no argument), so a key entry is named by its first input event.
+- **[source]** Child zones get no error handler of their own: a future that fails in one error zone does not deliver its error to a listener in another, so a handler per cause would change what the app sees. A future made before `PinPoint.run` and awaited inside it crosses an error zone, as with `runZonedGuarded`.
+- **[run-vm]** On the VM, an uncaught error that the zone passes to the root also reaches `PlatformDispatcher.onError`. The error source records it once.
+- **Decided: frame-to-frame links are "near"** (PLAN-v2 Milestone 14, step 9). The Session 16 spike did not run. The exact way costs one stack capture per `setState` (slow on web) and takes the `debugPrint` slot, and whether its label finds the element again is unverified. A frame cause lists up to 8 causes that ran since the frame before; `why` picks the one whose last events set state, answered a request or took input.
+
+**Source levels and cost (rule 18).** **[unverified]** Not measured in Chrome yet; needs the CPU profile of the long list.
+
+| Part | Level | Work per event |
+| --- | --- | --- |
+| cause zone | none (whole run) | One zone fork per engine entry; one zone lookup and one `identical` per callback in a cause; one counter per timer |
+| network | 1 | Per request: one zone lookup, URL masking (`Uri.parse`), header masking. Per answer: one event |
+| network bodies | 2 | One `clone()` per text or JSON answer up to 256 KB, read in chunks into an FNV-1a hash; a copy kept, bounded by count and bytes |
+| message | 1 | `JSON.stringify`, `jsonDecode`, masking, a hash, per message |
+
 ---
 
 ## Other plan errors and gaps found while scaffolding
