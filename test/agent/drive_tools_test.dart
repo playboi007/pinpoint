@@ -440,6 +440,65 @@ void main() {
       expect(log.events, ['changed Ada'], reason: 'step 1 never ran');
       await bridge.shutdown(tester);
     });
+
+    testWidgets('a widget that is still coming in is waited for', (
+      tester,
+    ) async {
+      await pumpApp(tester, _Sheet(log: log));
+      final result = await ok(tester, 'run_steps', {
+        'steps': [
+          {
+            'tool': 'tap',
+            'target': {'text': 'Open'},
+          },
+          // The sheet starts below the screen and slides up.
+          {
+            'tool': 'tap',
+            'target': {'text': 'Confirm'},
+          },
+        ],
+      });
+      expect(result.containsKey('stopped'), isFalse, reason: '$result');
+      expect(log.events, ['confirmed']);
+      await bridge.shutdown(tester);
+    });
+
+    testWidgets('a read after a change returns once its widget stops '
+        'moving; a spinner elsewhere does not hold it', (tester) async {
+      await pumpApp(tester, const _Grow());
+      final result = await ok(tester, 'run_steps', {
+        'steps': [
+          {
+            'tool': 'tap',
+            'target': {'text': 'Grow'},
+          },
+          {'tool': 'find_widgets', 'key': 'box'},
+        ],
+      });
+      final read = (result['steps']! as List).last! as Map<String, Object?>;
+      final box = ((read['result']! as Map)['widgets']! as List).single! as Map;
+      expect((box['rect']! as List)[2], 300, reason: 'the grown width');
+      expect(read.containsKey('settled'), isFalse);
+      await bridge.shutdown(tester);
+    });
+
+    testWidgets('an idle app is not waited on, unless wait_ms asks', (
+      tester,
+    ) async {
+      await pumpApp(tester, _Later(log: log));
+      // Nothing draws: the widget cannot come by itself, so no wait.
+      final now = await run(tester, 'tap', {
+        'target': {'text': 'Later'},
+      });
+      expect(now['error'], startsWith('no widget matches'));
+      // Content that loads: the agent asks to wait for it.
+      await ok(tester, 'tap', {
+        'target': {'text': 'Later'},
+        'wait_ms': 1000,
+      });
+      expect(log.events, ['later']);
+      await bridge.shutdown(tester);
+    });
   });
 }
 
@@ -623,6 +682,99 @@ class _LongForm extends StatelessWidget {
         ),
         const SizedBox(height: 200),
       ],
+    ),
+  );
+}
+
+class _Sheet extends StatelessWidget {
+  const _Sheet({required this.log});
+
+  final _Log log;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    body: Center(
+      child: Builder(
+        builder: (context) => ElevatedButton(
+          onPressed: () => showModalBottomSheet<void>(
+            context: context,
+            builder: (_) => Padding(
+              padding: const EdgeInsets.all(24),
+              child: ElevatedButton(
+                onPressed: () => log.events.add('confirmed'),
+                child: const Text('Confirm'),
+              ),
+            ),
+          ),
+          child: const Text('Open'),
+        ),
+      ),
+    ),
+  );
+}
+
+class _Grow extends StatefulWidget {
+  const _Grow();
+
+  @override
+  State<_Grow> createState() => _GrowState();
+}
+
+class _GrowState extends State<_Grow> {
+  double _width = 100;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    body: Column(
+      children: [
+        // Never settles: an idle wait would run to its timeout.
+        const CircularProgressIndicator(),
+        ElevatedButton(
+          onPressed: () => setState(() => _width = 300),
+          child: const Text('Grow'),
+        ),
+        AnimatedContainer(
+          key: const ValueKey<String>('box'),
+          duration: const Duration(milliseconds: 500),
+          width: _width,
+          height: 40,
+          color: Colors.teal,
+        ),
+      ],
+    ),
+  );
+}
+
+class _Later extends StatefulWidget {
+  const _Later({required this.log});
+
+  final _Log log;
+
+  @override
+  State<_Later> createState() => _LaterState();
+}
+
+class _LaterState extends State<_Later> {
+  bool _loaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Like a network answer: a timer, and no frames meanwhile.
+    Future<void>.delayed(const Duration(milliseconds: 300), () {
+      if (mounted) setState(() => _loaded = true);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    body: Center(
+      child: _loaded
+          ? TextButton(
+              onPressed: () => widget.log.events.add('later'),
+              child: const Text('Later'),
+            )
+          : const SizedBox.shrink(),
     ),
   );
 }

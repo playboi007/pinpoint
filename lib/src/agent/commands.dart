@@ -39,6 +39,13 @@ class AgentError implements Exception {
   String toString() => message;
 }
 
+/// A step that cannot run yet but may soon: its widget is not built, not
+/// laid out or not on screen. Thrown only before the tool changes
+/// anything, so the step can be tried again.
+class AgentNotReady extends AgentError {
+  const AgentNotReady(super.message);
+}
+
 /// How much a tool may return. Tool output is context the agent pays for
 /// (watch out for): every list defaults to 20 items and every string to
 /// 200 characters, with `limit` and `max_chars` to ask for more.
@@ -154,6 +161,9 @@ class HandleTable {
     );
   }
 
+  /// Forgets the handles [ids].
+  void forget(Iterable<String> ids) => ids.forEach(_handles.remove);
+
   /// Forgets every handle.
   void clear() => _handles.clear();
 }
@@ -202,46 +212,110 @@ class AgentCommands {
   final HandleTable handles = HandleTable();
 
   /// Runs [tool]. Matches [AgentRunner].
+  ///
+  /// A step that is not ready ([AgentNotReady]) is tried again by
+  /// [_againSoon]. One that is ready runs at once: nothing waits for an
+  /// app that has nothing left to do.
   Future<Map<String, Object?>> run(
     String tool,
     Map<String, Object?> args,
     AgentCancel cancel,
   ) async {
     final limits = OutputLimits.from(args);
-    try {
-      args = withTarget(args);
-      final Object result = switch (tool) {
-        'run_steps' => await runSteps(args, cancel),
-        'verify_note' => await verifyNote(args, cancel),
-        'wait_idle' => await waitIdleTool(args, cancel),
-        'tap' => await tap(args, cancel),
-        'long_press' => await tap(args, cancel, long: true),
-        'enter_text' => await enterText(args, limits, cancel),
-        'scroll' => await scroll(args),
-        'scroll_to' => await scrollTo(args, limits, cancel),
-        'navigate' => await navigate(args, cancel),
-        'back' => await back(cancel),
-        'set_environment' => await setEnvironment(args, cancel),
-        'reset_environment' => await resetEnvironment(cancel),
-        'scan' => await scan(args, limits),
-        'screenshot' => await screenshot(args),
-        'stress_matrix' => await stressMatrix(args, limits, cancel),
-        'get_state' => stateDump(
-          element(args),
-          adapters: stateAdapters?.call() ?? const <StateAdapter>[],
-          items: limits.items,
-          chars: limits.chars,
-        ),
-        'get_screen' => getScreen(limits),
-        'find_widgets' => findWidgets(args, limits),
-        'inspect' => inspect(args),
-        'flash' => flash(args),
-        _ => throw AgentError('unknown tool: $tool'),
-      };
-      return AgentControl.ok(result);
-    } on AgentError catch (failure) {
-      return AgentControl.error(failure.message);
+    final ms = args['wait_ms'];
+    final extra = Duration(
+      milliseconds: ms is num ? ms.round().clamp(0, maxWaitMs) : 0,
+    );
+    final watch = Stopwatch()..start();
+    while (true) {
+      try {
+        return AgentControl.ok(
+          await _dispatch(tool, withTarget(args), limits, cancel),
+        );
+      } on AgentNotReady catch (failure) {
+        if (!await _againSoon(watch.elapsed, extra, cancel)) {
+          return AgentControl.error(failure.message);
+        }
+      } on AgentError catch (failure) {
+        return AgentControl.error(failure.message);
+      }
     }
+  }
+
+  /// The longest `wait_ms` a step may ask for.
+  static const int maxWaitMs = 10000;
+
+  /// Whether a step that was not ready gets another try, after a wait.
+  ///
+  /// While the app draws frames, something is still coming in (a route, a
+  /// sheet, a list item): the wait is one frame, up to [settleTimeout]. An
+  /// app that draws nothing does not change by itself, so the step fails
+  /// at once, unless `wait_ms` ([extra]) asks to wait for content that
+  /// loads over the network; then it tries every 50 ms.
+  Future<bool> _againSoon(
+    Duration elapsed,
+    Duration extra,
+    AgentCancel cancel,
+  ) async {
+    final moving = appIsMoving;
+    final limit = moving && extra < settleTimeout ? settleTimeout : extra;
+    if (elapsed >= limit) return false;
+    await (moving
+        ? _nextFrame()
+        : Future<void>.delayed(const Duration(milliseconds: 50)));
+    cancel.check();
+    return true;
+  }
+
+  /// Whether the app draws frames now: a frame is scheduled or running, or
+  /// an animation ticks.
+  static bool get appIsMoving {
+    final scheduler = SchedulerBinding.instance;
+    return scheduler.hasScheduledFrame ||
+        scheduler.schedulerPhase != SchedulerPhase.idle ||
+        scheduler.transientCallbackCount > 0;
+  }
+
+  /// The next frame, or 100 ms: a hidden tab draws none.
+  static Future<void> _nextFrame() => Future.any([
+    _frame(),
+    Future<void>.delayed(const Duration(milliseconds: 100)),
+  ]);
+
+  Future<Object> _dispatch(
+    String tool,
+    Map<String, Object?> args,
+    OutputLimits limits,
+    AgentCancel cancel,
+  ) async {
+    return switch (tool) {
+      'run_steps' => await runSteps(args, cancel),
+      'verify_note' => await verifyNote(args, cancel),
+      'wait_idle' => await waitIdleTool(args, cancel),
+      'tap' => await tap(args, cancel),
+      'long_press' => await tap(args, cancel, long: true),
+      'enter_text' => await enterText(args, limits, cancel),
+      'scroll' => await scroll(args),
+      'scroll_to' => await scrollTo(args, limits, cancel),
+      'navigate' => await navigate(args, cancel),
+      'back' => await back(cancel),
+      'set_environment' => await setEnvironment(args, cancel),
+      'reset_environment' => await resetEnvironment(cancel),
+      'scan' => await scan(args, limits),
+      'screenshot' => await screenshot(args),
+      'stress_matrix' => await stressMatrix(args, limits, cancel),
+      'get_state' => stateDump(
+        element(args),
+        adapters: stateAdapters?.call() ?? const <StateAdapter>[],
+        items: limits.items,
+        chars: limits.chars,
+      ),
+      'get_screen' => getScreen(limits),
+      'find_widgets' => findWidgets(args, limits),
+      'inspect' => inspect(args),
+      'flash' => flash(args),
+      _ => throw AgentError('unknown tool: $tool'),
+    };
   }
 
   /// Tools a `run_steps` step may call. Not `inspect`, `screenshot`,
@@ -296,18 +370,24 @@ class AgentCommands {
       }
     }
     final done = <Map<String, Object?>>[];
+    // Whether the step before changed the app.
+    var changed = false;
     for (final (i, step) in steps.cast<Map<String, Object?>>().indexed) {
       cancel.check();
       final tool = step['tool']! as String;
+      final input = {...step}..remove('tool');
       Map<String, Object?> answer;
       try {
-        answer = await run(tool, {...step}..remove('tool'), cancel);
+        answer = changed && settledReads.contains(tool)
+            ? await settledRead(tool, input, cancel)
+            : await run(tool, input, cancel);
       } on AgentAborted {
         rethrow;
       } on Object catch (failure) {
         answer = AgentControl.error('$tool failed: $failure');
       }
       done.add({'step': i + 1, 'tool': tool, ...answer});
+      changed = AgentControl.drivingTools.contains(tool);
       if (answer['ok'] != true) {
         return {
           'steps': done,
@@ -317,6 +397,76 @@ class AgentCommands {
     }
     return {'steps': done};
   }
+
+  /// Reads that [runSteps] settles after a step that changed the app.
+  static const Set<String> settledReads = {
+    'find_widgets',
+    'get_screen',
+    'get_state',
+    'scan',
+  };
+
+  /// [tool], a read right after a step that changed the app, read again on
+  /// each frame until two reads agree: an animation the change started (a
+  /// route coming in, a box growing) has then ended.
+  ///
+  /// Nothing waits for the app to be idle. A tap's ink ripple, or a spinner
+  /// elsewhere on screen, keeps the app drawing frames for a long time but
+  /// does not change the read: it costs one more read, not a wait. A
+  /// fade alone changes no rect and is not seen; `wait_idle` covers it.
+  /// Gives up at [settleTimeout] and says `settled: false`.
+  Future<Map<String, Object?>> settledRead(
+    String tool,
+    Map<String, Object?> args,
+    AgentCancel cancel,
+  ) async {
+    var answer = await run(tool, args, cancel);
+    final watch = Stopwatch()..start();
+    while (answer['ok'] == true && appIsMoving) {
+      if (watch.elapsed >= settleTimeout) return {...answer, 'settled': false};
+      await _nextFrame();
+      cancel.check();
+      final again = await run(tool, args, cancel);
+      // The first read's handles are dropped: reading on every frame must
+      // not push out handles the agent holds (the table keeps 500).
+      handles.forget(
+        _handlesIn(answer['result']).where((id) => id != args['handle']),
+      );
+      if (again['ok'] != true || _sameRead(answer['result'], again['result'])) {
+        return again;
+      }
+      answer = again;
+    }
+    return answer;
+  }
+
+  /// Every handle in a read.
+  static Iterable<String> _handlesIn(Object? value) sync* {
+    switch (value) {
+      case Map<String, Object?>():
+        if (value['handle'] case final String id) yield id;
+        for (final item in value.values) {
+          yield* _handlesIn(item);
+        }
+      case List<Object?>():
+        for (final item in value) {
+          yield* _handlesIn(item);
+        }
+    }
+  }
+
+  /// Whether two reads say the same, new handles aside.
+  static bool _sameRead(Object? a, Object? b) =>
+      jsonEncode(_withoutHandles(a)) == jsonEncode(_withoutHandles(b));
+
+  static Object? _withoutHandles(Object? value) => switch (value) {
+    Map<String, Object?>() => {
+      for (final MapEntry(:key, :value) in value.entries)
+        if (key != 'handle') key: _withoutHandles(value),
+    },
+    List<Object?>() => [for (final item in value) _withoutHandles(item)],
+    _ => value,
+  };
 
   /// [args] with its `target` query turned into a new `handle`, so every
   /// tool that takes a handle takes a target too. A target is found again
@@ -335,8 +485,10 @@ class AgentCommands {
     final at = target['index'];
     final index = at is int ? at : 0;
     final found = matching(target, take: index + 1);
-    if (index < 0 || index >= found.length) {
-      throw AgentError(
+    if (index < 0) throw const AgentError('index must be 0 or more');
+    if (index >= found.length) {
+      // Perhaps not built yet: a page or a list that is coming in.
+      throw AgentNotReady(
         found.isEmpty
             ? 'no widget matches the target ${jsonEncode(target)}'
             : 'the target matches ${found.length} widgets; index $index is '
@@ -503,9 +655,7 @@ class AgentCommands {
       var quiet = 0;
       while (!expired.isCompleted) {
         cancel.check();
-        if (scheduler.hasScheduledFrame ||
-            scheduler.schedulerPhase != SchedulerPhase.idle ||
-            scheduler.transientCallbackCount > 0) {
+        if (appIsMoving) {
           quiet = 0;
           await Future.any([scheduler.endOfFrame, expired.future]);
           continue;
@@ -1050,11 +1200,11 @@ class AgentCommands {
     cancel.check();
     final renderObject = renderObjectOf(target);
     if (renderObject == null) {
-      throw const AgentError('the widget is not laid out');
+      throw const AgentNotReady('the widget is not laid out');
     }
     final visible = RenderSearch.visibleRectOf(renderObject);
     if (visible == null || visible.width <= 0 || visible.height <= 0) {
-      throw const AgentError('not on screen; call scroll_to first');
+      throw const AgentNotReady('not on screen; call scroll_to first');
     }
     final point = visible.center;
     // A what-if viewport leaves screen around the app: a point there is

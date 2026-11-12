@@ -61,6 +61,14 @@ const Map<String, Object?> _handle = {
       'target instead.',
 };
 
+const Map<String, Object?> _waitMs = {
+  'type': 'integer',
+  'description':
+      'For a widget that is not there yet while the app is idle (content '
+      'that loads): how long to keep looking, at most 10000. While the app '
+      'animates, a widget that is coming in is waited for anyway (1 s).',
+};
+
 const Map<String, Object?> _target = {
   'type': 'object',
   'description':
@@ -141,6 +149,7 @@ final List<Map<String, Object?>> agentTools = [
     {
       'handle': _handle,
       'target': _target,
+      'wait_ms': _waitMs,
       'detail': {
         'type': 'string',
         'enum': ['compact', 'standard', 'full'],
@@ -152,20 +161,20 @@ final List<Map<String, Object?>> agentTools = [
     'Show a widget to the user',
     'Outlines the widget for 1.5 s in the app, so the user sees which one '
         'you mean.',
-    {'handle': _handle, 'target': _target},
+    {'handle': _handle, 'target': _target, 'wait_ms': _waitMs},
   ),
   _tool(
     'tap',
     'Tap a widget',
     "A synthetic tap at the widget's center. Refused with \"obscured by X\" "
         'when something else is on top (a dialog barrier).',
-    {'handle': _handle, 'target': _target},
+    {'handle': _handle, 'target': _target, 'wait_ms': _waitMs},
   ),
   _tool(
     'long_press',
     'Long-press a widget',
     "A synthetic long press at the widget's center.",
-    {'handle': _handle, 'target': _target},
+    {'handle': _handle, 'target': _target, 'wait_ms': _waitMs},
   ),
   _tool(
     'enter_text',
@@ -175,6 +184,7 @@ final List<Map<String, Object?>> agentTools = [
     {
       'handle': _handle,
       'target': _target,
+      'wait_ms': _waitMs,
       'text': {'type': 'string'},
     },
     ['text'],
@@ -189,6 +199,7 @@ final List<Map<String, Object?>> agentTools = [
     {
       'handle': _handle,
       'target': _target,
+      'wait_ms': _waitMs,
       'dx': {'type': 'number'},
       'dy': {'type': 'number'},
     },
@@ -305,6 +316,7 @@ final List<Map<String, Object?>> agentTools = [
     {
       'handle': _handle,
       'target': _target,
+      'wait_ms': _waitMs,
       'max_width': {'type': 'integer', 'description': 'Default 800.'},
     },
   ),
@@ -317,6 +329,7 @@ final List<Map<String, Object?>> agentTools = [
     {
       'handle': _handle,
       'target': _target,
+      'wait_ms': _waitMs,
       'limit': _limit,
       'max_chars': _maxChars,
     },
@@ -377,8 +390,10 @@ final List<Map<String, Object?>> agentTools = [
         'step that fails. Each step is {tool, …its args} and answers as '
         'that tool would. Name widgets with target, not handles from an '
         'earlier step. End with one find_widgets or get_state step to check '
-        'the result. At most 20 steps; not inspect, screenshot, verify_note '
-        'or stress_matrix.',
+        'the result: a read right after a change waits until what it reads '
+        'stops moving (a route or a sheet coming in). Nothing else waits. '
+        'At most 20 steps; not inspect, screenshot, verify_note or '
+        'stress_matrix.',
     {
       'steps': {
         'type': 'array',
