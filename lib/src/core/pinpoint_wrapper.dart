@@ -17,6 +17,7 @@ import '../trace/redact.dart';
 import '../trace/sources/error_source.dart';
 import '../trace/sources/finding_source.dart';
 import '../trace/sources/key_source.dart';
+import '../trace/sources/message_source.dart';
 import '../trace/sources/network_source.dart';
 import '../trace/sources/pointer_source.dart';
 import '../trace/sources/route_source.dart';
@@ -190,6 +191,7 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
           redact: TraceRedact(widget.config.trace.redact),
           ignoreOrigins: _bridgeOrigins(),
         ),
+        MessageSource(redact: TraceRedact(widget.config.trace.redact)),
         FindingSource(findings: () => _controller.findings, resolver: resolver),
       ],
     );
