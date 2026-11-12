@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -139,6 +140,49 @@ void main() {
     expect(ErrorCapture.listeners, isEmpty);
     expect(debugOnRebuildDirtyWidget, isNull);
     expect(FlutterError.onError, same(onError));
+  });
+
+  testWidgets('watch out for: pointer moves come hundreds a second; at most '
+      'one per 16 ms is recorded, and only while a pointer is down', (
+    tester,
+  ) async {
+    await pumpApp(tester);
+    final from = recorder.nextSeq;
+    // Over a part of the app that does not react: no frame is drawn, so
+    // the events' own time stamps set the limit.
+    final gesture = await tester.startGesture(const Offset(600, 500));
+    // Thirty moves 1 ms apart, then thirty more 40 ms later.
+    var stamp = Duration.zero;
+    for (var batch = 0; batch < 2; batch++) {
+      for (var i = 0; i < 30; i++) {
+        stamp += const Duration(milliseconds: 1);
+        await gesture.moveBy(const Offset(0, 2), timeStamp: stamp);
+      }
+      stamp += const Duration(milliseconds: 40);
+    }
+    await gesture.up(timeStamp: stamp);
+    await tester.pump();
+    final moves = [
+      for (final e in recorder.events)
+        if (e.seq >= from &&
+            e.kind == TraceKind.pointer &&
+            e.data['phase'] == 'move')
+          e,
+    ];
+    // 30 ms per batch: two moves each (at 1 ms and 17 ms).
+    expect(moves, hasLength(4));
+    // A mouse moving with no button down: hover, not recorded.
+    final hover = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await hover.addPointer(location: const Offset(100, 100));
+    await hover.moveTo(const Offset(120, 140));
+    await tester.pump();
+    await hover.removePointer();
+    expect(
+      recorder.events.where(
+        (e) => e.seq > moves.last.seq && e.data['phase'] == 'move',
+      ),
+      isEmpty,
+    );
   });
 
   testWidgets('Pinpoint never records itself: a tap on the rail and the '

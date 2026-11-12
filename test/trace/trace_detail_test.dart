@@ -141,7 +141,7 @@ void main() {
       'detail': 'full',
       'limit': 30,
     });
-    // The tool's own pumps draw idle frames after the three that rebuilt.
+    // The three frames that rebuilt the counter; other frames rebuilt less.
     final counts = [
       for (final e
           in (frames['events']! as List<Object?>).cast<Map<String, Object?>>())

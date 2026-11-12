@@ -148,6 +148,23 @@ void main() {
     expect(first['cart.items'], '2');
     await toolResult(tester, controller, 'unwatch', {});
   });
+  testWidgets('watch out for: a state dump runs app code; one that throws '
+      'leaves its State short and breaks nothing', (tester) async {
+    await pumpApp(tester);
+    _ChildState.throwInDiagnostics = true;
+    addTearDown(() => _ChildState.throwInDiagnostics = false);
+    final watch = await watchChild(tester);
+    expect(
+      watch['states'],
+      contains(equals({'type': '_ChildState', 'shown': 0})),
+    );
+    parent.currentState!.load();
+    await tester.pump();
+    expect(states().last.data['changed'], {
+      'cache': ['0', '1'],
+    });
+    await toolResult(tester, controller, 'unwatch', {});
+  });
 }
 
 class _Parent extends StatefulWidget {
@@ -182,6 +199,8 @@ class _Child extends StatefulWidget {
 }
 
 class _ChildState extends State<_Child> {
+  static bool throwInDiagnostics = false;
+
   bool loading = false;
   // Not in debugFillProperties: a watch cannot see it.
   // ignore: unused_field
@@ -190,6 +209,7 @@ class _ChildState extends State<_Child> {
   @override
   void debugFillProperties(DiagnosticPropertiesBuilder properties) {
     super.debugFillProperties(properties);
+    if (throwInDiagnostics) throw StateError('app code failed');
     properties.add(FlagProperty('loading', value: loading, ifTrue: 'loading'));
   }
 

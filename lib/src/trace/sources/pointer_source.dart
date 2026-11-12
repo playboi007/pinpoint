@@ -18,9 +18,10 @@ import '../trace_source.dart';
 /// slot, so no other tool loses anything.
 ///
 /// Records down, up, cancel and scroll signals. Moves only while a pointer
-/// is down, and at most one per frame: they can come hundreds a second,
-/// and without the limit the buffer would hold nothing else (watch out
-/// for). Scroll signals in one frame add up into one event.
+/// is down, and at most one per frame (one per 16 ms when no frame is
+/// drawn): they can come hundreds a second, and without the limit the
+/// buffer would hold nothing else (watch out for). Scroll signals in one
+/// frame add up into one event.
 ///
 /// A down records the local widget it hit and the position inside it as a
 /// fraction (step 5), so Milestone 15 can replay a tap after the layout
@@ -55,7 +56,12 @@ class PointerSource extends TraceSource {
 
   /// Pointers down on the app (true) or on Pinpoint (false), by pointer id.
   final Map<int, bool> _down = <int, bool>{};
-  final Map<int, int> _moveFrame = <int, int>{};
+
+  /// The frame and time stamp of the last move recorded, by pointer id.
+  final Map<int, (int, Duration)> _moveAt = <int, (int, Duration)>{};
+
+  /// The shortest time between two moves recorded in one frame.
+  static const Duration moveInterval = Duration(milliseconds: 16);
   TraceEvent? _lastScroll;
 
   /// Downs whose widget waits for [_downTimer], with their positions.
@@ -86,7 +92,7 @@ class PointerSource extends TraceSource {
     debugInstalled--;
     _recorder = null;
     _down.clear();
-    _moveFrame.clear();
+    _moveAt.clear();
     _lastScroll = null;
     _downTimer?.cancel();
     _downTimer = null;
@@ -116,12 +122,20 @@ class PointerSource extends TraceSource {
         if (onApp) _recordDown(recorder, event);
       case PointerMoveEvent():
         if (_down[pointer] != true) return;
+        // At most one per frame, and when no frame is drawn (a drag over
+        // a part of the app that does not react), at most one per 16 ms
+        // of the events' own time stamps.
         final frame = recorder.frameOf();
-        if (_moveFrame[pointer] == frame) return;
-        _moveFrame[pointer] = frame;
+        final last = _moveAt[pointer];
+        if (last != null &&
+            last.$1 == frame &&
+            event.timeStamp - last.$2 < moveInterval) {
+          return;
+        }
+        _moveAt[pointer] = (frame, event.timeStamp);
         recorder.add(TraceKind.pointer, data: _base(event, 'move'));
       case PointerUpEvent() || PointerCancelEvent():
-        _moveFrame.remove(pointer);
+        _moveAt.remove(pointer);
         if (_down.remove(pointer) != true) return;
         recorder.add(
           TraceKind.pointer,
