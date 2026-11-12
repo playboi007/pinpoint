@@ -1114,8 +1114,11 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
                   fit: StackFit.expand,
                   children: [
                     // The trap stays while commenting and sending, so a stray
-                    // click never reaches the app behind the panel.
-                    if (widget.controller.isActive)
+                    // click never reaches the app behind the panel. Not
+                    // while reviewing a pin's note opened with Pinpoint
+                    // off: the user tries the agent's change in the app.
+                    if (widget.controller.isActive &&
+                        !widget.controller.reviewing)
                       _PointerTrap(tracker: _tracker),
                     IgnorePointer(
                       child: Builder(

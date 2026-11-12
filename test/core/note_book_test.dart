@@ -68,6 +68,29 @@ void main() {
       expect(controller.openPin('missing', fakePick()), isFalse);
     });
 
+    test('a pin opened with Pinpoint off: no hover; closing or Esc goes '
+        'back to off, not to picking', () {
+      controller.notes.put(note('a', 1));
+      controller.openPin('a', fakePick());
+      expect(controller.reviewing, isTrue);
+      expect(controller.canHover, isFalse);
+      controller.clearSelection();
+      expect(controller.mode, PinPointMode.idle);
+
+      controller.openPin('a', fakePick());
+      expect(controller.back(), isTrue);
+      expect(controller.mode, PinPointMode.idle);
+      expect(controller.reviewing, isFalse);
+
+      // Opened while picking: back to picking, as before.
+      controller
+        ..startPicking()
+        ..openPin('a', fakePick());
+      expect(controller.reviewing, isFalse);
+      controller.clearSelection();
+      expect(controller.mode, PinPointMode.picking);
+    });
+
     test('a click on another widget closes the note, even with a comment '
         'typed', () {
       controller.notes.put(note('a', 1));

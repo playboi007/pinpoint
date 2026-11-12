@@ -634,6 +634,9 @@ class AgentCommands {
         controller.stop();
         // The trap goes in the frame the stop scheduled.
         await _frame();
+      case PinPointMode.commenting when controller.reviewing:
+        // Only reading a note, with no trap: the app is live.
+        return;
       case PinPointMode.commenting:
       case PinPointMode.sending:
         throw const AgentError(

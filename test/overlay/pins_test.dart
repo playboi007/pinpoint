@@ -669,6 +669,54 @@ void main() {
       expect(pins(), findsOneWidget);
     });
 
+    testWidgets('acceptance: opened with Pinpoint off, the note stays open '
+        'while the app takes clicks; Accept turns Pinpoint off again', (
+      tester,
+    ) async {
+      var tried = 0;
+      await tester.pumpWidget(
+        host(
+          Scaffold(
+            body: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Title'),
+                const Spacer(),
+                TextButton(
+                  onPressed: () => tried++,
+                  child: const Text('Try it'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      final id = await saveDraft(tester, 'Title');
+      controller.notes.put(
+        controller.notes.byId(id)!.withStatus(NoteStatus.resolved),
+      );
+      controller.stop();
+      await tester.pump();
+      await tester.pump();
+
+      await tester.tap(pins());
+      await tester.pump();
+      await tester.pump();
+      expect(find.byType(NoteView), findsOneWidget);
+
+      // The user tries the agent's change.
+      await tester.tap(find.text('Try it'));
+      await tester.pump();
+      expect(tried, 1, reason: 'the click reached the app, not the trap');
+      expect(controller.openNote.value, id, reason: 'nothing was picked');
+
+      await tester.tap(find.byKey(NoteView.acceptKey));
+      await tester.pump();
+      await tester.pump();
+      expect(controller.notes.byId(id)!.status, NoteStatus.verified);
+      expect(controller.mode, PinPointMode.idle);
+    });
+
     testWidgets('Accept removes the pin; Reopen sends it back', (tester) async {
       final id = await resolvedPin(tester);
       await tester.tap(pins());

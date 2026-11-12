@@ -175,9 +175,15 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
     // the gap between the selection and the hovered widget.
     _controller.setMeasuring(HardwareKeyboard.instance.isAltPressed);
     final editingText = _editingText();
+    // While reviewing, the app has its keys unless the focus is in
+    // Pinpoint's panel: arrows must not move the selection while the user
+    // works in the app.
+    final mode = _controller.reviewing && !_focusInPinpoint()
+        ? PinPointMode.idle
+        : _controller.mode;
     final action = keyActionFor(
       event,
-      mode: _controller.mode,
+      mode: mode,
       shortcut: widget.config.shortcut,
       modifiers: modifiersOf(HardwareKeyboard.instance),
       editingText: editingText,
@@ -214,6 +220,14 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
   /// Whether primary focus is in a text field. While a mode is active the
   /// app cannot have focus (InspectorOverlay holds it), so this is
   /// Pinpoint's own comment field.
+  /// Whether the primary focus is in Pinpoint's overlay, not in the app.
+  static bool _focusInPinpoint() {
+    final context = FocusManager.instance.primaryFocus?.context;
+    if (context == null || !context.mounted) return false;
+    // Not `.of`: nothing here may subscribe an element (engineering rule 3).
+    return context.findAncestorWidgetOfExactType<InspectorOverlay>() != null;
+  }
+
   static bool _editingText() {
     final context = FocusManager.instance.primaryFocus?.context;
     if (context == null || !context.mounted) return false;
@@ -295,7 +309,12 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
                   child: ValueListenableBuilder<int>(
                     valueListenable: AppSemantics.readers,
                     builder: (context, readers, child) => ExcludeSemantics(
-                      excluding: _controller.isActive && readers == 0,
+                      // Kept while reviewing: there is no trap, and the
+                      // app must take its clicks.
+                      excluding:
+                          _controller.isActive &&
+                          !_controller.reviewing &&
+                          readers == 0,
                       child: child!,
                     ),
                     child: child,

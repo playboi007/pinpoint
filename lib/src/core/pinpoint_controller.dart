@@ -117,6 +117,8 @@ class CommentDraft extends ChangeNotifier {
 /// commenting --select--> commenting (a new selection)
 /// openPin: idle, picking or commenting -> commenting (a pin's note)
 /// back (Esc): sending -> commenting -> picking -> idle
+/// a pin's note opened from idle ([reviewing]): closing, Esc, Accept or
+///   Delete -> idle
 /// stop: any -> idle
 /// ```
 ///
@@ -220,7 +222,21 @@ class PinPointController extends ChangeNotifier {
 
   /// Whether hover is recorded in the current mode.
   bool get canHover =>
-      _mode == PinPointMode.picking || _mode == PinPointMode.commenting;
+      _mode == PinPointMode.picking ||
+      (_mode == PinPointMode.commenting && !reviewing);
+
+  /// Whether the open note came from a pin clicked with Pinpoint off.
+  ///
+  /// The user then reads what the agent did and tries it in the app before
+  /// Accept: the panel shows, but the app keeps its clicks (no pointer
+  /// trap, no hover) and its semantics, and closing the note goes back to
+  /// idle, not to picking.
+  bool get reviewing => _reviewing == true;
+
+  // Nullable on purpose: on web a hot reload leaves a new field undefined
+  // in a controller that already exists (docs/api-notes.md, item 29), and
+  // `== true` reads that as false where a plain bool would throw.
+  bool? _reviewing;
 
   /// idle -> picking.
   bool startPicking() =>
@@ -254,6 +270,8 @@ class PinPointController extends ChangeNotifier {
     _openNote.value = id;
     _selection.value = pick;
     if (_mode == PinPointMode.commenting) return true;
+    _reviewing = _mode == PinPointMode.idle;
+    if (reviewing) _hovered.value = null;
     _mode = PinPointMode.commenting;
     notifyListeners();
     return true;
@@ -265,11 +283,16 @@ class PinPointController extends ChangeNotifier {
   }
 
   /// sending -> picking, after a draft was saved: ready for the next
-  /// widget. Drops the selection, which now has its pin.
+  /// widget. Drops the selection, which now has its pin. While
+  /// [reviewing], back to idle instead.
   bool draftSaved() {
     if (_mode != PinPointMode.sending) return false;
     _selection.value = null;
     _openNote.value = null;
+    if (reviewing) {
+      stop();
+      return true;
+    }
     return _move(from: PinPointMode.sending, to: PinPointMode.picking);
   }
 
@@ -298,6 +321,10 @@ class PinPointController extends ChangeNotifier {
         stop();
         return true;
       case PinPointMode.commenting:
+        if (reviewing) {
+          stop();
+          return true;
+        }
         return _move(from: _mode, to: PinPointMode.picking);
       case PinPointMode.sending:
         return _move(from: _mode, to: PinPointMode.commenting);
@@ -307,6 +334,7 @@ class PinPointController extends ChangeNotifier {
   /// Any mode -> idle. Drops hover and selection.
   void stop() {
     if (_mode == PinPointMode.idle) return;
+    _reviewing = false;
     _selection.value = null;
     _openNote.value = null;
     _move(from: _mode, to: PinPointMode.idle);
@@ -375,19 +403,27 @@ class PinPointController extends ChangeNotifier {
 
   /// Drops hover and selection, for example on hot reload, when held
   /// elements may be stale. Commenting falls back to picking, since there is
-  /// nothing left to comment on.
+  /// nothing left to comment on; while [reviewing], to idle.
   void clearSelection() {
     _hovered.value = null;
     if (_selection.value == null) return;
     _selection.value = null;
     _openNote.value = null;
-    if (_mode == PinPointMode.commenting) _mode = PinPointMode.picking;
+    if (_mode == PinPointMode.commenting) {
+      if (reviewing) {
+        // Opened with Pinpoint off: off again.
+        stop();
+        return;
+      }
+      _mode = PinPointMode.picking;
+    }
     notifyListeners();
   }
 
   bool _move({required PinPointMode from, required PinPointMode to}) {
     if (_mode != from) return false;
     _mode = to;
+    if (to == PinPointMode.idle) _reviewing = false;
     if (!canHover) _hovered.value = null;
     if (!isActive) _measuring.value = false;
     notifyListeners();
