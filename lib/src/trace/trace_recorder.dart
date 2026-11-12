@@ -133,6 +133,16 @@ class TraceRecorder {
     }
   }
 
+  /// The event [seq], or null when it is not held. Seqs are consecutive
+  /// and the oldest go first, so this is one index.
+  TraceEvent? at(int seq) {
+    final first = oldest;
+    if (first == null) return null;
+    final i = seq - first.seq;
+    if (i < 0 || i >= _length) return null;
+    return _ring[(_head + i) % maxEvents];
+  }
+
   /// The newest event of [kind], or null.
   TraceEvent? lastOf(String kind) {
     for (final event in newestFirst) {

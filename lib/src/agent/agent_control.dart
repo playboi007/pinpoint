@@ -82,6 +82,8 @@ class AgentControl extends ChangeNotifier {
     'watch',
     'unwatch',
     'mark',
+    'why',
+    'caused_by',
   };
 
   /// How long a tap dot stays.

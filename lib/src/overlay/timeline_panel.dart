@@ -6,13 +6,15 @@ import '../core/pinpoint_controller.dart';
 import '../model/trace_event.dart';
 import '../theme/controls.dart';
 import '../theme/pinpoint_tokens.dart';
+import '../trace/cause_zone.dart';
 import '../trace/trace_format.dart';
 import '../trace/trace_session.dart';
 import 'panel_keys.dart';
 import 'rail.dart';
 
 /// The Timeline (PLAN-v2 Milestone 13, step 11): the flight recorder's
-/// events, newest first, grouped by frame, with a filter chip per kind. A
+/// events, newest first, grouped by cause (Milestone 14) or, without
+/// `PinPoint.run`, by frame, with a filter chip per kind. A
 /// click on an event flashes its widget. Marks are rows the user can name.
 ///
 /// While open it holds level 3 ([TraceDemand.timeline]), so rebuilds and
@@ -35,6 +37,8 @@ class TimelinePanel extends StatefulWidget {
   static Key chipKey(String kind) =>
       ValueKey<String>('pinpoint.timeline.chip.$kind');
   static Key rowKey(int seq) => ValueKey<String>('pinpoint.timeline.row.$seq');
+  static Key causeKey(int id) =>
+      ValueKey<String>('pinpoint.timeline.cause.$id');
   static Key nameKey(int seq) =>
       ValueKey<String>('pinpoint.timeline.name.$seq');
 
@@ -53,6 +57,7 @@ class TimelinePanel extends StatefulWidget {
     TraceKind.error,
     TraceKind.finding,
     TraceKind.mark,
+    'net',
     'detail',
   ];
 
@@ -110,9 +115,11 @@ class _TimelinePanelState extends State<TimelinePanel> {
     final tokens = PinPointTokens.of(context);
     final recorder = _session.recorder;
     _seen = recorder.nextSeq;
-    // Newest first, grouped by frame. The frame event carries the
-    // recorder's own time and the rebuild count for its header.
-    final groups = <int, List<TraceEvent>>{};
+    // Newest first. Events sit under their cause (PLAN-v2 Milestone 14,
+    // step 17); without causes (no PinPoint.run), under their frame. The
+    // frame event carries the recorder's own time and the rebuild count for
+    // its header.
+    final groups = <(int?, int), List<TraceEvent>>{};
     final frames = <int, TraceEvent>{};
     var rows = 0;
     for (final event in recorder.newestFirst) {
@@ -121,7 +128,9 @@ class _TimelinePanelState extends State<TimelinePanel> {
         continue;
       }
       if (!_shown(event)) continue;
-      (groups[event.frame] ??= <TraceEvent>[]).add(event);
+      final cause = event.cause;
+      final key = cause == null ? (null, event.frame) : (cause, 0);
+      (groups[key] ??= <TraceEvent>[]).add(event);
       if (++rows >= TimelinePanel.maxRows) break;
     }
     return PanelKeyScope(
@@ -145,10 +154,13 @@ class _TimelinePanelState extends State<TimelinePanel> {
                       shrinkWrap: true,
                       padding: EdgeInsets.zero,
                       children: [
-                        for (final MapEntry(key: frame, value: events)
+                        for (final MapEntry(key: (cause, frame), :value)
                             in groups.entries) ...[
-                          _frameHeader(tokens, frame, events, frames[frame]),
-                          for (final event in events) _row(tokens, event),
+                          if (cause == null)
+                            _frameHeader(tokens, frame, value, frames[frame])
+                          else
+                            _causeHeader(tokens, cause, value, frames),
+                          for (final event in value) _row(tokens, event),
                         ],
                       ],
                     ),
@@ -235,6 +247,37 @@ class _TimelinePanelState extends State<TimelinePanel> {
       if (us is int) 'rec ${(us / 1000).toStringAsFixed(2)} ms',
     ];
     return Container(
+      color: tokens.field,
+      padding: const EdgeInsets.symmetric(
+        horizontal: PinPointSizes.panelPadding,
+        vertical: 2,
+      ),
+      child: Text(parts.join('  '), style: tokens.caps),
+    );
+  }
+
+  /// `c37  pointer  f233-f236  +3.21s`; for a frame cause, the
+  /// recorder's own time in that frame too.
+  Widget _causeHeader(
+    PinPointTokens tokens,
+    int id,
+    List<TraceEvent> events,
+    Map<int, TraceEvent> frames,
+  ) {
+    final cause = _session.recorder.causeOf(id);
+    final first = events.last.frame;
+    final last = events.first.frame;
+    final frameEvent = cause?.kind == CauseKind.frame ? frames[first] : null;
+    final us = frameEvent?.data['us'];
+    final parts = [
+      'c$id',
+      cause?.kind ?? '?',
+      first == last ? 'f$first' : 'f$first-f$last',
+      formatTraceTime(events.last.t),
+      if (us is int) 'rec ${(us / 1000).toStringAsFixed(2)} ms',
+    ];
+    return Container(
+      key: TimelinePanel.causeKey(id),
       color: tokens.field,
       padding: const EdgeInsets.symmetric(
         horizontal: PinPointSizes.panelPadding,

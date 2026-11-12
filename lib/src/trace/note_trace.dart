@@ -14,10 +14,21 @@ Map<String, Object?>? traceForNote(
 }) {
   final session = TraceSession.current;
   if (session == null) return null;
+  final recorder = session.recorder;
+  return noteTrace(
+    recorder,
+    end: session.activeSince ?? recorder.now,
+    subtree: subtreeSources(picked, resolver),
+  );
+}
+
+/// The creation locations (`file:line:column`) of the local widgets in the
+/// subtree of [root], [root] included. Bounded like every walk (engineering
+/// rule 4); empty when [root] is gone.
+Set<String> subtreeSources(Element root, SourceResolver resolver) {
   final subtree = <String>{};
   var visited = 0;
   void visit(Element element) {
-    // Bounded like every walk (engineering rule 4).
     if (++visited > 3000) return;
     final entry = resolver.entryOf(element);
     final location = entry.location;
@@ -31,14 +42,9 @@ Map<String, Object?>? traceForNote(
   }
 
   try {
-    visit(picked);
+    visit(root);
   } catch (_) {
     // Unmounted since the pick: the inputs, routes and errors still help.
   }
-  final recorder = session.recorder;
-  return noteTrace(
-    recorder,
-    end: session.activeSince ?? recorder.now,
-    subtree: subtree,
-  );
+  return subtree;
 }

@@ -1,6 +1,8 @@
 // Plain Dart: the Milestone 12 tools the bridge offers over MCP. Each one
 // runs inside the app, through the command queue.
 
+import '../trace/trace_causes.dart' show whyLimits;
+
 /// The agent tools, in the order `tools/list` shows them.
 const List<String> agentToolNames = [
   'get_screen',
@@ -28,6 +30,8 @@ const List<String> agentToolNames = [
   'watch',
   'unwatch',
   'mark',
+  'why',
+  'caused_by',
 ];
 
 /// How long the bridge waits for the app's answer to [tool].
@@ -425,6 +429,10 @@ final List<Map<String, Object?>> agentTools = [
         'folded with ×n. Taps, keys, text, routes, errors, findings, '
         'probes and marks are always recorded; rebuilds (build) and '
         'watched state (state) only while level 3 runs (trace_detail). '
+        'Requests are net.request, net.response and net.error, with the '
+        'body hash when bodies are read. With PinPoint.run in main, each '
+        'line shows its cause (c37): the tap, frame, key or message that '
+        'started it; ask why({seq}) for the chain. '
         'partial: true means a limit dropped older events; notes say where '
         'rebuilds were not recorded. Frames are counted, not listed, '
         'unless kinds asks for frame.',
@@ -445,7 +453,12 @@ final List<Map<String, Object?>> agentTools = [
         'type': 'string',
         'description': 'Part of a widget type or of its source file.',
       },
-      'cause': {'type': 'integer'},
+      'cause': {
+        'type': 'integer',
+        'description':
+            'Only the events of one cause: the c37 on each line (needs '
+            'PinPoint.run).',
+      },
       'limit': {
         'type': 'integer',
         'description': 'Most lines (default 50, newest kept).',
@@ -496,6 +509,40 @@ final List<Map<String, Object?>> agentTools = [
         'stops level 3 unless trace_detail or the Timeline holds it.',
     {
       'id': {'type': 'string'},
+    },
+  ),
+  _tool(
+    'why',
+    'Why did this happen',
+    'Walks back from one event (its seq from get_trace): its cause, the '
+        'events of that cause before it, and the entry that started it (a '
+        'tap, a key, a message). For a frame, the cause that made it '
+        'dirty, then that cause, up to 4 frames back; loop: true when each '
+        'frame does the same work again. Needs PinPoint.run in main. '
+        '$whyLimits',
+    {
+      'seq': {'type': 'integer', 'description': 'The event, for example 412.'},
+    },
+    ['seq'],
+  ),
+  _tool(
+    'caused_by',
+    'What did this widget start',
+    'Everything the widget\'s subtree started: requests, rebuilds, state '
+        'changes, timers and errors, as counts and the first few of each. '
+        'A cause counts when its tap landed on the subtree or the subtree '
+        'rebuilt in it; a frame\'s work is shared by every widget that '
+        'rebuilt in it. Rebuilds need level 3 (trace_detail); causes need '
+        'PinPoint.run.',
+    {
+      'handle': _handle,
+      'target': _target,
+      'wait_ms': _waitMs,
+      'since': {
+        'description':
+            'A seq (412), seconds back ("30s", the default is "10s") or '
+            '"mark".',
+      },
     },
   ),
   _tool(

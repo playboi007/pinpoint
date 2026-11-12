@@ -10,6 +10,7 @@ import 'screens/form_screen.dart';
 import 'screens/html_view_screen.dart';
 import 'screens/long_list_screen.dart';
 import 'screens/nested_navigator_screen.dart';
+import 'screens/planted_loop_screen.dart';
 
 // PinPoint.run: every recorded event names the tap, frame or key that
 // started it (PLAN-v2 Milestone 14).
@@ -49,6 +50,7 @@ class ExampleApp extends StatelessWidget {
         for (final screen in HomeScreen.screens)
           screen.route: (_) => screen.build(),
         HomeScreen.bugZooRoute: (_) => const BugZooScreen(),
+        PlantedLoopScreen.route: (_) => const PlantedLoopScreen(),
       },
     );
   }
@@ -107,6 +109,16 @@ class HomeScreen extends StatelessWidget {
             subtitle: const Text('One planted problem of each kind'),
             trailing: const Icon(Icons.bug_report_outlined),
             onTap: () => Navigator.of(context).pushNamed(bugZooRoute),
+          ),
+          // Not in [screens] either: it loads in a loop on purpose.
+          ListTile(
+            title: const Text(PlantedLoopScreen.title),
+            subtitle: const Text(
+              'A load scheduled from build: try why on a request',
+            ),
+            trailing: const Icon(Icons.bug_report_outlined),
+            onTap: () =>
+                Navigator.of(context).pushNamed(PlantedLoopScreen.route),
           ),
         ],
       ),

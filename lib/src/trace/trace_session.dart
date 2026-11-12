@@ -44,7 +44,7 @@ class TraceSession {
     required this.config,
     required RebuildHook rebuildHook,
     required Element? Function() content,
-    required SourceResolver resolver,
+    required this.resolver,
     List<TraceSource> builtIn = const <TraceSource>[],
     TraceRecorder? recorder,
     Object? owner,
@@ -110,6 +110,10 @@ class TraceSession {
 
   final TraceConfig config;
   final TraceRecorder recorder;
+
+  /// Resolves widgets to the sources events carry, so a reader of the
+  /// record (the Info tab's "Caused") matches them the same way.
+  final SourceResolver resolver;
   final FrameClock clock = FrameClock();
 
   late final FrameSource frameSource;

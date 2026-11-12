@@ -23,6 +23,8 @@ import '../search/render_search.dart';
 import '../search/source_index.dart';
 import '../search/source_resolver.dart';
 import '../trace/cause_zone.dart';
+import '../trace/note_trace.dart';
+import '../trace/trace_causes.dart';
 import '../trace/trace_format.dart';
 import '../trace/trace_session.dart';
 import '../trace/watch.dart';
@@ -333,6 +335,8 @@ class AgentCommands {
       'watch' => watch(args),
       'unwatch' => unwatch(args),
       'mark' => mark(args),
+      'why' => why(args),
+      'caused_by' => causedBy(args),
       _ => throw AgentError('unknown tool: $tool'),
     };
   }
@@ -422,6 +426,36 @@ class AgentCommands {
     };
   }
 
+  /// `why`: walks back from one event to the entry that started it
+  /// (PLAN-v2 Milestone 14).
+  Map<String, Object?> why(Map<String, Object?> args) {
+    final seq = args['seq'];
+    if (seq is! num) throw const AgentError('seq is required: an event seq');
+    try {
+      return whyAnswer(_trace().recorder, seq.round());
+    } on FormatException catch (error) {
+      throw AgentError(error.message);
+    }
+  }
+
+  /// `caused_by`: what the widget's subtree started (PLAN-v2 Milestone 14).
+  Map<String, Object?> causedBy(Map<String, Object?> args) {
+    final session = _trace();
+    final target = element(args);
+    final TraceBound? since;
+    try {
+      since = TraceBound.parse(args['since'], 'since');
+    } on FormatException catch (error) {
+      throw AgentError(error.message);
+    }
+    return causedByAnswer(
+      session.recorder,
+      sources: subtreeSources(target, resolver()),
+      widget: target.widget.runtimeType.toString().split('<').first,
+      since: since,
+    );
+  }
+
   /// `mark`: a moment the agent points at.
   Map<String, Object?> mark(Map<String, Object?> args) {
     final text = args['text'];
@@ -452,6 +486,8 @@ class AgentCommands {
     'set_environment',
     'reset_environment',
     'get_trace',
+    'why',
+    'caused_by',
   };
 
   /// The most steps in one `run_steps`.
