@@ -62,6 +62,8 @@ class AgentControl extends ChangeNotifier {
     'reset_environment',
     'verify_note',
     'stress_matrix',
+    // Its steps can drive.
+    'run_steps',
   };
 
   /// Tools that only read. They reach the app only through the command

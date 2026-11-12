@@ -86,14 +86,15 @@ class AgentHandle {
 
 /// The handles given out to the agent.
 ///
-/// Handles hold elements, which die on rebuild (watch out for). Each one
-/// lives [lifetime]; on use it is checked, re-resolved from its anchor
-/// when its element is gone, and refused as stale when that fails, never
-/// acted on as another widget.
+/// Handles hold elements, which die on rebuild (watch out for). On each
+/// use a handle is checked against its anchor, re-resolved from it when
+/// its element is gone, and refused as stale when that fails, never acted
+/// on as another widget. A handle with no anchor to check (no source
+/// location) cannot be checked, so it lives only [lifetime].
 class HandleTable {
   HandleTable({DateTime Function()? clock}) : _clock = clock ?? DateTime.now;
 
-  /// How long a handle can be used.
+  /// How long a handle with no anchor can be used.
   static const Duration lifetime = Duration(seconds: 90);
 
   /// The most handles kept; the oldest go first.
@@ -127,25 +128,24 @@ class HandleTable {
         'unknown handle $id; call get_screen or find_widgets for a new one',
       );
     }
-    if (_clock().difference(handle.created) > lifetime) {
+    final anchor = handle.anchor;
+    final checkable = anchor != null && anchor.resolvable;
+    if (!checkable && _clock().difference(handle.created) > lifetime) {
       _handles.remove(id);
       throw AgentError(
         'stale handle $id (older than ${lifetime.inSeconds} s); find the '
         'widget again',
       );
     }
-    final anchor = handle.anchor;
     final element = handle.element;
     // Exact, not the nearest line: within one run a widget does not move,
     // so a widget on another line is another widget. After a hot reload
     // the handles are dropped (AgentCommands.reassemble).
     if (element.mounted &&
-        (anchor == null ||
-            !anchor.resolvable ||
-            index.matchesExactly(element, anchor))) {
+        (!checkable || index.matchesExactly(element, anchor))) {
       return element;
     }
-    if (anchor != null && anchor.resolvable) {
+    if (checkable) {
       final again = index.resolveExact(anchor, root: root);
       if (again != null) return handle.element = again;
     }
@@ -209,7 +209,9 @@ class AgentCommands {
   ) async {
     final limits = OutputLimits.from(args);
     try {
+      args = withTarget(args);
       final Object result = switch (tool) {
+        'run_steps' => await runSteps(args, cancel),
         'verify_note' => await verifyNote(args, cancel),
         'wait_idle' => await waitIdleTool(args, cancel),
         'tap' => await tap(args, cancel),
@@ -240,6 +242,113 @@ class AgentCommands {
     } on AgentError catch (failure) {
       return AgentControl.error(failure.message);
     }
+  }
+
+  /// Tools a `run_steps` step may call. Not `inspect`, `screenshot`,
+  /// `verify_note` or `stress_matrix`: the bridge shapes their answers,
+  /// and inside a step they would come back as raw JSON or base64.
+  static const Set<String> stepTools = {
+    'get_screen',
+    'find_widgets',
+    'flash',
+    'get_state',
+    'scan',
+    'wait_idle',
+    'tap',
+    'long_press',
+    'enter_text',
+    'scroll',
+    'scroll_to',
+    'navigate',
+    'back',
+    'set_environment',
+    'reset_environment',
+  };
+
+  /// The most steps in one `run_steps`.
+  static const int maxSteps = 20;
+
+  /// `run_steps`: runs each step in order and stops at the first that
+  /// fails. One round trip instead of one per step. Each step answers as
+  /// its tool would, so a later step names its widget with a `target`
+  /// query, not with a handle from an earlier step.
+  Future<Map<String, Object?>> runSteps(
+    Map<String, Object?> args,
+    AgentCancel cancel,
+  ) async {
+    final steps = args['steps'];
+    if (steps is! List<Object?> || steps.isEmpty) {
+      throw const AgentError('steps is required: a list of {tool, …args}');
+    }
+    if (steps.length > maxSteps) {
+      throw const AgentError('at most $maxSteps steps');
+    }
+    // Every step is checked before the first runs: a typo in step 3 must
+    // not leave steps 1 and 2 done.
+    for (final (i, step) in steps.indexed) {
+      final tool = step is Map<String, Object?> ? step['tool'] : null;
+      if (tool is! String || !stepTools.contains(tool)) {
+        throw AgentError(
+          'step ${i + 1}: ${tool is String ? '$tool cannot run in '
+                    'run_steps' : 'give tool'}; use one of '
+          '${stepTools.join(', ')}',
+        );
+      }
+    }
+    final done = <Map<String, Object?>>[];
+    for (final (i, step) in steps.cast<Map<String, Object?>>().indexed) {
+      cancel.check();
+      final tool = step['tool']! as String;
+      Map<String, Object?> answer;
+      try {
+        answer = await run(tool, {...step}..remove('tool'), cancel);
+      } on AgentAborted {
+        rethrow;
+      } on Object catch (failure) {
+        answer = AgentControl.error('$tool failed: $failure');
+      }
+      done.add({'step': i + 1, 'tool': tool, ...answer});
+      if (answer['ok'] != true) {
+        return {
+          'steps': done,
+          'stopped': 'at step ${i + 1} of ${steps.length}',
+        };
+      }
+    }
+    return {'steps': done};
+  }
+
+  /// [args] with its `target` query turned into a new `handle`, so every
+  /// tool that takes a handle takes a target too. A target is found again
+  /// on each call: it does not go stale as a handle can.
+  Map<String, Object?> withTarget(Map<String, Object?> args) {
+    final target = args['target'];
+    if (target == null) return args;
+    if (args['handle'] != null) {
+      throw const AgentError('give handle or target, not both');
+    }
+    if (target is! Map<String, Object?>) {
+      throw const AgentError(
+        'target must be an object: file, line, type, text, key, index',
+      );
+    }
+    final found = matching(target);
+    final at = target['index'];
+    final index = at is int ? at : 0;
+    if (index < 0 || index >= found.length) {
+      throw AgentError(
+        found.isEmpty
+            ? 'no widget matches the target ${jsonEncode(target)}'
+            : 'the target matches ${found.length} widgets; index $index is '
+                  'out of range',
+      );
+    }
+    final element = found[index];
+    return {
+      for (final MapEntry(:key, :value) in args.entries)
+        if (key != 'target') key: value,
+      'handle': handles.add(element, _anchorOf(element)),
+    };
   }
 
   /// How long a command waits for the app to settle after a change. A
@@ -1113,24 +1222,32 @@ class AgentCommands {
     return found;
   }
 
-  /// Moves the nearest scrollable at or above the handle by `dx` or `dy`.
+  /// Moves a scrollable by `dy` (a vertical one) or `dx` (a horizontal
+  /// one): the nearest of that axis at or above the handle, or the main
+  /// one with no handle. The axis decides, so a text field's own
+  /// horizontal scrollable never takes a `dy` meant for the page.
   Future<Map<String, Object?>> scroll(Map<String, Object?> args) async {
-    final target = element(args);
-    await prepareToDrive();
-    final scrollable = scrollableFor(target);
-    if (scrollable == null) {
-      throw const AgentError('no scrollable at or above the widget');
+    final dx = args['dx'];
+    final dy = args['dy'];
+    final vertical = dy is num && dy != 0;
+    final horizontal = dx is num && dx != 0;
+    if (vertical == horizontal) {
+      throw const AgentError('give one of dy (vertical) or dx (horizontal)');
     }
-    final position = scrollable.position;
-    final vertical =
-        axisDirectionToAxis(position.axisDirection) == Axis.vertical;
-    final delta = args[vertical ? 'dy' : 'dx'];
-    if (delta is! num || delta == 0) {
+    final axis = vertical ? Axis.vertical : Axis.horizontal;
+    final delta = (vertical ? dy : dx)! as num;
+    final target = args['handle'] == null ? null : element(args);
+    await prepareToDrive();
+    final scrollable = target == null
+        ? mainScrollable(axis: axis)
+        : scrollableFor(target, axis: axis);
+    if (scrollable == null) {
       throw AgentError(
-        'give ${vertical ? 'dy' : 'dx'}: the list scrolls '
-        '${vertical ? 'vertically' : 'horizontally'}',
+        'no ${axis.name} scrollable '
+        '${target == null ? 'on screen' : 'at or above the widget'}',
       );
     }
+    final position = scrollable.position;
     position.jumpTo(
       (position.pixels + delta).clamp(
         position.minScrollExtent,
@@ -1150,31 +1267,49 @@ class AgentCommands {
   };
 
   /// The scrollable of a handle: its own (a list's handle), else the
-  /// nearest above it. Found without subscribing (engineering rule 3).
-  static ScrollableState? scrollableFor(Element element) {
-    ScrollableState? own;
+  /// nearest above it; with [axis], only one that scrolls along it. Found
+  /// without subscribing (engineering rule 3).
+  static ScrollableState? scrollableFor(Element element, {Axis? axis}) {
+    bool fits(Element e) =>
+        e is StatefulElement &&
+        e.state is ScrollableState &&
+        (axis == null ||
+            axisDirectionToAxis((e.state as ScrollableState).axisDirection) ==
+                axis);
+    ScrollableState? found;
     var visited = 0;
     void visit(Element e) {
-      if (own != null || ++visited > 200) return;
-      if (e is StatefulElement && e.state is ScrollableState) {
-        own = e.state as ScrollableState;
+      if (found != null || ++visited > 200) return;
+      if (fits(e)) {
+        found = (e as StatefulElement).state as ScrollableState;
         return;
       }
       e.visitChildren(visit);
     }
 
     visit(element);
-    return own ?? element.findAncestorStateOfType<ScrollableState>();
+    if (found != null) return found;
+    element.visitAncestorElements((e) {
+      if (!fits(e)) return true;
+      found = (e as StatefulElement).state as ScrollableState;
+      return false;
+    });
+    return found;
   }
 
-  /// The biggest scrollable on screen: the page's main list.
-  ScrollableState? mainScrollable() {
+  /// The biggest scrollable on screen, of [axis] when given: the page's
+  /// main list.
+  ScrollableState? mainScrollable({Axis? axis}) {
     ScrollableState? best;
     var bestArea = 0.0;
     var visited = 0;
     void visit(Element e) {
       if (++visited > 20000) return;
-      if (e is StatefulElement && e.state is ScrollableState) {
+      if (e is StatefulElement &&
+          e.state is ScrollableState &&
+          (axis == null ||
+              axisDirectionToAxis((e.state as ScrollableState).axisDirection) ==
+                  axis)) {
         final renderObject = renderObjectOf(e);
         final shown = renderObject == null
             ? null
@@ -1433,6 +1568,21 @@ class AgentCommands {
         ? null
         : RenderSearch.globalRectOf(renderObject);
     final text = textOf(element);
+    var field = _soleEditableIn(element);
+    var scrollable = _ownScrollable(element);
+    if (field != null && scrollable != null) {
+      // A field has its own horizontal scrollable; a list can hold one
+      // field. Whichever is outside the other is what this widget is.
+      final inField = identical(
+        scrollable.context.findAncestorStateOfType<EditableTextState>(),
+        field,
+      );
+      if (inField) {
+        scrollable = null;
+      } else {
+        field = null;
+      }
+    }
     return {
       'handle': handles.add(element, anchor),
       'widget': element.widget.runtimeType.toString(),
@@ -1443,7 +1593,53 @@ class AgentCommands {
           renderObject != null &&
           RenderSearch.visibleRectOf(renderObject) != null,
       if (text != null) 'text': limits.clip(text),
+      // A field's value and a list's position, so the agent needs no
+      // get_state call to read them.
+      if (field != null && text == null)
+        'value': field.widget.obscureText
+            ? '[masked]'
+            : limits.clip(field.textEditingValue.text),
+      if (scrollable != null && scrollable.position.hasPixels)
+        'scroll': _scrollState(scrollable.position),
     };
+  }
+
+  /// The one text field at or close under [element] (a `TextField`,
+  /// a `TextFormField`), or null when there is none or more than one (a
+  /// form).
+  static EditableTextState? _soleEditableIn(Element element) {
+    EditableTextState? found;
+    var count = 0;
+    var visited = 0;
+    void visit(Element e) {
+      if (count > 1 || ++visited > 200) return;
+      if (e is StatefulElement && e.state is EditableTextState) {
+        found = e.state as EditableTextState;
+        count++;
+        return;
+      }
+      e.visitChildren(visit);
+    }
+
+    visit(element);
+    return count == 1 ? found : null;
+  }
+
+  /// The scrollable at or close under [element] (a list's own), or null.
+  static ScrollableState? _ownScrollable(Element element) {
+    ScrollableState? found;
+    var visited = 0;
+    void visit(Element e) {
+      if (found != null || ++visited > 50) return;
+      if (e is StatefulElement && e.state is ScrollableState) {
+        found = e.state as ScrollableState;
+        return;
+      }
+      e.visitChildren(visit);
+    }
+
+    visit(element);
+    return found;
   }
 
   /// The route on top: the route of what is at the center of the app.

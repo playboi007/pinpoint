@@ -22,6 +22,7 @@ const List<String> agentToolNames = [
   'get_state',
   'verify_note',
   'stress_matrix',
+  'run_steps',
 ];
 
 /// How long the bridge waits for the app's answer to [tool].
@@ -36,13 +37,39 @@ Duration agentToolTimeout(String tool, Map<String, Object?> args) {
       return const Duration(seconds: 60);
     case 'stress_matrix':
       return const Duration(seconds: 240);
+    case 'run_steps':
+      // The sum of its steps' own timeouts.
+      final steps = args['steps'];
+      var total = Duration.zero;
+      for (final step in steps is List<Object?> ? steps : const <Object?>[]) {
+        if (step is Map<String, Object?> && step['tool'] is String) {
+          total += agentToolTimeout(step['tool']! as String, step);
+        }
+      }
+      return total > maxRunStepsTimeout ? maxRunStepsTimeout : total;
   }
   return const Duration(seconds: 20);
 }
 
+/// The longest the bridge waits for one `run_steps`.
+const Duration maxRunStepsTimeout = Duration(seconds: 240);
+
 const Map<String, Object?> _handle = {
   'type': 'string',
-  'description': 'A handle from get_screen or find_widgets, for example h12.',
+  'description':
+      'A handle from get_screen or find_widgets, for example h12. Or give '
+      'target instead.',
+};
+
+const Map<String, Object?> _target = {
+  'type': 'object',
+  'description':
+      'Instead of a handle: the widget by query, found again on each call '
+      '(never stale). Visible matches first; index picks one (default 0).',
+  'properties': {
+    ..._query,
+    'index': {'type': 'integer'},
+  },
 };
 
 const Map<String, Object?> _limit = {
@@ -113,35 +140,32 @@ final List<Map<String, Object?>> agentTools = [
     'The note payload for a handle: source, layout, enclosing widgets.',
     {
       'handle': _handle,
+      'target': _target,
       'detail': {
         'type': 'string',
         'enum': ['compact', 'standard', 'full'],
       },
     },
-    ['handle'],
   ),
   _tool(
     'flash',
     'Show a widget to the user',
     'Outlines the widget for 1.5 s in the app, so the user sees which one '
         'you mean.',
-    {'handle': _handle},
-    ['handle'],
+    {'handle': _handle, 'target': _target},
   ),
   _tool(
     'tap',
     'Tap a widget',
     "A synthetic tap at the widget's center. Refused with \"obscured by X\" "
         'when something else is on top (a dialog barrier).',
-    {'handle': _handle},
-    ['handle'],
+    {'handle': _handle, 'target': _target},
   ),
   _tool(
     'long_press',
     'Long-press a widget',
     "A synthetic long press at the widget's center.",
-    {'handle': _handle},
-    ['handle'],
+    {'handle': _handle, 'target': _target},
   ),
   _tool(
     'enter_text',
@@ -150,21 +174,24 @@ final List<Map<String, Object?>> agentTools = [
         'would: input formatters and onChanged run.',
     {
       'handle': _handle,
+      'target': _target,
       'text': {'type': 'string'},
     },
-    ['handle', 'text'],
+    ['text'],
   ),
   _tool(
     'scroll',
     'Scroll',
-    'Moves the nearest scrollable at or above the handle by dx or dy '
-        'logical pixels (positive: further down or right).',
+    'Moves a list by dy (vertical) or dx (horizontal) logical pixels '
+        '(positive: further down or right): the nearest list of that axis '
+        'at or above the handle, or the main list of the screen with no '
+        'handle.',
     {
       'handle': _handle,
+      'target': _target,
       'dx': {'type': 'number'},
       'dy': {'type': 'number'},
     },
-    ['handle'],
   ),
   _tool(
     'scroll_to',
@@ -277,6 +304,7 @@ final List<Map<String, Object?>> agentTools = [
     'The whole app, or one widget outlined, downscaled.',
     {
       'handle': _handle,
+      'target': _target,
       'max_width': {'type': 'integer', 'description': 'Default 800.'},
     },
   ),
@@ -286,8 +314,12 @@ final List<Map<String, Object?>> agentTools = [
     "The widget's nearest State properties, scroll position, focus, text "
         'field value, whether its route is current, the inherited widgets '
         "above it, and the app's state adapters.",
-    {'handle': _handle, 'limit': _limit, 'max_chars': _maxChars},
-    ['handle'],
+    {
+      'handle': _handle,
+      'target': _target,
+      'limit': _limit,
+      'max_chars': _maxChars,
+    },
   ),
   _tool(
     'verify_note',
@@ -337,5 +369,32 @@ final List<Map<String, Object?>> agentTools = [
         'items': {'type': 'string'},
       },
     },
+  ),
+  _tool(
+    'run_steps',
+    'Run several steps',
+    'Runs tools in the app in order, in one call, and stops at the first '
+        'step that fails. Each step is {tool, …its args} and answers as '
+        'that tool would. Name widgets with target, not handles from an '
+        'earlier step. End with one find_widgets or get_state step to check '
+        'the result. At most 20 steps; not inspect, screenshot, verify_note '
+        'or stress_matrix.',
+    {
+      'steps': {
+        'type': 'array',
+        'items': {
+          'type': 'object',
+          'properties': {
+            'tool': {'type': 'string'},
+          },
+          'required': ['tool'],
+        },
+        'description':
+            'For example [{"tool": "enter_text", "target": {"key": '
+            '"email"}, "text": "a@b.c"}, {"tool": "scroll", "dy": 400}, '
+            '{"tool": "tap", "target": {"text": "Save"}}].',
+      },
+    },
+    ['steps'],
   ),
 ];

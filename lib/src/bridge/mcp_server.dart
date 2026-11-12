@@ -112,7 +112,10 @@ class McpServer {
           'set it inProgress, open the Source file at the line, make the '
           'change, run flutter analyze, then set it resolved (or fixed, or '
           'rejected) with a one-line message saying what you did. The user '
-          'accepts the result in the app.',
+          'accepts the result in the app.'
+          '${commands == null ? '' : ' To operate the app, name widgets with '
+                    'target queries and put several actions in one '
+                    'run_steps call; check once at the end.'}',
     };
   }
 

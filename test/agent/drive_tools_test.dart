@@ -192,6 +192,9 @@ void main() {
         'text': 'hunter2',
       });
       expect(result['text'], '[masked]');
+      final found = await ok(tester, 'find_widgets', {'key': 'password'});
+      final widget = (found['widgets']! as List).first! as Map;
+      expect(widget['value'], '[masked]');
       await bridge.shutdown(tester);
     });
 
@@ -349,6 +352,92 @@ void main() {
       final answer = await run(tester, 'navigate', {'path': ''});
       expect(answer['ok'], isFalse);
       expect(answer['error'], contains('path'));
+      await bridge.shutdown(tester);
+    });
+  });
+
+  group('run_steps', () {
+    testWidgets('acceptance: type, scroll the page and tap in one call, '
+        'with widgets named by target', (tester) async {
+      await pumpApp(tester, _LongForm(log: log));
+      final result = await ok(tester, 'run_steps', {
+        'steps': [
+          {
+            'tool': 'enter_text',
+            'target': {'key': 'name'},
+            'text': 'Ada',
+          },
+          // From the field: its own horizontal scrollable must not take
+          // the dy; the page moves.
+          {
+            'tool': 'scroll',
+            'target': {'key': 'name'},
+            'dy': 400,
+          },
+          {
+            'tool': 'tap',
+            'target': {'text': 'Save'},
+          },
+          {'tool': 'find_widgets', 'type': 'TextField'},
+          {'tool': 'find_widgets', 'type': 'ListView'},
+        ],
+      });
+      final steps = (result['steps']! as List<Object?>)
+          .cast<Map<String, Object?>>();
+      expect([for (final s in steps) s['ok']], everyElement(isTrue));
+      expect(log.events, ['changed Ada', 'saved']);
+      final scrolled = steps[1]['result']! as Map<String, Object?>;
+      expect(scrolled['axis'], 'vertical');
+      expect(scrolled['pixels'], greaterThan(0));
+      Map<String, Object?> firstWidget(Map<String, Object?> step) =>
+          ((step['result']! as Map)['widgets']! as List).first!
+              as Map<String, Object?>;
+      expect(firstWidget(steps[3])['value'], 'Ada');
+      expect(
+        (firstWidget(steps[4])['scroll']! as Map)['pixels'],
+        scrolled['pixels'],
+      );
+      await bridge.shutdown(tester);
+    });
+
+    testWidgets('stops at the first failing step; a bad step list runs '
+        'nothing', (tester) async {
+      await pumpApp(tester, _LongForm(log: log));
+      final result = await ok(tester, 'run_steps', {
+        'steps': [
+          {
+            'tool': 'enter_text',
+            'target': {'key': 'name'},
+            'text': 'Ada',
+          },
+          {
+            'tool': 'tap',
+            'target': {'text': 'Missing'},
+          },
+          {
+            'tool': 'tap',
+            'target': {'text': 'Save'},
+          },
+        ],
+      });
+      final steps = result['steps']! as List<Object?>;
+      expect(steps, hasLength(2));
+      expect((steps[1]! as Map)['error'], startsWith('no widget matches'));
+      expect(result['stopped'], 'at step 2 of 3');
+      expect(log.events, ['changed Ada'], reason: 'step 3 never ran');
+
+      final refused = await run(tester, 'run_steps', {
+        'steps': [
+          {
+            'tool': 'enter_text',
+            'target': {'key': 'name'},
+            'text': 'Bob',
+          },
+          {'tool': 'screenshot'},
+        ],
+      });
+      expect(refused['error'], startsWith('step 2: screenshot cannot run'));
+      expect(log.events, ['changed Ada'], reason: 'step 1 never ran');
       await bridge.shutdown(tester);
     });
   });
@@ -511,5 +600,29 @@ class _Delegate extends RouterDelegate<String>
       ];
       notifyListeners();
     },
+  );
+}
+
+class _LongForm extends StatelessWidget {
+  const _LongForm({required this.log});
+
+  final _Log log;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    body: ListView(
+      children: [
+        TextField(
+          key: const ValueKey<String>('name'),
+          onChanged: (value) => log.events.add('changed $value'),
+        ),
+        const SizedBox(height: 700),
+        ElevatedButton(
+          onPressed: () => log.events.add('saved'),
+          child: const Text('Save'),
+        ),
+        const SizedBox(height: 200),
+      ],
+    ),
   );
 }

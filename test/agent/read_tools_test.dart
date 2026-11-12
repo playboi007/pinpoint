@@ -219,9 +219,8 @@ void main() {
     await bridge.shutdown(tester);
   });
 
-  testWidgets('watch out for: handles expire after their short lifetime', (
-    tester,
-  ) async {
+  testWidgets('watch out for: a handle with no anchor expires after its '
+      'short lifetime; one with an anchor does not', (tester) async {
     await pumpScreen(tester, const _Screen());
     var now = DateTime(2026, 11, 11);
     final table = HandleTable(clock: () => now);
@@ -229,8 +228,11 @@ void main() {
     final root = tester.element(find.byType(_Screen));
     final index = SourceIndex(resolver: const SourceResolver());
     final id = table.add(element, null);
+    final anchored = table.add(element, index.anchorFor(element, root: root));
     expect(table.resolve(id, root: root, index: index), same(element));
     now = now.add(HandleTable.lifetime + const Duration(seconds: 1));
+    // Checked against its anchor on each use, so age does not matter.
+    expect(table.resolve(anchored, root: root, index: index), same(element));
     expect(
       () => table.resolve(id, root: root, index: index),
       throwsA(
