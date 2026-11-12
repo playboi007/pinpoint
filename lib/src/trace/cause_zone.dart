@@ -179,6 +179,13 @@ class CauseZone {
   bool _ready = false;
   TraceCause? _openFrame;
 
+  /// Most causes a frame is linked to; the newest are kept.
+  static const int maxLinks = 8;
+
+  // The causes that ran since the last frame began, oldest first.
+  final List<TraceCause> _ran = <TraceCause>[];
+  Object? _lastRan;
+
   /// Runs [body] in this zone. Call it once, around the binding's set-up
   /// and `runApp`.
   R run<R>(R Function() body) {
@@ -214,11 +221,36 @@ class CauseZone {
     final running = Zone.current[causeKey];
     if (running is TraceCause) return running;
     if (kind == CauseKind.frame) {
-      return _openFrame = TraceCause(_nextId++, CauseKind.frame, clockMs);
+      final frame = _openFrame = TraceCause(
+        _nextId++,
+        CauseKind.frame,
+        clockMs,
+      );
+      // From frame to frame, the "near" way (PLAN-v2 Milestone 14, step
+      // 9): the frame is linked to every cause that ran since the frame
+      // before it. One of them made it dirty. The exact way
+      // (`debugPrintScheduleBuildForStacks`) costs a stack per setState and
+      // takes the `debugPrint` slot.
+      frame.after = [for (final c in _ran) c.id];
+      _ran.clear();
+      _lastRan = null;
+      return frame;
     }
     final frame = _openFrame;
     if (frame != null && (inFrame?.call() ?? false)) return frame;
     return TraceCause(_nextId++, kind ?? CauseKind.other, clockMs);
+  }
+
+  /// Notes that [cause] ran, for the next frame's links. Called for every
+  /// callback in a cause, so the common case (the same cause again) is one
+  /// `identical`.
+  void _noteRan(Object? cause) {
+    if (identical(cause, _lastRan)) return;
+    _lastRan = cause;
+    if (cause is! TraceCause || cause.internal) return;
+    _ran.remove(cause);
+    _ran.add(cause);
+    if (_ran.length > maxLinks) _ran.removeAt(0);
   }
 
   Zone _fork(Zone zone, TraceCause cause) {
@@ -227,8 +259,14 @@ class CauseZone {
   }
 
   R _run<R>(Zone self, ZoneDelegate parent, Zone zone, R Function() f) {
+    final Object? value = zone[causeKey];
+    if (value != null) {
+      _noteRan(value);
+      return parent.run(zone, f);
+    }
     final cause = _entry(zone, null);
     if (cause == null) return parent.run(zone, f);
+    _noteRan(cause);
     return parent.run(_fork(zone, cause), f);
   }
 
@@ -239,9 +277,14 @@ class CauseZone {
     R Function(T arg) f,
     T arg,
   ) {
-    if (zone[causeKey] != null) return parent.runUnary(zone, f, arg);
+    final Object? value = zone[causeKey];
+    if (value != null) {
+      _noteRan(value);
+      return parent.runUnary(zone, f, arg);
+    }
     final cause = _entry(zone, kindOf?.call(arg));
     if (cause == null) return parent.runUnary(zone, f, arg);
+    _noteRan(cause);
     return parent.runUnary(_fork(zone, cause), f, arg);
   }
 
@@ -253,8 +296,14 @@ class CauseZone {
     T1 arg1,
     T2 arg2,
   ) {
+    final Object? value = zone[causeKey];
+    if (value != null) {
+      _noteRan(value);
+      return parent.runBinary(zone, f, arg1, arg2);
+    }
     final cause = _entry(zone, null);
     if (cause == null) return parent.runBinary(zone, f, arg1, arg2);
+    _noteRan(cause);
     return parent.runBinary(_fork(zone, cause), f, arg1, arg2);
   }
 
