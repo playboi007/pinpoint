@@ -96,4 +96,52 @@ void main() {
     final queue = CommandQueue();
     expect(await queue.next(wait: const Duration(milliseconds: 10)), isNull);
   });
+
+  test('each answer logs where its time went', () async {
+    final lines = <String>[];
+    final queue = CommandQueue(log: lines.add);
+    final poll = queue.next(wait: const Duration(seconds: 5));
+    final run = queue.run('find_widgets', const {'text': 'Save'});
+    final command = (await poll)!;
+    queue.complete(command['id']! as String, {
+      'ok': true,
+      'result': const <String, Object?>{},
+      'ms': 12,
+    });
+    // The app's `ms` stays out of the agent's answer.
+    expect(await run, {'ok': true, 'result': const <String, Object?>{}});
+    expect(lines, hasLength(1));
+    expect(
+      lines.single,
+      matches(
+        RegExp(
+          r'^pinpoint: find_widgets took \d+ ms \(\d+ ms until the app took '
+          r'it, 12 ms in the app, \d+ ms network\)$',
+        ),
+      ),
+    );
+  });
+
+  test('the timing line splits the total', () {
+    expect(
+      CommandQueue.timingLine(
+        'tap',
+        const Duration(milliseconds: 3000),
+        const Duration(milliseconds: 20),
+        2900,
+      ),
+      'pinpoint: tap took 3000 ms (20 ms until the app took it, 2900 ms in '
+      'the app, 80 ms network)',
+    );
+    // An app without `ms` (older version): no split.
+    expect(
+      CommandQueue.timingLine(
+        'tap',
+        const Duration(milliseconds: 40),
+        const Duration(milliseconds: 5),
+        null,
+      ),
+      'pinpoint: tap took 40 ms (5 ms until the app took it)',
+    );
+  });
 }

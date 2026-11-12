@@ -40,6 +40,11 @@ void main() {
       expect(parseBridgeArgs(const ['--lan']).lan, isTrue);
     });
 
+    test('the timing log is off unless asked for', () {
+      expect(parseBridgeArgs(const []).timing, isFalse);
+      expect(parseBridgeArgs(const ['--timing']).timing, isTrue);
+    });
+
     test('rejects a bad port, an unknown flag and a missing value', () {
       for (final args in [
         ['--port', 'abc'],

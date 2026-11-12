@@ -2,6 +2,7 @@
 // HTTP, and widget tests (which cannot open sockets) call it directly.
 
 import 'dart:async';
+import 'dart:math' as math;
 
 /// What the bridge says when no app takes commands.
 const String agentControlDisabled =
@@ -26,6 +27,7 @@ class CommandQueue {
   CommandQueue({
     this.pollGrace = const Duration(seconds: 35),
     DateTime Function()? clock,
+    this._log,
   }) : _clock = clock ?? DateTime.now;
 
   /// How long after its last poll an app still counts as connected. Longer
@@ -33,6 +35,9 @@ class CommandQueue {
   final Duration pollGrace;
 
   final DateTime Function() _clock;
+
+  /// Gets one line per answered command: where its time went.
+  final void Function(String line)? _log;
 
   /// The longest an app may hold a poll open.
   static const Duration maxWait = Duration(seconds: 30);
@@ -117,6 +122,14 @@ class CommandQueue {
   bool complete(String id, Map<String, Object?> answer) {
     final command = _running.remove(id);
     if (command == null || command.done.isCompleted) return false;
+    _log?.call(
+      timingLine(
+        command.tool,
+        command.watch.elapsed,
+        command.queued,
+        answer['ms'],
+      ),
+    );
     command.done.complete(
       answer['ok'] == true
           ? {'ok': true, 'result': answer['result']}
@@ -165,8 +178,31 @@ class CommandQueue {
     }
   }
 
+  /// Where the time of one command went: [total] from the tool call to
+  /// the answer, [queued] until the app took it, and [appMs] (the `ms` the
+  /// app reports) running it. The rest is the network and the bridge.
+  static String timingLine(
+    String tool,
+    Duration total,
+    Duration queued,
+    Object? appMs,
+  ) {
+    final all = total.inMilliseconds;
+    final wait = queued.inMilliseconds;
+    if (appMs is! num) {
+      return 'pinpoint: $tool took $all ms ($wait ms until the app took it)';
+    }
+    final app = appMs.round();
+    final network = math.max(0, all - wait - app);
+    return 'pinpoint: $tool took $all ms ($wait ms until the app took it, '
+        '$app ms in the app, $network ms network)';
+  }
+
   Map<String, Object?> _take() {
-    final command = _pending.removeAt(0)..taken = true;
+    final command = _pending.removeAt(0);
+    command
+      ..taken = true
+      ..queued = command.watch.elapsed;
     _running[command.id] = command;
     return {'id': command.id, 'tool': command.tool, 'args': command.args};
   }
@@ -187,4 +223,10 @@ class _Command {
   final Completer<Map<String, Object?>> done =
       Completer<Map<String, Object?>>();
   bool taken = false;
+
+  /// Runs from the tool call.
+  final Stopwatch watch = Stopwatch()..start();
+
+  /// How long it waited for the app's poll.
+  Duration queued = Duration.zero;
 }

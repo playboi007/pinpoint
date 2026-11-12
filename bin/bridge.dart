@@ -34,6 +34,7 @@ Future<void> main(List<String> args) async {
       port: options.port,
       lan: options.lan,
       allowedOrigins: options.allowedOrigins,
+      timing: options.timing,
       log: stdout.writeln,
     );
   } on BridgeStartException catch (error) {

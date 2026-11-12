@@ -113,13 +113,19 @@ class LongPollTransport implements CommandTransport {
         final tool = command['tool'];
         final args = command['args'];
         if (id is! String || tool is! String) continue;
+        final ran = Stopwatch()..start();
         final answer = await handler(
           tool,
           args is Map<String, Object?> ? args : const <String, Object?>{},
         );
         // Stopped meanwhile: the bridge has failed the command already.
         if (!live()) return;
-        await client.postCommandResult(id, answer);
+        // `ms`: the time in the app, so the bridge log can tell it from
+        // the time on the network.
+        await client.postCommandResult(id, {
+          ...answer,
+          'ms': ran.elapsedMilliseconds,
+        });
       } on Object {
         if (!live()) return;
         await _pause(generation);

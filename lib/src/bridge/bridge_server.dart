@@ -43,7 +43,13 @@ class BridgeStartException implements Exception {
 /// MCP for the agent: `POST /mcp` (Streamable HTTP with JSON answers; no
 /// server-sent events) with the tools of [McpServer].
 class PinPointBridge {
-  PinPointBridge._(this._server, this.store, this._allowedOrigins, this._log) {
+  PinPointBridge._(
+    this._server,
+    this.store,
+    this._allowedOrigins,
+    this._log, {
+    required bool timing,
+  }) : commands = CommandQueue(log: timing ? _log : null) {
     _subscription = _server.listen(_handle);
   }
 
@@ -57,6 +63,7 @@ class PinPointBridge {
     int port = defaultBridgePort,
     bool lan = false,
     List<String> allowedOrigins = const <String>[],
+    bool timing = false,
     void Function(String line) log = _noLog,
   }) async {
     final folder = Directory(dir).absolute;
@@ -88,7 +95,7 @@ class PinPointBridge {
         '${server.port}.',
       );
     }
-    return PinPointBridge._(server, store, allowedOrigins, log);
+    return PinPointBridge._(server, store, allowedOrigins, log, timing: timing);
   }
 
   final HttpServer _server;
@@ -97,7 +104,7 @@ class PinPointBridge {
   final NoteStore store;
 
   /// Agent commands on their way to the app (Milestone 12).
-  final CommandQueue commands = CommandQueue();
+  final CommandQueue commands;
 
   final List<String> _allowedOrigins;
   late final McpServer _mcp = McpServer(store, commands: commands, log: _log);

@@ -23,6 +23,8 @@ Options:
   --allow-origin <url>   Also accept notes from pages served at <url>, for
                          example http://192.168.1.20:5000. Repeatable. Pages
                          served from this machine are always accepted.
+  --timing               Log where the time of each agent command went: in
+                         the queue, in the app, on the network.
   -h, --help             Show this text.
 ''';
 
@@ -33,6 +35,7 @@ class BridgeOptions {
     this.dir = '.pinpoint',
     this.lan = false,
     this.allowedOrigins = const <String>[],
+    this.timing = false,
     this.help = false,
   });
 
@@ -45,6 +48,9 @@ class BridgeOptions {
   /// Origins accepted besides pages served from this machine.
   final List<String> allowedOrigins;
 
+  /// Log one timing line per agent command.
+  final bool timing;
+
   final bool help;
 }
 
@@ -54,6 +60,7 @@ BridgeOptions parseBridgeArgs(List<String> args) {
   var port = defaultBridgePort;
   var dir = '.pinpoint';
   var lan = false;
+  var timing = false;
   var help = false;
   final origins = <String>[];
   for (var i = 0; i < args.length; i++) {
@@ -87,6 +94,8 @@ BridgeOptions parseBridgeArgs(List<String> args) {
         origins.add(value());
       case '--lan' when equals < 0:
         lan = true;
+      case '--timing' when equals < 0:
+        timing = true;
       case '-h' || '--help' when equals < 0:
         help = true;
       default:
@@ -98,6 +107,7 @@ BridgeOptions parseBridgeArgs(List<String> args) {
     dir: dir,
     lan: lan,
     allowedOrigins: origins,
+    timing: timing,
     help: help,
   );
 }
