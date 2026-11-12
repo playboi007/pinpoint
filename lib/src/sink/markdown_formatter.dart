@@ -162,6 +162,12 @@ String markdownFromJson(Map<String, Object?> json) {
     replies.forEach(out.writeln);
   }
 
+  final happened = whatHappenedLines(json);
+  if (happened.isNotEmpty) {
+    out.writeln();
+    happened.forEach(out.writeln);
+  }
+
   final subtree = _string(json['subtree']);
   if (subtree != null && subtree.isNotEmpty) {
     out
@@ -172,6 +178,21 @@ String markdownFromJson(Map<String, Object?> json) {
     }
   }
   return out.toString();
+}
+
+/// The "What happened" section of a note (its `trace` JSON): a heading,
+/// then the compact trace lines indented. Empty without a trace.
+List<String> whatHappenedLines(Map<String, Object?> json) {
+  final trace = _map(json['trace']);
+  final lines = [for (final l in _list(trace['lines'])) ?_string(l)];
+  if (lines.isEmpty) return const <String>[];
+  final seconds = _number(trace['seconds']);
+  final partial = trace['partial'] == true;
+  return [
+    'What happened${seconds == null ? '' : ' ($seconds s before the pick)'}'
+        '${partial ? ' (partial: ${_line(_string(trace['reason']) ?? 'older events dropped')})' : ''}:',
+    for (final line in lines) '  ${_line(line)}',
+  ];
 }
 
 /// The what-if overrides of a note (its `environment` JSON) on one line,

@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:typed_data';
+
 import 'package:flutter/widgets.dart';
 
 import '../agent/state_dump.dart';
@@ -262,6 +265,69 @@ class TraceSession {
     final removed = watchSource.remove(id);
     if (watchSource.watches.isEmpty) release(TraceDemand.watch);
     return removed;
+  }
+
+  /// Recorder time (ms) when Pinpoint last left idle, or null while idle.
+  /// A note's trace ends here: the user saw the problem, then started
+  /// picking, and wrote the comment after.
+  int? activeSince;
+
+  /// Pinpoint's overlay left idle ([active]) or went back to it.
+  void pinpointActive(bool active) {
+    if (!active) {
+      activeSince = null;
+    } else {
+      activeSince ??= recorder.now;
+    }
+  }
+
+  /// Most mark thumbnails kept; the oldest go first.
+  static const int maxThumbnails = 20;
+
+  /// Takes a 400 px wide image of the app for a mark, or null. Set by the
+  /// wrapper.
+  Future<Uint8List?> Function()? thumbnail;
+
+  /// The marks' thumbnails, by the mark's seq.
+  final Map<int, Uint8List> thumbnails = <int, Uint8List>{};
+
+  /// Records a mark (PLAN-v2 Milestone 13, step 9): a moment the user (M
+  /// key, Timeline) or the agent (`mark`) points at, with an optional
+  /// sentence, and takes a thumbnail of the app.
+  TraceEvent mark({String? text, String by = 'user'}) {
+    final event = recorder.add(
+      TraceKind.mark,
+      data: {'text': traceValue(text ?? ''), 'by': by},
+    );
+    final capture = thumbnail;
+    if (capture != null) {
+      unawaited(
+        capture().then(
+          (png) {
+            if (png == null || _disposed) return;
+            thumbnails[event.seq] = png;
+            while (thumbnails.length > maxThumbnails) {
+              thumbnails.remove(thumbnails.keys.first);
+            }
+          },
+          onError: (Object error) =>
+              debugPrint('pinpoint: mark thumbnail failed: $error'),
+        ),
+      );
+    }
+    return event;
+  }
+
+  /// Names the mark [seq]. False when it is no longer held.
+  bool renameMark(int seq, String text) {
+    for (final event in recorder.newestFirst) {
+      if (event.seq < seq) break;
+      if (event.seq == seq && event.kind == TraceKind.mark) {
+        event.data['text'] = traceValue(text);
+        return true;
+      }
+    }
+    return false;
   }
 
   /// What `trace_detail` answers: whether level 3 runs, for what, which

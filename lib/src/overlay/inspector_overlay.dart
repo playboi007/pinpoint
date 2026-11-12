@@ -23,8 +23,10 @@ import '../detect/image_detector.dart';
 import '../detect/overflow_detector.dart';
 import '../detect/truncation_detector.dart';
 import '../model/annotation.dart';
+import '../model/trace_event.dart';
 import '../search/pick_result.dart';
 import '../search/render_search.dart';
+import '../search/source_index.dart';
 import '../search/source_resolver.dart';
 import '../sink/bridge_client.dart';
 import '../sink/http_sink.dart';
@@ -32,6 +34,9 @@ import '../sink/markdown_formatter.dart';
 import '../sink/pinpoint_sink.dart';
 import '../theme/pinpoint_theme.dart';
 import '../theme/pinpoint_tokens.dart';
+import '../trace/note_trace.dart';
+import '../trace/trace_format.dart' show parseTraceSource;
+import '../trace/trace_session.dart';
 import '../tweak/tweak_scope.dart';
 import '../tweak/tweak_session.dart';
 import 'agent_layer.dart';
@@ -45,6 +50,7 @@ import 'pin_marker.dart';
 import 'pin_tracker.dart';
 import 'rail.dart';
 import 'ruler_painter.dart';
+import 'timeline_panel.dart';
 import 'toast_layer.dart';
 import 'toolbar.dart';
 import 'tweak_panel.dart';
@@ -413,6 +419,8 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     final previous = _lastMode;
     if (mode == previous) return;
     _lastMode = mode;
+    // A note's trace ends when Pinpoint became active.
+    TraceSession.current?.pinpointActive(widget.controller.isActive);
     // Polls only while active: an idle overlay must not keep the network
     // busy or the tab awake.
     _sync?.active = widget.controller.isActive;
@@ -526,6 +534,54 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     ];
   }
 
+  /// Outlines the widget of a Timeline event: the pointer's anchor, else
+  /// the widget at the event's source line.
+  void _flashEvent(TraceEvent event) {
+    final content = widget.contentKey.currentContext;
+    if (content is! Element) return;
+    NoteAnchor? anchor;
+    final raw = event.data['anchor'];
+    final source = event.source;
+    if (raw is Map<String, Object?>) {
+      anchor = NoteAnchor.fromJson(raw);
+    } else if (source != null) {
+      if (parseTraceSource(source) case final at?) {
+        anchor = NoteAnchor(
+          file: at.file,
+          line: at.line,
+          column: at.column,
+          widget: event.widget,
+        );
+      }
+    }
+    final element = anchor == null || !anchor.resolvable
+        ? null
+        : SourceIndex(resolver: _tracker.resolver)
+              .resolve(anchor, root: content);
+    final renderObject = element == null
+        ? null
+        : AgentCommands.renderObjectOf(element);
+    if (renderObject == null) {
+      _toasts.show('${event.widget ?? 'That widget'} is not on screen now');
+      return;
+    }
+    widget.controller.agent.flashOn(renderObject);
+  }
+
+  /// What happened before the pick, for the note; null when the recorder
+  /// is off. A failure leaves the note without it.
+  static Map<String, Object?>? _noteTrace(PickResult selection) {
+    try {
+      return traceForNote(
+        selection.element,
+        resolver: selection.chain.resolver,
+      );
+    } catch (error) {
+      debugPrint('pinpoint: trace for the note failed: $error');
+      return null;
+    }
+  }
+
   /// The note for the selection with the draft's comment and intent, or null
   /// after a toast that says why not.
   Annotation? _collect() {
@@ -540,6 +596,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
         controller.draft.intent,
         context: context,
         environment: controller.environment.toJson(),
+        trace: _noteTrace(selection),
       );
       final checks = controller.draft.checks;
       final note = checks.isEmpty
@@ -1227,6 +1284,13 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
                           unawaited(_noteFromFinding(finding)),
                       onSendDraft: (id) => unawaited(_sendNotes([id])),
                       onCopy: (finding) => unawaited(_copyFinding(finding)),
+                    ),
+                    // Above the trap, so clicks on it never pick.
+                    TimelinePanelLayer(
+                      controller: widget.controller,
+                      placement: _rail,
+                      others: [_environmentPanel, _findingsPanel],
+                      onFlash: _flashEvent,
                     ),
                     // In idle too while any tweak is active.
                     TweakChip(session: widget.controller.tweaks),

@@ -173,6 +173,7 @@ String _standard(Map<String, Object?> note) {
   }
   final replies = _replies(note);
   if (replies.isNotEmpty) lines.addAll(['Replies:', ...replies]);
+  lines.addAll(whatHappenedLines(note));
   return lines.join('\n');
 }
 

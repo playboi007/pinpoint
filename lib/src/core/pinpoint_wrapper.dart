@@ -1,13 +1,16 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
+import '../capture/screenshot.dart';
 import '../detect/detector.dart';
 import '../detect/detector_hooks.dart';
 import '../detect/findings_controller.dart';
 import '../env/environment_controller.dart';
 import '../env/environment_host.dart';
 import '../overlay/inspector_overlay.dart';
+import '../search/render_search.dart';
 import '../search/source_resolver.dart';
 import '../trace/sources/error_source.dart';
 import '../trace/sources/finding_source.dart';
@@ -155,7 +158,7 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
     if (!widget.config.trace.enabled) return;
     final resolver = SourceResolver.forConfig(widget.config);
     final routes = RouteSource(appKey: _appKey);
-    TraceSession(
+    final session = TraceSession(
       owner: this,
       config: widget.config.trace,
       rebuildHook: rebuildHook,
@@ -181,6 +184,30 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
         FindingSource(findings: () => _controller.findings, resolver: resolver),
       ],
     );
+    session.thumbnail = _thumbnail;
+  }
+
+  /// A 400 px wide image of the app, for a mark.
+  Future<Uint8List?> _thumbnail() async {
+    final boundary = _appKey.currentContext?.findRenderObject();
+    if (boundary is! RenderRepaintBoundary || !boundary.attached) return null;
+    final rect = RenderSearch.globalRectOf(boundary);
+    if (rect == null) return null;
+    final shot = await captureScreenshot(
+      boundary,
+      rect,
+      // Not View.of: this runs outside build and must subscribe nothing.
+      pixelRatio:
+          WidgetsBinding
+              .instance
+              .platformDispatcher
+              .implicitView
+              ?.devicePixelRatio ??
+          1,
+      maxWidth: 400,
+      outline: false,
+    );
+    return shot?.png;
   }
 
   /// Restores every global slot, the environment's and the detectors'
@@ -273,6 +300,8 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
           _controller.stepSelection(up: true, localOnly: false);
         case KeyAction.chainDownAll:
           _controller.stepSelection(up: false, localOnly: false);
+        case KeyAction.mark:
+          TraceSession.ownedBy(this)?.mark();
       }
     }
     // True only for Pinpoint's own keys. It does not stop the app's focused

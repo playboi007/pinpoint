@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pinpoint/src/model/annotation.dart';
 import 'package:pinpoint/src/model/trace_event.dart';
 import 'package:pinpoint/src/trace/trace_format.dart';
 import 'package:pinpoint/src/trace/trace_recorder.dart';
@@ -199,5 +200,93 @@ void main() {
       'level 3 on: watch; rebuild slot taken',
     );
     expect(shortSource('lib/screens/home.dart:120:12'), 'home.dart:120');
+  });
+
+  group('noteTrace (a note\'s "What happened")', () {
+    test('keeps the window, filters builds by subtree, and names the part '
+        'where level 3 was off', () {
+      final recorder = replay(loop);
+      final trace = noteTrace(
+        recorder,
+        end: 2000,
+        subtree: {'lib/screens/existing.dart:120:12'},
+      )!;
+      final lines = (trace['lines']! as List<Object?>).cast<String>();
+      expect(lines.first, '$traceNotRecorded for seq 1-4');
+      expect(lines, contains(endsWith('×12 of:')));
+      expect(lines, contains(contains('build  _ImproveExistingConfig')));
+      expect(trace['rebuilds'], isFalse);
+
+      // Another widget's subtree: the loop's builds are left out, its probes
+      // stay.
+      final other = noteTrace(
+        recorder,
+        end: 2000,
+        subtree: {'lib/x.dart:1:1'},
+      )!;
+      final otherLines = (other['lines']! as List<Object?>).cast<String>();
+      expect(otherLines.where((l) => l.contains('build  ')), isEmpty);
+      expect(otherLines, contains(contains('existing.ensureLoaded')));
+    });
+
+    test('with level 3 off for the whole window: inputs, routes and errors '
+        'only, under "rebuilds not recorded"', () {
+      final recorder = TraceRecorder(clock: () => 0);
+      for (final e in loop.where((e) => e.kind != TraceKind.detailOn)) {
+        recorder.add(e.kind, data: e.data, widget: e.widget, source: e.source);
+      }
+      final lines =
+          (noteTrace(recorder, end: 0, subtree: {})!['lines']! as List<Object?>)
+              .cast<String>();
+      expect(lines.first, traceNotRecorded);
+      expect(
+        lines
+            .skip(1)
+            .every(
+              (l) =>
+                  l.contains('input.') ||
+                  l.contains('  route  ') ||
+                  l.contains('  error  '),
+            ),
+        isTrue,
+        reason: lines.join('\n'),
+      );
+    });
+
+    test('nothing in the window: no trace', () {
+      final recorder = TraceRecorder(clock: () => 60000);
+      expect(noteTrace(recorder, end: 60000, subtree: {}), isNull);
+    });
+
+    test('the size budget cuts the trace first and keeps its first line', () {
+      final note = Annotation(
+        id: 'pp_20261113_100000_a1f3',
+        createdAt: DateTime.utc(2026, 11, 13, 10),
+        intent: AnnotationIntent.bug,
+        comment: 'Loads twice',
+        app: const AppInfo(buildMode: 'debug', platform: 'web'),
+        page: const PageInfo(route: '/'),
+        target: const TargetInfo(widget: 'Text', sourceUnavailable: false),
+        trace: {
+          'seconds': 10,
+          'rebuilds': false,
+          'lines': [
+            traceNotRecorded,
+            for (var i = 0; i < 59; i++)
+              '$i  +0.0${i}s  f$i  probe  ${'p' * 150}',
+          ],
+        },
+      );
+      final fitted = note.fitToBudget();
+      expect(fitted.truncated.first, 'trace');
+      final lines = (fitted.trace!['lines']! as List<Object?>).cast<String>();
+      expect(lines, hasLength(20));
+      expect(lines.first, traceNotRecorded);
+      expect(lines.last, startsWith('58  '));
+
+      final back = Annotation.fromJson(fitted.toJson())!;
+      expect(back.trace, fitted.trace);
+      expect(fitted.toJson()['schema'], 7);
+    });
   });
 }

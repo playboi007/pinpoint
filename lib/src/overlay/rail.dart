@@ -10,6 +10,7 @@ import 'agent_layer.dart';
 import 'environment_panel.dart';
 import 'findings_panel.dart';
 import 'theme_menu.dart';
+import 'timeline_panel.dart';
 import 'toolbar.dart';
 
 /// Where the rail is, shared with the panels that open beside it.
@@ -212,6 +213,7 @@ class _RailLayerState extends State<RailLayer> {
         _controller.findings,
         widget.environmentPanel,
         widget.findingsPanel,
+        TimelinePanel.open,
         widget.placement,
       ]),
       builder: (context, _) {
@@ -221,7 +223,7 @@ class _RailLayerState extends State<RailLayer> {
             _controller.agent.enabled;
         if (!visible) return const SizedBox.shrink();
         final tokens = PinPointTokens.of(context);
-        final items = 3 + (widget.allowAgentControl ? 1 : 0);
+        final items = 4 + (widget.allowAgentControl ? 1 : 0);
         final placement = widget.placement..height = _heightFor(items);
         return LayoutBuilder(
           builder: (context, constraints) {
@@ -295,6 +297,14 @@ class _RailLayerState extends State<RailLayer> {
         active: widget.findingsPanel.value && _controller.isActive,
         badge: findings > 0 ? CountBadge(findings) : null,
         onTap: () => openRailPanel(_controller, widget.findingsPanel),
+      ),
+      const DraftRule(),
+      RailItem(
+        key: TimelinePanel.buttonKey,
+        icon: PinPointIcons.timeline,
+        tooltip: 'Timeline',
+        active: TimelinePanel.open.value && _controller.isActive,
+        onTap: () => openRailPanel(_controller, TimelinePanel.open),
       ),
       const DraftRule(),
       if (widget.allowAgentControl) ...[

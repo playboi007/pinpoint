@@ -1,5 +1,5 @@
 {
-  "schema": 6,
+  "schema": 7,
   "status": "draft",
   "intent": "improve",
   "comment": "Label truncates at narrow widths",

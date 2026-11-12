@@ -321,6 +321,7 @@ class AgentCommands {
       'trace_detail' => traceDetail(args),
       'watch' => watch(args),
       'unwatch' => unwatch(args),
+      'mark' => mark(args),
       _ => throw AgentError('unknown tool: $tool'),
     };
   }
@@ -408,6 +409,16 @@ class AgentCommands {
       'watches': [for (final w in session.watchSource.watches) w.id],
       'level3': session.detailStatus(),
     };
+  }
+
+  /// `mark`: a moment the agent points at.
+  Map<String, Object?> mark(Map<String, Object?> args) {
+    final text = args['text'];
+    final event = _trace().mark(
+      text: text is String ? text : null,
+      by: 'agent',
+    );
+    return {'seq': event.seq, 't': event.t, 'frame': event.frame};
   }
 
   /// Tools a `run_steps` step may call. Not `inspect`, `screenshot`,

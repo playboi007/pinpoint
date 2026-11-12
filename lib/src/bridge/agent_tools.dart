@@ -27,6 +27,7 @@ const List<String> agentToolNames = [
   'trace_detail',
   'watch',
   'unwatch',
+  'mark',
 ];
 
 /// How long the bridge waits for the app's answer to [tool].
@@ -495,6 +496,19 @@ final List<Map<String, Object?>> agentTools = [
         'stops level 3 unless trace_detail or the Timeline holds it.',
     {
       'id': {'type': 'string'},
+    },
+  ),
+  _tool(
+    'mark',
+    'Mark this moment',
+    'Records a mark in the flight recorder, with an optional sentence, '
+        'and a thumbnail of the app. Read from it with get_trace since: '
+        '"mark".',
+    {
+      'text': {
+        'type': 'string',
+        'description': 'For example "the list is empty here".',
+      },
     },
   ),
 ];

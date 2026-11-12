@@ -1,7 +1,7 @@
 // Plain Dart: no `dart:ui` and no `package:flutter` (PLAN-v2 rule 13). The
 // compact text an agent reads, and the `get_trace` query.
 
-import '../model/annotation.dart' show clipText;
+import '../model/annotation.dart' show clipText, traceNotRecorded;
 import '../model/trace_event.dart';
 import 'trace_recorder.dart';
 
@@ -17,6 +17,30 @@ String shortSource(String source) {
       : source;
   final slash = withoutColumn.lastIndexOf('/');
   return slash < 0 ? withoutColumn : withoutColumn.substring(slash + 1);
+}
+
+/// `file`, `line` and `column` from a source such as
+/// `lib/home.dart:120:12`, or null when it has no line.
+({String file, int line, int? column})? parseTraceSource(String source) {
+  final parts = source.split(':');
+  if (parts.length < 2) return null;
+  final last = int.tryParse(parts.last);
+  final before = parts.length >= 3
+      ? int.tryParse(parts[parts.length - 2])
+      : null;
+  if (last == null) return null;
+  if (before != null) {
+    return (
+      file: parts.sublist(0, parts.length - 2).join(':'),
+      line: before,
+      column: last,
+    );
+  }
+  return (
+    file: parts.sublist(0, parts.length - 1).join(':'),
+    line: last,
+    column: null,
+  );
 }
 
 /// What [event] says, after its kind: the part of a compact line that is
@@ -402,4 +426,72 @@ Map<String, Object?> traceAnswer(TraceRecorder recorder, TraceQuery query) {
     }
   }
   return answer;
+}
+
+/// The `trace` of a note (PLAN-v2 Milestone 13, step 12): the events in the
+/// [seconds] before [end] (recorder time, in ms), at most [maxLines]
+/// compact lines. Null when nothing in the window is kept.
+///
+/// `build` and `state` events are kept only for widgets created at one of
+/// the [subtree] sources (`file:line:column`). When level 3 was off for the
+/// whole window, only inputs, routes and errors are kept and the first
+/// line says [traceNotRecorded]. When it was off for part of the window,
+/// the first line names that part.
+Map<String, Object?>? noteTrace(
+  TraceRecorder recorder, {
+  required int end,
+  required Set<String> subtree,
+  int seconds = 10,
+  int maxLines = 60,
+}) {
+  final start = end - seconds * 1000;
+  final window = <TraceEvent>[
+    for (final e in recorder.events)
+      if (e.t >= start && e.t <= end) e,
+  ];
+  if (window.isEmpty) return null;
+  final first = window.first.seq;
+  final last = window.last.seq;
+  final gaps = recorder.rebuildGaps(first, last);
+  final off = gaps.length == 1 && gaps.single == (first, last);
+  bool keep(TraceEvent e) {
+    if (TraceKind.isInput(e.kind) ||
+        e.kind == TraceKind.route ||
+        e.kind == TraceKind.error) {
+      return true;
+    }
+    if (off) return false;
+    return switch (e.kind) {
+      TraceKind.build || TraceKind.state => subtree.contains(e.source),
+      TraceKind.probe || TraceKind.finding || TraceKind.mark => true,
+      _ => false,
+    };
+  }
+
+  final kept = [
+    for (final e in window)
+      if (keep(e)) e,
+  ];
+  if (kept.isEmpty) return null;
+  final oldest = recorder.oldest;
+  final partial = recorder.partial && oldest != null && oldest.t > start;
+  final head = gaps.isEmpty
+      ? null
+      : off
+      ? traceNotRecorded
+      : '$traceNotRecorded for seq '
+            '${[for (final (a, b) in gaps.take(3)) '$a-$b'].join(', ')}';
+  return {
+    'seconds': seconds,
+    'rebuilds': gaps.isEmpty,
+    'lines': [
+      ?head,
+      ...compactTrace(
+        kept,
+        limit: head == null ? maxLines : maxLines - 1,
+      ).lines,
+    ],
+    if (partial) 'partial': true,
+    if (partial) 'reason': recorder.partialReason,
+  };
 }
