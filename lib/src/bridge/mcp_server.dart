@@ -16,6 +16,7 @@ import 'hot_reload.dart';
 import 'note_detail.dart';
 import 'note_store.dart';
 import 'png_resize.dart';
+import 'probe_scan.dart';
 
 /// The MCP protocol versions this server speaks, newest first.
 const List<String> mcpProtocolVersions = [
@@ -202,6 +203,16 @@ class McpServer {
         'required': ['id'],
       },
     },
+    {
+      'name': 'list_probes',
+      'title': 'List probe lines',
+      'description':
+          'The PinPoint.probe( lines left under lib/, with file and line. '
+          'A probe records values each time it runs (read them with '
+          'get_trace kinds [probe]); remove every probe before you set a '
+          'note fixed.',
+      'inputSchema': {'type': 'object', 'properties': <String, Object?>{}},
+    },
   ];
 
   static const Map<String, Object?> _detailSchema = {
@@ -221,6 +232,7 @@ class McpServer {
       'list_notes' => _listNotes(input),
       'get_note' => _getNote(input),
       'update_note' => _updateNote(input),
+      'list_probes' => _listProbes(),
       'verify_note' when commands != null => _verifyNote(input),
       'hot_reload' when reloader != null => _hotReload(input),
       final String tool
@@ -324,9 +336,36 @@ class McpServer {
       'pinpoint: the agent set $id to ${note['status']}'
       '${message == null ? '' : ': $message'}',
     );
+    // Probe lines are for finding a bug, not for the fix: say so while
+    // any remain (PLAN-v2 Milestone 13, step 7).
+    final probes = status == 'fixed' || status == 'resolved'
+        ? await findProbes(store.root.parent)
+        : const <ProbeLine>[];
     return _text(
       'Note $id is ${note['status']}.\n\n'
-      '${noteText(note, NoteDetail.compact)}',
+      '${noteText(note, NoteDetail.compact)}'
+      '${probes.isEmpty ? '' : '\n\n${_probeWarning(probes)}'}',
+    );
+  }
+
+  static String _probeWarning(List<ProbeLine> probes) => [
+    'Warning: ${probes.length} PinPoint.probe line'
+        '${probes.length == 1 ? ' is' : 's are'} still in lib/. Remove '
+        '${probes.length == 1 ? 'it' : 'them'} before the fix is done:',
+    for (final p in probes.take(10)) '  ${p.file}:${p.line}',
+    if (probes.length > 10) '  … and ${probes.length - 10} more',
+  ].join('\n');
+
+  /// `list_probes`: the `PinPoint.probe(` lines left under `lib/`.
+  Future<Map<String, Object?>> _listProbes() async {
+    final probes = await findProbes(store.root.parent);
+    if (probes.isEmpty) return _text('No PinPoint.probe lines in lib/.');
+    return _text(
+      [
+        '${probes.length} PinPoint.probe line'
+            '${probes.length == 1 ? '' : 's'} in lib/:',
+        for (final p in probes) '$p',
+      ].join('\n'),
     );
   }
 
