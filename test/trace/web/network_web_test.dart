@@ -185,6 +185,37 @@ void main() {
     expect(_s(xhr['readyState']), isNot('4'));
   });
 
+  test('acceptance: an Authorization header and a token parameter never '
+      'appear in an event (step 4)', () async {
+    final url = _blobUrl(utf8.encode('ok'), 'text/plain');
+    await BrowserClient().get(
+      Uri.parse(url),
+      headers: {'Authorization': 'Bearer s3cret-token'},
+    );
+    await _xhr('GET', url, headers: {'X-Api-Key': 'k3y'});
+    await _until(() => net().length == 4);
+    final all = [for (final e in recorder.events) e.toJsonLine()].join();
+    expect(all, isNot(contains('s3cret')));
+    expect(all, isNot(contains('k3y')));
+    expect((net()[0].data['headers']! as Map)['authorization'], '***');
+    expect((net()[2].data['headers']! as Map)['x-api-key'], '***');
+  });
+
+  test('acceptance: requests to the bridge origin pass through and give no '
+      'events (step 4)', () async {
+    source.stop();
+    final page = '${Uri.base.scheme}://${Uri.base.authority}';
+    source = NetworkSource(hooks: hooks, ignoreOrigins: {page})
+      ..start(recorder);
+    // A blob URL is not on the page origin; a relative URL is.
+    final answer = await BrowserClient().get(Uri.base.resolve('/no-such'));
+    expect(answer.statusCode, isNonZero);
+    final xhr = await _xhr('GET', '/no-such');
+    expect(_s(xhr['status']), isNot('0'));
+    expect(net(), isEmpty);
+    expect(source.net!.ignored, 2);
+  });
+
   test('a failed fetch gives net.error with the cause of the call', () async {
     TraceCause? cause;
     await CauseZone.enter(CauseKind.pointer, () async {

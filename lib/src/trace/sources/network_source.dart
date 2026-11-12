@@ -1,5 +1,6 @@
 import '../../core/hook_registry.dart';
 import '../net_record.dart';
+import '../redact.dart';
 import '../trace_recorder.dart';
 import '../trace_source.dart';
 import 'network_source_stub.dart'
@@ -32,6 +33,8 @@ class NetworkSource extends TraceSource {
   NetworkSource({
     required this._hooks,
     this.bodies = true,
+    this.redact = const TraceRedact(),
+    this.ignoreOrigins = const <String>{},
     NetworkHooks? platformHooks,
   }) : _platform = platformHooks ?? createNetworkHooks();
 
@@ -40,6 +43,12 @@ class NetworkSource extends TraceSource {
 
   /// Whether answers are read for their hash and kept for a tape.
   final bool bodies;
+
+  /// Masked header and parameter names.
+  final TraceRedact redact;
+
+  /// Origins never recorded: the bridge's (rule 14).
+  final Set<String> ignoreOrigins;
 
   NetRecorder? _net;
   bool _installed = false;
@@ -63,7 +72,12 @@ class NetworkSource extends TraceSource {
   @override
   void start(TraceRecorder recorder) {
     if (_net != null) return;
-    final net = _net = NetRecorder(recorder, bodies: bodies);
+    final net = _net = NetRecorder(
+      recorder,
+      bodies: bodies,
+      redact: redact,
+      ignoreOrigins: ignoreOrigins,
+    );
     _installed = _platform.install(net, _hooks);
   }
 

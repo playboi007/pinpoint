@@ -9,6 +9,7 @@ import 'dart:typed_data';
 import '../model/annotation.dart' show clipText;
 import '../model/trace_event.dart';
 import 'cause_zone.dart';
+import 'redact.dart';
 import 'trace_recorder.dart';
 
 /// Writes `net.request`, `net.response` and `net.error` events.
@@ -18,11 +19,27 @@ import 'trace_recorder.dart';
 /// keep up to [maxBody] bytes of it for a tape (Milestone 15). Bodies never
 /// go into events.
 class NetRecorder {
-  NetRecorder(this.recorder, {bool bodies = true, NetBodies? store})
-    : readBodies = bodies,
-      store = store ?? NetBodies();
+  NetRecorder(
+    this.recorder, {
+    bool bodies = true,
+    NetBodies? store,
+    this.redact = const TraceRedact(),
+    this.ignoreOrigins = const <String>{},
+  }) : readBodies = bodies,
+       store = store ?? NetBodies();
 
   final TraceRecorder recorder;
+
+  /// Header and URL parameter names whose values are masked before an
+  /// event exists (rule 16).
+  final TraceRedact redact;
+
+  /// Origins never recorded, such as `http://127.0.0.1:4747`: the bridge's
+  /// (rule 14). Their requests pass through untouched.
+  final Set<String> ignoreOrigins;
+
+  /// Requests left out: to an ignored origin, or Pinpoint's own.
+  int ignored = 0;
 
   /// Whether answers are read for their hash and kept.
   final bool readBodies;
@@ -56,8 +73,15 @@ class NetRecorder {
     int? bodySize,
   }) {
     final cause = CauseZone.currentCause;
+    // Pinpoint never records itself (rule 14): its long poll and its
+    // posts to the bridge are left out, by zone and by origin.
+    if ((cause != null && cause.internal) || _ignored(url)) {
+      ignored++;
+      return null;
+    }
     final upper = method.toUpperCase();
-    final shownUrl = clipText(url, maxUrl);
+    // Masked before the event exists (rule 16).
+    final shownUrl = clipText(redact.url(url), maxUrl);
     final event = recorder.add(
       TraceKind.netRequest,
       data: {
@@ -74,9 +98,23 @@ class NetRecorder {
     return NetCall._(this, event, cause, upper, shownUrl);
   }
 
-  static Map<String, Object?> _clipHeaders(Map<String, String> headers) => {
+  bool _ignored(String url) {
+    if (ignoreOrigins.isEmpty) return false;
+    try {
+      final uri = Uri.base.resolve(url);
+      return ignoreOrigins.contains('${uri.scheme}://${uri.authority}');
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Masked, lower-case names, clipped.
+  Map<String, Object?> _clipHeaders(Map<String, String> headers) => {
     for (final MapEntry(:key, :value) in headers.entries.take(20))
-      clipText(key.toLowerCase(), 60): clipText(value, 200),
+      clipText(key.toLowerCase(), 60): clipText(
+        redact.masks(key) ? TraceRedact.mask : value,
+        200,
+      ),
   };
 
   /// Why an answer's body is not read, or null to read it.
@@ -157,7 +195,7 @@ class NetCall {
         'ms': _watch.elapsedMilliseconds,
         'size': ?declared,
         'type': ?(type == null ? null : clipText(type, 80)),
-        if (headers.isNotEmpty) 'headers': NetRecorder._clipHeaders(headers),
+        if (headers.isNotEmpty) 'headers': _net._clipHeaders(headers),
         if (skip != null) 'body': 'not read: $skip',
       },
       cause: cause,

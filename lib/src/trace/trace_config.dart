@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import 'redact.dart';
 import 'trace_recorder.dart';
 import 'trace_source.dart';
 
@@ -14,6 +15,7 @@ class TraceConfig {
     this.sources = const <TraceSource>[],
     this.causes = true,
     this.bodies = true,
+    this.redact = TraceRedact.defaults,
   }) : assert(maxEvents > 0),
        assert(maxBytes > 0);
 
@@ -54,4 +56,12 @@ class TraceConfig {
   /// and never go into an event. False: no response is ever cloned, and
   /// events have no body hash.
   final bool bodies;
+
+  /// Header names and URL parameter names whose values are masked before
+  /// an event exists, so they never reach memory in clear. Also the keys
+  /// of a `message` event's JSON. A list here replaces the defaults
+  /// (`authorization`, `cookie`, `set-cookie`, `*token*`, `*key*`,
+  /// `*secret*`); keep them with `[...TraceRedact.defaults, 'x-session']`.
+  /// `*` matches any text at the start or end of a name.
+  final List<String> redact;
 }

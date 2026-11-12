@@ -12,6 +12,8 @@ import '../env/environment_host.dart';
 import '../overlay/inspector_overlay.dart';
 import '../search/render_search.dart';
 import '../search/source_resolver.dart';
+import '../sink/bridge_client.dart';
+import '../trace/redact.dart';
 import '../trace/sources/error_source.dart';
 import '../trace/sources/finding_source.dart';
 import '../trace/sources/key_source.dart';
@@ -182,11 +184,28 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
         ),
         routes,
         ErrorSource(),
-        NetworkSource(hooks: hooks, bodies: widget.config.trace.bodies),
+        NetworkSource(
+          hooks: hooks,
+          bodies: widget.config.trace.bodies,
+          redact: TraceRedact(widget.config.trace.redact),
+          ignoreOrigins: _bridgeOrigins(),
+        ),
         FindingSource(findings: () => _controller.findings, resolver: resolver),
       ],
     );
     session.thumbnail = _thumbnail;
+  }
+
+  /// The bridge's origin: its traffic (pins, drafts, the long poll) is
+  /// Pinpoint's own and never recorded (rule 14).
+  Set<String> _bridgeOrigins() {
+    final bridge = BridgeClient.find(
+      url: widget.config.bridgeUrl,
+      sinks: widget.config.sinks,
+    );
+    if (bridge == null) return const <String>{};
+    final base = bridge.base;
+    return {'${base.scheme}://${base.authority}'};
   }
 
   /// A 400 px wide image of the app, for a mark.
