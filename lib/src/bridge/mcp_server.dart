@@ -12,6 +12,7 @@ import '../model/annotation.dart' show NoteStatus;
 import '../sink/markdown_formatter.dart' show verificationLines;
 import 'agent_tools.dart';
 import 'command_queue.dart';
+import 'hot_reload.dart';
 import 'note_detail.dart';
 import 'note_store.dart';
 import 'png_resize.dart';
@@ -40,6 +41,7 @@ class McpServer {
   McpServer(
     this.store, {
     this.commands,
+    this.reloader,
     this.version = '0.0.1',
     this._log = _noLog,
   });
@@ -48,6 +50,9 @@ class McpServer {
 
   /// The way to the app; null: the note tools only.
   final CommandQueue? commands;
+
+  /// Gives the agent `hot_reload`; null: no such tool.
+  final HotReloader? reloader;
 
   final void Function(String line) _log;
 
@@ -84,7 +89,11 @@ class McpServer {
         'initialize' => _result(id, _initialize(args)),
         'ping' => _result(id, const <String, Object?>{}),
         'tools/list' => _result(id, {
-          'tools': [..._tools, if (commands != null) ...agentTools],
+          'tools': [
+            ..._tools,
+            if (reloader != null) hotReloadTool,
+            if (commands != null) ...agentTools,
+          ],
         }),
         'tools/call' => _result(id, await _call(args)),
         _ => _error(id, -32601, 'Method not found: $method'),
@@ -206,6 +215,7 @@ class McpServer {
       'get_note' => _getNote(input),
       'update_note' => _updateNote(input),
       'verify_note' when commands != null => _verifyNote(input),
+      'hot_reload' when reloader != null => _hotReload(input),
       final String tool
           when commands != null && agentToolNames.contains(tool) =>
         _agent(tool, input),
@@ -311,6 +321,51 @@ class McpServer {
       'Note $id is ${note['status']}.\n\n'
       '${noteText(note, NoteDetail.compact)}',
     );
+  }
+
+  /// The `hot_reload` tool: not in [agentTools], because it goes to the
+  /// app's debug service, not through the command queue.
+  static const Map<String, Object?> hotReloadTool = {
+    'name': 'hot_reload',
+    'title': 'Hot reload the app',
+    'description':
+        'Hot reloads the running app after you edit its code, as r in '
+        'flutter run does, and says whether the new code runs: a reload '
+        'that did not compile is an error. Works with agent control off. '
+        'The bridge finds the app in .pinpoint/vm-service.txt (start it '
+        'with flutter run --vmservice-out-file=.pinpoint/vm-service.txt); '
+        'else give vm_service once per flutter run. Handles from before the '
+        'reload are gone.',
+    'inputSchema': {
+      'type': 'object',
+      'properties': {
+        'vm_service': {
+          'type': 'string',
+          'description':
+              'The address flutter run prints: "A Dart VM Service on Chrome '
+              'is available at: http://127.0.0.1:…". Kept for later calls.',
+        },
+      },
+    },
+  };
+
+  Future<Map<String, Object?>> _hotReload(Map<String, Object?> input) async {
+    final address = input['vm_service'];
+    final answer = await reloader!.reload(
+      address: address is String ? address : null,
+    );
+    if (answer['ok'] != true) {
+      return _text('${answer['error']}', isError: true);
+    }
+    final result = answer['result'];
+    if (result is Map<String, Object?>) {
+      _log(
+        'pinpoint: the agent hot reloaded the app '
+        '(${result['confirmed'] == true ? 'confirmed' : 'not confirmed'}, '
+        '${result['ms']} ms)',
+      );
+    }
+    return _text(jsonEncode(result));
   }
 
   /// Runs [tool] in the app and turns its answer into tool content. An

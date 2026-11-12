@@ -99,6 +99,12 @@ Map<String, Object?> mcpServerEntry(int port) => {
   'url': 'http://127.0.0.1:$port$mcpPath',
 };
 
+/// How to start the app so the agent's `hot_reload` finds it: the debug
+/// service address goes into `<dir>/vm-service.txt`.
+String hotReloadHint(String dir) =>
+    'So the agent can hot reload the app, start it with: flutter run '
+    '--vmservice-out-file=$dir/$vmServiceFileName';
+
 /// Runs the setup in [project] (the app's folder) and returns what to
 /// print, line by line.
 ///
@@ -150,6 +156,8 @@ Future<List<String>> runSetup(SetupOptions options, Directory project) async {
       ..add('first). Claude Code:')
       ..add('  claude mcp add --transport http pinpoint $url')
       ..add('or merge ${notes.path}/mcp.json into ${mcpFile.path}.')
+      ..add('')
+      ..add(hotReloadHint(dirName))
       ..add('')
       ..add('Run again with --write to make both edits.');
     return out;
@@ -204,7 +212,9 @@ Future<List<String>> runSetup(SetupOptions options, Directory project) async {
     await mcpFile.writeAsString(_pretty(config));
     out.add('Added the pinpoint server ($url) to ${mcpFile.path}.');
   }
-  out.add('Start the bridge with `dart run pinpoint:bridge`.');
+  out
+    ..add('Start the bridge with `dart run pinpoint:bridge`.')
+    ..add(hotReloadHint(dirName));
   return out;
 }
 

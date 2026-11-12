@@ -29,6 +29,15 @@ const String mcpPath = '/mcp';
 /// (`POST /commands/control`).
 const String commandsPath = '/commands';
 
+/// The app's service extension that counts its hot reloads. The bridge's
+/// `hot_reload` reads it before and after a reload: on web the reload
+/// service says success even when the code did not compile.
+const String reloadsExtension = 'ext.pinpoint.reloads';
+
+/// The file in the notes folder with the app's debug service address, as
+/// `flutter run --vmservice-out-file=.pinpoint/vm-service.txt` writes it.
+const String vmServiceFileName = 'vm-service.txt';
+
 /// How long the app holds a command poll open.
 const Duration commandWait = Duration(seconds: 25);
 

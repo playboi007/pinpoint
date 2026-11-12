@@ -9,6 +9,7 @@ import 'dart:io';
 
 import 'package:pinpoint/src/bridge/bridge_options.dart';
 import 'package:pinpoint/src/bridge/bridge_server.dart';
+import 'package:pinpoint/src/bridge/setup.dart';
 
 Future<void> main(List<String> args) async {
   final BridgeOptions options;
@@ -49,6 +50,7 @@ Future<void> main(List<String> args) async {
       'pinpoint: MCP for your agent at $url/mcp '
       '(Claude Code: claude mcp add --transport http pinpoint $url/mcp)',
     )
+    ..writeln('pinpoint: ${hotReloadHint(options.dir)}')
     ..writeln('pinpoint: Ctrl+C stops it.');
 
   late final StreamSubscription<ProcessSignal> interrupt;

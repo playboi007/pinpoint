@@ -11,6 +11,7 @@ import '../model/annotation.dart' show NoteStatus, annotationSchema, clipText;
 import 'agent_instructions.dart';
 import 'bridge_protocol.dart';
 import 'command_queue.dart';
+import 'hot_reload.dart';
 import 'mcp_server.dart';
 import 'note_store.dart';
 
@@ -107,7 +108,12 @@ class PinPointBridge {
   final CommandQueue commands;
 
   final List<String> _allowedOrigins;
-  late final McpServer _mcp = McpServer(store, commands: commands, log: _log);
+  late final McpServer _mcp = McpServer(
+    store,
+    commands: commands,
+    reloader: HotReloader(store.root),
+    log: _log,
+  );
   final void Function(String line) _log;
   late final StreamSubscription<HttpRequest> _subscription;
 

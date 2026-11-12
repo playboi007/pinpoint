@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 
 import '../agent/command_channel.dart';
 import '../agent/commands.dart';
+import '../agent/reload_counter.dart';
 import '../capture/context_collector.dart';
 import '../capture/screenshot.dart';
 import '../core/note_sync.dart';
@@ -235,6 +236,9 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
   @override
   void initState() {
     super.initState();
+    // The bridge's hot_reload reads it to tell a reload that ran from one
+    // that did not compile.
+    ReloadCounter.register();
     // Before the first build, so the first frame has the saved palette.
     widget.controller.palette.restore(widget.config.palette);
     widget.controller.addListener(_onControllerChanged);
@@ -377,6 +381,10 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     // moved: every pin is looked up again, and the agent's handles go.
     _pins.reset();
     _agentCommands.reassemble();
+    // Also registered here: in an app that was running when this code
+    // came in by a hot reload, initState does not run again.
+    ReloadCounter.register();
+    ReloadCounter.reloaded();
   }
 
   @override
