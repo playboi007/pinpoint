@@ -137,11 +137,14 @@ class TraceEvent {
   /// then.
   final int? cause;
 
-  /// The type name of the widget involved, when known.
-  final String? widget;
+  /// The type name of the widget involved, when known. Not final: a source
+  /// that looks the widget up after the event (the pointer source, outside
+  /// the pointer dispatch) fills it in then.
+  String? widget;
 
-  /// Where that widget is created, for example `lib/home.dart:120:12`.
-  final String? source;
+  /// Where that widget is created, for example `lib/home.dart:120:12`. Not
+  /// final, for the same reason as [widget].
+  String? source;
 
   /// Small, clipped, JSON values only.
   final Map<String, Object?> data;
@@ -149,6 +152,8 @@ class TraceEvent {
   /// Rough size in memory, for the recorder's byte limit. Counts strings by
   /// length and everything else as 8 bytes; [data] is small and flat, so
   /// this costs little.
+  /// A widget or source filled in later is covered by the 64 bytes and the
+  /// recorder's slack: the estimate is made once, when the event is added.
   late final int approxBytes =
       64 +
       kind.length +

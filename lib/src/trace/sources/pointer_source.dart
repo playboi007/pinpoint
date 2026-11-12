@@ -58,10 +58,9 @@ class PointerSource extends TraceSource {
   final Map<int, int> _moveFrame = <int, int>{};
   TraceEvent? _lastScroll;
 
-  /// Downs whose anchor waits for [_anchorTimer].
-  final List<(TraceEvent, Element, Element)> _pendingAnchors =
-      <(TraceEvent, Element, Element)>[];
-  Timer? _anchorTimer;
+  /// Downs whose widget waits for [_downTimer], with their positions.
+  final List<(TraceEvent, Offset)> _pendingDowns = <(TraceEvent, Offset)>[];
+  Timer? _downTimer;
 
   @override
   String get name => 'pointer';
@@ -89,9 +88,9 @@ class PointerSource extends TraceSource {
     _down.clear();
     _moveFrame.clear();
     _lastScroll = null;
-    _anchorTimer?.cancel();
-    _anchorTimer = null;
-    _pendingAnchors.clear();
+    _downTimer?.cancel();
+    _downTimer = null;
+    _pendingDowns.clear();
   }
 
   // Runs inside the pointer dispatch: never throw, never await.
@@ -164,67 +163,68 @@ class PointerSource extends TraceSource {
   };
 
   void _recordDown(TraceRecorder recorder, PointerDownEvent event) {
-    final data = _base(event, 'down');
-    String? widget;
-    String? source;
-    Element? hit;
+    final recorded = recorder.add(
+      TraceKind.pointer,
+      data: _base(event, 'down'),
+    );
+    // The widget under the pointer needs a pick search (about 5 ms on web)
+    // and its anchor a walk of the tree. Neither runs inside the pointer
+    // dispatch, where it would delay the app's own handling (rule 11): a
+    // one-shot timer runs them after the event, before the layout changes
+    // in the next frame, and forces no frame (engineering rule 2).
+    _pendingDowns.add((recorded, event.position));
+    _downTimer ??= Timer(Duration.zero, _fillDowns);
+  }
+
+  void _fillDowns() {
+    _downTimer = null;
+    final pending = List.of(_pendingDowns);
+    _pendingDowns.clear();
+    final watch = Stopwatch()..start();
+    for (final (event, position) in pending) {
+      try {
+        _fillDown(event, position);
+      } catch (error) {
+        debugPrint('pinpoint: pointer source failed: $error');
+      }
+    }
+    _recorder?.charge(watch.elapsedMicroseconds);
+  }
+
+  /// Fills in the widget a down hit, its source, its anchor and the
+  /// position inside it as a fraction.
+  void _fillDown(TraceEvent event, Offset position) {
     final appContext = appKey.currentContext;
     final root = appContext?.findRenderObject();
     final content = contentKey.currentContext;
-    if (appContext is Element && root != null && content is Element) {
-      final pick = PickResult.fromSearch(
-        RenderSearch.find(root, event.position),
-        position: event.position,
-        rootElement: appContext,
-        chainBoundary: content,
-        resolver: resolver,
-      );
-      if (pick != null && !pick.sourceUnavailable) {
-        final entry = pick.chain[pick.chainIndex];
-        final rect = pick.globalRect;
-        widget = entry.name;
-        hit = entry.element;
-        final location = entry.location;
-        if (location != null) {
-          source =
-              '${resolver.paths.relativePath(location.uri)}:'
-              '${location.line}:${location.column}';
-        }
-        if (rect.width > 0 && rect.height > 0) {
-          data['fx'] = _fraction((event.position.dx - rect.left) / rect.width);
-          data['fy'] = _fraction((event.position.dy - rect.top) / rect.height);
-        }
-      }
+    if (appContext is! Element || root == null || content is! Element) {
+      return;
     }
-    final recorded = recorder.add(
-      TraceKind.pointer,
-      widget: widget,
-      source: source,
-      data: data,
+    final pick = PickResult.fromSearch(
+      RenderSearch.find(root, position),
+      position: position,
+      rootElement: appContext,
+      chainBoundary: content,
+      resolver: resolver,
     );
-    // The anchor's ordinal needs a walk of the tree. Not inside the
-    // pointer dispatch: a one-shot timer runs it after the event, and
-    // forces no frame (engineering rule 2).
-    if (hit != null && content is Element) {
-      _pendingAnchors.add((recorded, hit, content));
-      _anchorTimer ??= Timer(Duration.zero, _fillAnchors);
+    if (pick == null || pick.sourceUnavailable) return;
+    final entry = pick.chain[pick.chainIndex];
+    final rect = pick.globalRect;
+    event.widget = entry.name;
+    final location = entry.location;
+    if (location != null) {
+      event.source =
+          '${resolver.paths.relativePath(location.uri)}:'
+          '${location.line}:${location.column}';
     }
-  }
-
-  void _fillAnchors() {
-    _anchorTimer = null;
-    final pending = List.of(_pendingAnchors);
-    _pendingAnchors.clear();
-    for (final (event, element, content) in pending) {
-      try {
-        if (!element.mounted || !content.mounted) continue;
-        final anchor = SourceIndex(resolver: resolver)
-            .anchorFor(element, root: content);
-        if (anchor != null) event.data['anchor'] = anchor.toJson();
-      } catch (error) {
-        debugPrint('pinpoint: pointer anchor failed: $error');
-      }
+    final data = event.data;
+    if (rect.width > 0 && rect.height > 0) {
+      data['fx'] = _fraction((position.dx - rect.left) / rect.width);
+      data['fy'] = _fraction((position.dy - rect.top) / rect.height);
     }
+    final anchor = SourceIndex(resolver: resolver)
+        .anchorFor(entry.element, root: content);
+    if (anchor != null) data['anchor'] = anchor.toJson();
   }
 
   /// Whether the top of the hit path at [position] is the app, not
