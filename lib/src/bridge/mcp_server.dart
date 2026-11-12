@@ -130,7 +130,12 @@ class McpServer {
           'shows only what update_note says.'
           '${commands == null ? '' : ' To operate the app, name widgets with '
                     'target queries and put several actions in one '
-                    'run_steps call; check once at the end.'}',
+                    'run_steps call; check once at the end. To see what '
+                    'happened over time, call get_trace (trace_detail or '
+                    'watch add rebuilds and state). For a value no '
+                    'diagnostics show, add a PinPoint.probe line, '
+                    'hot_reload, read it with get_trace, and remove it '
+                    'before you set the note fixed (list_probes).'}',
     };
   }
 

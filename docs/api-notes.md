@@ -533,6 +533,36 @@ All **[source]**, none run. `PLAN-v2.md` "Verify by running" lists what Session 
 - On web, `package:http` 1.6.0 calls `fetch` (`lib/src/browser_client.dart:36`); `dio_web_adapter` 2.2.0 uses `XMLHttpRequest` (`lib/src/adapter_impl.dart:36`).
 - Flutter Tools pins `dwds` 27.1.2. Its `lib/src/services/chrome/chrome_proxy_service.dart` has `addBreakpoint` (410), `addBreakpointWithScriptUri` (439), `evaluateInFrame` (698) and `getStack` (825). `getRetainingPath` and `getInstances` are only in the base `proxy_service.dart`; treat them as not supported on web.
 
+## 31. Facts found in Session 16 (PLAN-v2 Milestone 13, flight recorder)
+
+Session 16 of PLAN-v2 (spikes and cost table) was not run first: the user started Milestone 13 directly. The facts below come from building it. The "Verify by running" list in PLAN-v2 is still open, except where noted.
+
+- **[source]** There is no public frame number and no start-of-frame hook that is not a global slot (`handleBeginFrame` is reached through `PlatformDispatcher.onBeginFrame`). `RendererBinding.initInstances` registers the framework's own persistent callback first, so a persistent callback Pinpoint adds runs after build, layout and paint. `FrameClock` counts the frames it sees end there; an event made during a frame (transient callbacks, mid-frame microtasks, persistent callbacks before Pinpoint's) gets the number of the frame being drawn. **[run-vm]** An event added from `build` gets that frame's number.
+- **[source]** `GestureBinding.handleEvent` (`gestures/binding.dart:537`) calls `pointerRouter.route` for every event it handles, and `route` (`gestures/pointer_router.dart:124`) calls the global routes after the per-pointer ones. A global route therefore sees taps on Pinpoint's own trap, panels and rail too. The pointer source runs one hit test at each down and scroll signal and keeps the event only when the top of the hit path is under the app's `RepaintBoundary` (rule 14).
+- **[run-vm]** A route pushed by a tap is still moving when the tap's next frame ends: the route of what is at the app's center is still the old one. The route source reads once more from a one-shot timer 500 ms after its last read, which forces no frame.
+- **[run-vm]** A `debugOnRebuildDirtyWidget` that DevTools clears while level 3 runs is seen after the next frame (`identical` check, item 8). The rebuild source stops, ends rebuild coverage and records `detail.off` with "rebuild slot taken". The watches go on reading every watched `State` after each frame.
+- **[source]** `State.debugFillProperties` (`widgets/framework.dart:1489`) adds `lifecycle state`, `_widget` and `_element`. A watch leaves these three out.
+- **[run-vm]** A `Scaffold` made in project code counts as local (Pinpoint's rule is the creation location), so a watch with the default three `State`s follows `ScaffoldState` too when it is within reach.
+- **[source]** In `testWidgets`, `tester.binding.delayed(d)` (`flutter_test/lib/src/binding.dart:2461`) moves the fake clock and fires timers without drawing frames. `tester.pump(d)` always draws a frame. The "idle adds nothing" test needs `delayed`.
+- **[run-vm]** A zero-duration `Timer` left pending when a test ends fails the test ("A Timer is still pending even after the widget tree was disposed"). Every source cancels its timers in `stop()`.
+
+**Source levels and measured cost (rule 18).** Measured in the VM (`flutter test`, `test/trace/trace_cost_test.dart`) on a copy of the example's long list, 120 scroll frames per run. **[unverified]** The Chrome CPU profile against the plan's 3 % budget.
+
+| Source | Level | Work per event | Measured |
+| --- | --- | --- | --- |
+| frame | 1 | One event per frame from the post-frame tick | Whole level 1 tick about 40 us per frame |
+| pointer | 1 | One hit test per down or scroll signal in the dispatch. The pick search and the anchor walk run in a zero timer after the event | Pick p50 0.27 ms VM, 5.4 ms web (Session 2 numbers) |
+| key | 1 | One event per key, one focus lookup | Not measured alone |
+| text | 1 | After each frame: one focus compare; one chain walk per new focus | Inside the tick |
+| route | 1 | One hit search at the app's center after a frame that follows a pointer up, at most every 500 ms otherwise, and once from a timer | Inside the tick |
+| error, finding | 1 | One event per error or new finding | Not measured alone |
+| rebuild | 3 | One map increment per rebuild; locations resolved once per frame | Not measured (level 3) |
+| watch | 3 | The `State`'s diagnostics after a rebuild, post-frame; every watched `State` per frame when the rebuild slot is taken | Not measured (level 3) |
+
+- The recorder's own time, as the frame events report it: median 6 to 7 us, p95 20 to 25 us per frame.
+- VM wall time for 120 frames, on against off: from 0.95 to 1.6 times between runs with nothing changed. Too noisy for a 3 % budget; the test does not check it.
+- `get_screen` median: 8.9 ms on, 9.8 ms off (not slower).
+
 ---
 
 ## Other plan errors and gaps found while scaffolding
