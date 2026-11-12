@@ -28,8 +28,9 @@ class NoteActions {
   /// its pin goes away.
   final ValueChanged<String> accept;
 
-  /// Back to submitted, for the agent to look at again.
-  final ValueChanged<String> reopen;
+  /// Back to submitted, for the agent to look at again, with the user's
+  /// reason (null when none was typed).
+  final void Function(String id, String? reason) reopen;
 
   /// The draft's comment was edited.
   final void Function(String id, String comment) edit;
@@ -54,6 +55,24 @@ class NoteView extends StatefulWidget {
   static const Key deleteKey = ValueKey<String>('pinpoint.note.delete');
   static const Key acceptKey = ValueKey<String>('pinpoint.note.accept');
   static const Key reopenKey = ValueKey<String>('pinpoint.note.reopen');
+
+  /// "What is still wrong?": sent with Reopen.
+  static const Key reasonKey = ValueKey<String>('pinpoint.note.reason');
+
+  /// Whether the user can accept [note]: the agent says it is done, or it
+  /// worked the note at least once. The user decides what is done: after a
+  /// reopen an agent may fix the code from the chat and never set the note
+  /// fixed, and the note must not be stuck.
+  static bool canAccept(Annotation note) =>
+      PinMarker.showsMark(note.status) || acceptsAnyway(note);
+
+  /// Whether [note] can be accepted although the agent has not marked it
+  /// done: sent or in progress, with a reply from the agent.
+  static bool acceptsAnyway(Annotation note) =>
+      (note.status == NoteStatus.submitted ||
+          note.status == NoteStatus.inProgress) &&
+      note.messages.any((m) => m.from == 'agent');
+
   static const Key verificationKey = ValueKey<String>(
     'pinpoint.note.verification',
   );
@@ -81,6 +100,9 @@ class _NoteViewState extends State<NoteView> {
     text: widget.note.comment,
   );
 
+  /// Why the user reopens the note.
+  final TextEditingController _reason = TextEditingController();
+
   @override
   void didUpdateWidget(NoteView oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -88,23 +110,50 @@ class _NoteViewState extends State<NoteView> {
     // a status from the agent): keep what is being typed.
     if (oldWidget.note.id != widget.note.id) {
       _text.text = widget.note.comment;
+      _reason.clear();
     }
   }
 
   @override
   void dispose() {
     _text.dispose();
+    _reason.dispose();
     super.dispose();
+  }
+
+  void _reopen() {
+    final reason = _reason.text.trim();
+    _reason.clear();
+    widget.actions.reopen(widget.note.id, reason.isEmpty ? null : reason);
   }
 
   @override
   Widget build(BuildContext context) {
     final tokens = PinPointTokens.of(context);
     final note = widget.note;
+    final number = widget.number;
+    // The body scrolls; the reason field and the buttons stay in a footer
+    // under it, as the Comment tab's do. A note with many replies would
+    // otherwise push Accept and Reopen out of the panel.
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Flexible(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(PinPointSizes.panelPadding),
+            child: _body(tokens, note, number),
+          ),
+        ),
+        _footer(tokens, note),
+      ],
+    );
+  }
+
+  Widget _body(PinPointTokens tokens, Annotation note, int? number) {
     final id = note.id;
     final status = note.status;
     final draft = status == NoteStatus.draft;
-    final number = widget.number;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -176,47 +225,89 @@ class _NoteViewState extends State<NoteView> {
               style: tokens.label,
             ),
           ),
-        const SizedBox(height: 14),
-        Wrap(
-          alignment: WrapAlignment.end,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            DraftButton.link(
-              key: NoteView.deleteKey,
-              label: 'Delete',
-              onPressed: () => widget.actions.delete(id),
-            ),
-            if (draft && widget.drafts > 1)
-              DraftButton.outline(
-                key: NoteView.sendAllKey,
-                label: 'Send all ${widget.drafts} drafts',
-                onPressed: widget.actions.sendAll,
-              ),
-            if (PinMarker.showsMark(status)) ...[
-              DraftButton.outline(
-                key: NoteView.reopenKey,
-                label: 'Reopen',
-                onPressed: () => widget.actions.reopen(id),
-              ),
-              DraftButton.primary(
-                key: NoteView.acceptKey,
-                label: 'Accept',
-                onPressed: () => widget.actions.accept(id),
-              ),
-            ],
-            if (draft)
-              DraftButton.primary(
-                key: NoteView.sendKey,
-                label: 'Send',
-                onPressed: _text.text.trim().isEmpty
-                    ? null
-                    : () => widget.actions.send(id),
-              ),
-          ],
-        ),
       ],
+    );
+  }
+
+  Widget _footer(PinPointTokens tokens, Annotation note) {
+    final id = note.id;
+    final status = note.status;
+    final draft = status == NoteStatus.draft;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+      decoration: BoxDecoration(
+        border: Border(top: BorderSide(color: tokens.ink)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (PinMarker.showsMark(status)) ...[
+            // The reason reaches the agent as the user's message: without it
+            // a reopened note says nothing about what is still wrong.
+            TextField(
+              key: NoteView.reasonKey,
+              controller: _reason,
+              maxLines: 1,
+              textInputAction: TextInputAction.send,
+              onSubmitted: (_) => _reopen(),
+              onTapOutside: (_) {},
+              style: tokens.body,
+              decoration: InputDecoration(
+                isDense: true,
+                hintText: 'What is still wrong? Sent with Reopen',
+                hintStyle: tokens.body.copyWith(color: tokens.muted),
+                contentPadding: const EdgeInsets.all(8),
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+          Wrap(
+            alignment: WrapAlignment.end,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              DraftButton.link(
+                key: NoteView.deleteKey,
+                label: 'Delete',
+                onPressed: () => widget.actions.delete(id),
+              ),
+              if (draft && widget.drafts > 1)
+                DraftButton.outline(
+                  key: NoteView.sendAllKey,
+                  label: 'Send all ${widget.drafts} drafts',
+                  onPressed: widget.actions.sendAll,
+                ),
+              if (PinMarker.showsMark(status))
+                DraftButton.outline(
+                  key: NoteView.reopenKey,
+                  label: 'Reopen',
+                  onPressed: _reopen,
+                ),
+              if (NoteView.acceptsAnyway(note))
+                DraftButton.outline(
+                  key: NoteView.acceptKey,
+                  label: 'Accept anyway',
+                  onPressed: () => widget.actions.accept(id),
+                )
+              else if (NoteView.canAccept(note))
+                DraftButton.primary(
+                  key: NoteView.acceptKey,
+                  label: 'Accept',
+                  onPressed: () => widget.actions.accept(id),
+                ),
+              if (draft)
+                DraftButton.primary(
+                  key: NoteView.sendKey,
+                  label: 'Send',
+                  onPressed: _text.text.trim().isEmpty
+                      ? null
+                      : () => widget.actions.send(id),
+                ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

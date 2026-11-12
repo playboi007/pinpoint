@@ -185,6 +185,77 @@ void main() {
     expect(bridge.notes.containsKey(b), isFalse);
   });
 
+  testWidgets('acceptance: the whole loop in the app: sent, fixed and '
+      'verified, reopened with a reason, fixed and verified again, '
+      'accepted', (tester) async {
+    await tester.pumpWidget(host());
+    final id = await writeNote(tester, 'Title', button: CommentForm.sendKey);
+    controller.stop();
+    await settle(tester);
+    expect(bridge.notes[id]!['status'], 'submitted');
+
+    Finder checksBadge() =>
+        find.descendant(of: pins(), matching: find.byKey(PinMarker.checksKey));
+    Future<void> openPin() async {
+      await tester.tap(find.byKey(ValueKey<String>('pinpoint.pin.$id')));
+      await settle(tester);
+    }
+
+    // First pass, while Pinpoint is off. A click on the pin asks the
+    // bridge at once.
+    bridge
+      ..agentUpdate(id, 'inProgress', message: 'Looking at it.')
+      ..agentUpdate(id, 'fixed', message: 'Made it 36 px.')
+      ..agentVerify(id, passed: true);
+    await openPin();
+    expect(controller.notes.byId(id)!.status, NoteStatus.fixed);
+    expect(checksBadge(), findsOneWidget);
+    expect(find.byKey(NoteView.acceptKey), findsOneWidget);
+    expect(find.byKey(NoteView.reopenKey), findsOneWidget);
+
+    // Reopen, saying why.
+    await tester.enterText(
+      find.byKey(NoteView.reasonKey),
+      'not yet, you shortened it',
+    );
+    await tester.tap(find.byKey(NoteView.reopenKey));
+    await settle(tester);
+    final stored = bridge.notes[id]!;
+    expect(stored['status'], 'submitted');
+    expect(stored['verification'], isNull, reason: 'about the old code');
+    expect(stored['reopened'], 1);
+    expect(
+      (stored['messages']! as List<Object?>).last,
+      containsPair('text', 'Reopened: not yet, you shortened it'),
+    );
+    expect(find.textContaining('· SENT ·'), findsOneWidget);
+    expect(checksBadge(), findsNothing);
+    // If the agent fixes it from the chat and never marks it, the note is
+    // not stuck: the user can accept it anyway.
+    expect(find.text('Accept anyway'), findsOneWidget);
+
+    // The agent marks it and verifies again: the same view as pass one.
+    bridge
+      ..agentUpdate(
+        id,
+        'fixed',
+        message: 'Kept the width; set the height to 36 px.',
+      )
+      ..agentVerify(id, passed: true);
+    await tester.pump(pollInterval);
+    await settle(tester);
+    expect(controller.notes.byId(id)!.status, NoteStatus.fixed);
+    expect(checksBadge(), findsOneWidget);
+    expect(find.byKey(NoteView.reopenKey), findsOneWidget);
+    expect(find.text('Accept'), findsOneWidget);
+
+    await tester.tap(find.byKey(NoteView.acceptKey));
+    await settle(tester);
+    expect(bridge.notes[id]!['status'], 'verified');
+    expect(pins(), findsNothing);
+    expect(controller.mode, PinPointMode.idle);
+  });
+
   testWidgets('a draft edit reaches the bridge once typing pauses', (
     tester,
   ) async {

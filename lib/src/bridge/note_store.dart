@@ -231,7 +231,21 @@ class NoteStore {
     if (entry == null || note == null) {
       throw StoreException(HttpStatus.notFound, 'No note $id');
     }
-    if (status != null) note['status'] = status.name;
+    if (status != null) {
+      final before = NoteStatus.byName(note['status']);
+      // Reopened: back to submitted after the agent worked it. The last
+      // check result is about the old code, and the agent must see that
+      // the note came back.
+      if (status == NoteStatus.submitted &&
+          before != null &&
+          before != NoteStatus.draft &&
+          before != NoteStatus.submitted) {
+        note.remove('verification');
+        final reopened = note['reopened'];
+        note['reopened'] = (reopened is int ? reopened : 0) + 1;
+      }
+      note['status'] = status.name;
+    }
     if (verification != null) note['verification'] = verification;
     if (comment != null) note['comment'] = comment;
     if (intent != null) note['intent'] = intent;

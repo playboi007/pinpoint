@@ -491,29 +491,30 @@ class InfoPanel extends StatelessWidget {
                   : 'Note $noteNumber',
             ),
             Flexible(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(PinPointSizes.panelPadding),
-                child: switch (tab) {
-                  PanelTab.info => _info(),
-                  PanelTab.tweak => TweakTab(
-                    selection: selection,
-                    session: controller.tweaks,
-                    onApply: onTweak ?? controller.tweaks.apply,
-                  ),
-                  PanelTab.comment when note != null && noteActions != null =>
-                    NoteView(
+              // A note scrolls its own body over a fixed footer.
+              child: showsNote && noteActions != null
+                  ? NoteView(
                       note: note!,
                       number: noteNumber,
                       drafts: drafts,
                       focusNode: commentFocus,
                       actions: noteActions!,
+                    )
+                  : SingleChildScrollView(
+                      padding: const EdgeInsets.all(PinPointSizes.panelPadding),
+                      child: switch (tab) {
+                        PanelTab.info => _info(),
+                        PanelTab.tweak => TweakTab(
+                          selection: selection,
+                          session: controller.tweaks,
+                          onApply: onTweak ?? controller.tweaks.apply,
+                        ),
+                        PanelTab.comment => CommentForm(
+                          controller: controller,
+                          focusNode: commentFocus,
+                        ),
+                      },
                     ),
-                  PanelTab.comment => CommentForm(
-                    controller: controller,
-                    focusNode: commentFocus,
-                  ),
-                },
-              ),
             ),
             ?footer,
           ],

@@ -65,8 +65,28 @@ String inspectText(
 
 String _header(Map<String, Object?> note) {
   final id = _string(note['id']) ?? '?';
-  final parts = [?_string(note['intent']), ?_string(note['status'])];
+  final reopened = note['reopened'];
+  final parts = [
+    ?_string(note['intent']),
+    ?_string(note['status']),
+    if (reopened is int && reopened > 0)
+      reopened == 1 ? 'reopened' : 'reopened $reopened times',
+  ];
   return parts.isEmpty ? id : '$id (${parts.join(', ')})';
+}
+
+/// What the user said when they last reopened [note], for the compact
+/// view: the replies are not in it, and this is the work left to do.
+List<String> _reopenedLines(Map<String, Object?> note) {
+  final reopened = note['reopened'];
+  if (reopened is! int || reopened < 1) return const [];
+  for (final m in _list(note['messages']).reversed) {
+    final message = _map(m);
+    if (_string(message['from']) != 'user') continue;
+    final text = _string(message['text']);
+    if (text != null) return ['User: ${_line(clipText(text, 200))}'];
+  }
+  return const [];
 }
 
 List<String> _location(Map<String, Object?> note) {
@@ -87,8 +107,12 @@ List<String> _location(Map<String, Object?> note) {
 
 String _compact(Map<String, Object?> note) {
   final comment = _line(_string(note['comment']) ?? '');
-  String build(String text) =>
-      [_header(note), 'Comment: $text', ..._location(note)].join('\n');
+  String build(String text) => [
+    _header(note),
+    'Comment: $text',
+    ..._reopenedLines(note),
+    ..._location(note),
+  ].join('\n');
   final full = build(comment);
   if (full.length <= maxCompactChars) return full;
   // Cut the comment, never the source: that is what the agent acts on.

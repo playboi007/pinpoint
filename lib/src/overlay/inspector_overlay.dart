@@ -229,7 +229,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     ),
     delete: _deleteNote,
     accept: (id) => _setStatus(id, NoteStatus.verified),
-    reopen: (id) => _setStatus(id, NoteStatus.submitted),
+    reopen: _reopen,
     edit: _editNote,
   );
 
@@ -721,6 +721,29 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     if (status == NoteStatus.verified) widget.controller.clearSelection();
     notes.put(note.withStatus(status));
     unawaited(_sync?.update(id, status: status));
+  }
+
+  /// Sends the note [id] back to the agent: submitted again, with the
+  /// user's [reason] as a message (always one, so the agent sees the note
+  /// came back), and without the last check result, which is about the
+  /// old code. The bridge does the same.
+  void _reopen(String id, String? reason) {
+    final notes = widget.controller.notes;
+    final note = notes.byId(id);
+    if (note == null) return;
+    final text = reason == null ? 'Reopened.' : 'Reopened: $reason';
+    notes.put(
+      note
+          .withStatus(NoteStatus.submitted)
+          .copyWith(
+            verification: () => null,
+            messages: [
+              ...note.messages,
+              NoteMessage(at: DateTime.now().toUtc(), from: 'user', text: text),
+            ],
+          ),
+    );
+    unawaited(_sync?.update(id, status: NoteStatus.submitted, message: text));
   }
 
   void _editNote(String id, String comment) {

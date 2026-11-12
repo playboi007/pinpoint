@@ -121,7 +121,12 @@ class McpServer {
           'set it inProgress, open the Source file at the line, make the '
           'change, run flutter analyze, then set it resolved (or fixed, or '
           'rejected) with a one-line message saying what you did. The user '
-          'accepts the result in the app.'
+          'accepts the result in the app. A note the user reopened is '
+          'submitted again, "reopened" in its header, with their reason as '
+          'the last reply: work it again, set it fixed again, and call '
+          'verify_note again if it has checks. Finish every code change for '
+          'a note that way, also when the user asked for it in chat: the pin '
+          'shows only what update_note says.'
           '${commands == null ? '' : ' To operate the app, name widgets with '
                     'target queries and put several actions in one '
                     'run_steps call; check once at the end.'}',
@@ -178,7 +183,9 @@ class McpServer {
       'description':
           'Sets a note\'s status and adds a message for the user. The pin '
           'in the app follows within seconds. resolved and rejected move '
-          'the note to .pinpoint/resolved/.',
+          'the note to .pinpoint/resolved/. After each fix, also of a '
+          'reopened note, set fixed or resolved: the user can accept only '
+          'what you marked done.',
       'inputSchema': {
         'type': 'object',
         'properties': {

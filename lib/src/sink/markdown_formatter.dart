@@ -39,6 +39,15 @@ String markdownFromJson(Map<String, Object?> json) {
   if (status != null && status != 'submitted' && status != 'draft') {
     out.writeln('Status: ${_line(status)}');
   }
+  // A reopened note is submitted again: say so, or a file-inbox agent
+  // takes it for new work and misses the user's reason.
+  final reopened = json['reopened'];
+  if (reopened is int && reopened > 0) {
+    out.writeln(
+      'Reopened by the user${reopened > 1 ? ' ($reopened times)' : ''}: '
+      'their reason is the last reply.',
+    );
+  }
 
   final widget = _string(target['widget']);
   final description = _string(target['description']) ?? widget;

@@ -26,6 +26,27 @@ class FakeBridge {
 
   int count(String request) => requests.where((r) => r == request).length;
 
+  /// What `verify_note` stores: the result, and Pinpoint's message.
+  void agentVerify(String id, {required bool passed}) {
+    final note = notes[id]!;
+    note['verification'] = {
+      'at': '2026-11-10T15:00:00Z',
+      'passed': passed,
+      'checks': [
+        {'type': 'visible', 'passed': passed},
+      ],
+    };
+    note['messages'] = [
+      ...(note['messages'] as List<Object?>? ?? const []),
+      {
+        'at': '2026-11-10T15:00:00Z',
+        'from': 'pinpoint',
+        'text': 'Checks ${passed ? 'passed' : 'failed'}',
+      },
+    ];
+    _changed[id] = ++_seq;
+  }
+
   /// What the agent does through `update_note`.
   void agentUpdate(String id, String status, {String? message}) {
     final note = notes[id]!;
@@ -92,8 +113,22 @@ class FakeBridge {
       switch (request.method) {
         case 'PATCH':
           final body = jsonDecode(request.body) as Map<String, Object?>;
+          // As NoteStore.update: back to submitted after the agent worked
+          // the note is a reopen.
+          if (body['status'] == 'submitted' &&
+              note['status'] != 'submitted' &&
+              note['status'] != 'draft') {
+            note.remove('verification');
+            note['reopened'] = ((note['reopened'] as int?) ?? 0) + 1;
+          }
           for (final field in ['status', 'comment', 'intent']) {
             if (body[field] != null) note[field] = body[field];
+          }
+          if (body['message'] case final String text) {
+            note['messages'] = [
+              ...(note['messages'] as List<Object?>? ?? const []),
+              {'at': '2026-11-10T15:00:00Z', 'from': 'user', 'text': text},
+            ];
           }
           _changed[id] = ++_seq;
           return _json(note);
