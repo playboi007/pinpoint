@@ -24,6 +24,7 @@ import '../search/source_index.dart';
 import '../search/source_resolver.dart';
 import '../trace/trace_format.dart';
 import '../trace/trace_session.dart';
+import '../trace/watch.dart';
 import 'agent_control.dart';
 import 'checks.dart';
 import 'state_dump.dart';
@@ -318,6 +319,8 @@ class AgentCommands {
       'flash' => flash(args),
       'get_trace' => getTrace(args),
       'trace_detail' => traceDetail(args),
+      'watch' => watch(args),
+      'unwatch' => unwatch(args),
       _ => throw AgentError('unknown tool: $tool'),
     };
   }
@@ -354,6 +357,57 @@ class AgentCommands {
       session.release(TraceDemand.agent);
     }
     return session.detailStatus();
+  }
+
+  /// `watch`: follows the widget's State and the local States above it.
+  Map<String, Object?> watch(Map<String, Object?> args) {
+    final session = _trace();
+    final target = element(args);
+    final ancestors = args['ancestors'];
+    final TraceWatch watch;
+    try {
+      watch = session.watch(
+        target,
+        states: ancestors is num
+            ? ancestors.round()
+            : WatchSource.defaultStates,
+      );
+    } on StateError catch (error) {
+      throw AgentError(error.message);
+    }
+    final shown = watch.shown;
+    final total = shown.values.fold(0, (a, b) => a + b);
+    return {
+      'id': watch.id,
+      'widget': watch.widget,
+      'states': [
+        for (final MapEntry(:key, :value) in shown.entries)
+          {'type': key, 'shown': value},
+      ],
+      'shown': total,
+      // A state dump reads only what the State shows in its diagnostics
+      // (watch out for): say so, so the agent reaches for a probe instead
+      // of trusting a short list.
+      'note':
+          'only values a State lists in debugFillProperties are watched; '
+          'private fields need a probe (PinPoint.probe)',
+      'level3': session.detailStatus(),
+    };
+  }
+
+  /// `unwatch`: removes one watch, or all with no id.
+  Map<String, Object?> unwatch(Map<String, Object?> args) {
+    final session = _trace();
+    final id = args['id'];
+    final removed = session.unwatch(id is String ? id : null);
+    if (removed == 0 && id is String) {
+      throw AgentError('no watch $id');
+    }
+    return {
+      'removed': removed,
+      'watches': [for (final w in session.watchSource.watches) w.id],
+      'level3': session.detailStatus(),
+    };
   }
 
   /// Tools a `run_steps` step may call. Not `inspect`, `screenshot`,

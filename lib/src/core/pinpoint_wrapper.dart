@@ -162,6 +162,7 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
       content: () => _contentKey.currentContext as Element?,
       resolver: resolver,
       recorder: TraceSession.current?.recorder,
+      adapters: () => widget.config.stateAdapters,
       builtIn: [
         PointerSource(
           appKey: _appKey,

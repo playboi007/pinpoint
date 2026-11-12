@@ -25,6 +25,8 @@ const List<String> agentToolNames = [
   'run_steps',
   'get_trace',
   'trace_detail',
+  'watch',
+  'unwatch',
 ];
 
 /// How long the bridge waits for the app's answer to [tool].
@@ -466,5 +468,33 @@ final List<Map<String, Object?>> agentTools = [
       'on': {'type': 'boolean'},
     },
     ['on'],
+  ),
+  _tool(
+    'watch',
+    'Watch a widget\'s state',
+    'Follows the widget\'s own State and the local States above it, up to '
+        'its route (ancestors: how many, default 3, at most 8). After each '
+        'rebuild of one of them, get_trace shows a state event with only '
+        'the values that changed. At most 8 watches; they start level 3. '
+        'Only what a State lists in debugFillProperties is seen: private '
+        'fields need a probe (PinPoint.probe).',
+    {
+      'handle': _handle,
+      'target': _target,
+      'wait_ms': _waitMs,
+      'ancestors': {
+        'type': 'integer',
+        'description': 'Most States followed (default 3).',
+      },
+    },
+  ),
+  _tool(
+    'unwatch',
+    'Stop watching',
+    'Removes a watch by id (w1), or every watch with no id. The last one '
+        'stops level 3 unless trace_detail or the Timeline holds it.',
+    {
+      'id': {'type': 'string'},
+    },
   ),
 ];

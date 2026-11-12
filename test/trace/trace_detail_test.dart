@@ -68,6 +68,8 @@ void main() {
     expect(on['on'], isTrue);
     expect(on['rebuilds'], contains('rebuild slot taken'));
     expect(on['running'], isNot(contains('rebuild')));
+    // The other level 3 sources still start.
+    expect(on['running'], contains('watch'));
     expect(debugOnRebuildDirtyWidget, same(devTools));
     final detailOn = recorder.lastOf(TraceKind.detailOn)!;
     expect(detailOn.data['reason'], 'rebuild slot taken');

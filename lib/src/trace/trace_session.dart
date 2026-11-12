@@ -1,5 +1,6 @@
 import 'package:flutter/widgets.dart';
 
+import '../agent/state_dump.dart';
 import '../core/rebuild_hook.dart';
 import '../model/trace_event.dart';
 import '../search/source_resolver.dart';
@@ -9,6 +10,7 @@ import 'sources/rebuild_source.dart';
 import 'trace_config.dart';
 import 'trace_recorder.dart';
 import 'trace_source.dart';
+import 'watch.dart';
 
 /// Why level 3 runs. Level 3 starts with the first reason and stops with
 /// the last (PLAN-v2, "Source levels").
@@ -43,6 +45,7 @@ class TraceSession {
     List<TraceSource> builtIn = const <TraceSource>[],
     TraceRecorder? recorder,
     Object? owner,
+    List<StateAdapter> Function()? adapters,
   }) : recorder =
            recorder ??
            TraceRecorder(
@@ -56,9 +59,21 @@ class TraceSession {
       onLost: _rebuildsLost,
     );
     frameSource = FrameSource(builds: () => rebuildSource.lastTotal);
+    watchSource = WatchSource(
+      rebuilds: rebuildSource,
+      content: content,
+      resolver: resolver,
+      adapters: adapters ?? () => const <StateAdapter>[],
+    );
     // The rebuild source flushes before the sources that read what rebuilt
     // (watches); the frame event is written last of all.
-    _sources = [frameSource, rebuildSource, ...builtIn, ...config.sources];
+    _sources = [
+      frameSource,
+      rebuildSource,
+      watchSource,
+      ...builtIn,
+      ...config.sources,
+    ];
     this.recorder.frameOf = () => clock.frame;
     for (final source in _sources) {
       if (source.level < 3) _start(source);
@@ -94,6 +109,7 @@ class TraceSession {
 
   late final FrameSource frameSource;
   late final RebuildSource rebuildSource;
+  late final WatchSource watchSource;
   late final List<TraceSource> _sources;
   final Set<TraceSource> _started = Set<TraceSource>.identity();
   final Set<String> _demand = <String>{};
@@ -225,6 +241,27 @@ class TraceSession {
           'reason': 'rebuild slot taken',
         },
       );
+  }
+
+  /// Watches [element] (PLAN-v2 Milestone 13, step 8). Level 3 runs while
+  /// any watch is set.
+  TraceWatch watch(Element element, {int states = WatchSource.defaultStates}) {
+    // Level 3 first, so the watch's first values are recorded.
+    demand(TraceDemand.watch);
+    try {
+      return watchSource.add(element, states: states);
+    } catch (_) {
+      if (watchSource.watches.isEmpty) release(TraceDemand.watch);
+      rethrow;
+    }
+  }
+
+  /// Removes the watch [id], or every watch for null. The last one
+  /// releases level 3. Returns how many were removed.
+  int unwatch(String? id) {
+    final removed = watchSource.remove(id);
+    if (watchSource.watches.isEmpty) release(TraceDemand.watch);
+    return removed;
   }
 
   /// What `trace_detail` answers: whether level 3 runs, for what, which
