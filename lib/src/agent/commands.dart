@@ -653,6 +653,8 @@ class AgentCommands {
         {...flag.options, 'run': flag.run},
         session,
         net: TapePlayer.bootNet,
+        // The whole record of a restarted page is the run.
+        streamFrom: 1,
         notes: [
           if (!TapeBoot.loadedBeforeApp)
             'no PinPoint.run in main: requests before the tape loaded '
@@ -669,9 +671,8 @@ class AgentCommands {
       });
       return;
     }
-    unawaited(player.ended.then((result) => _report(client, flag.run, result)));
-    final first = await player.start();
-    if (first['state'] == 'held') await _report(client, flag.run, first);
+    // The player reports each hold and the end to the bridge itself.
+    await player.start();
   }
 
   static Future<void> _report(
@@ -694,6 +695,7 @@ class AgentCommands {
     TraceSession session, {
     NetReplay? net,
     List<String> notes = const <String>[],
+    int? streamFrom,
   }) {
     final speed = args['speed'] ?? 1;
     if (speed is! num || speed <= 0 || speed > maxSpeed) {
@@ -713,7 +715,11 @@ class AgentCommands {
     } on FormatException catch (error) {
       throw AgentError(error.message);
     }
-    final run = args['run'];
+    final given = args['run'];
+    final run = given is String && runIdPattern.hasMatch(given)
+        ? given
+        : newRunId();
+    final client = bridge?.call();
     return TapePlayer(
       tape: tape,
       host: replayHost(session),
@@ -721,9 +727,18 @@ class AgentCommands {
       until: until,
       unmatched: unmatched,
       latency: latency,
-      runId: run is String && runIdPattern.hasMatch(run) ? run : null,
+      runId: run,
       net: net,
       notes: notes,
+      streamFrom: streamFrom,
+      // The run lives on the bridge (step 14): its events in batches, and
+      // where it is at each hold and at the end.
+      stream: client == null
+          ? null
+          : (events) => client.postRunEvents(run, events),
+      report: client == null
+          ? null
+          : (status) => client.postRunStatus(run, status),
     );
   }
 

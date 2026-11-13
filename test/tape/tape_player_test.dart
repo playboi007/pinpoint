@@ -236,6 +236,27 @@ void main() {
     await bridge.shutdown(tester);
   });
 
+  testWidgets('acceptance (stream): a replay\'s events and its end reach '
+      'the bridge before the answer', (tester) async {
+    await pumpApp(tester);
+    TraceSession.current!.mark();
+    await tap(tester, find.text('Count'));
+    final id = await save(tester);
+    final result = await replay(tester, id);
+    final run = result['run']! as String;
+    final kinds = [
+      for (final e in bridge.notes.runEvents[run]!) e['kind'],
+    ];
+    expect(kinds.first, TraceKind.replayStart);
+    expect(kinds, contains(TraceKind.replayStep));
+    expect(kinds.last, TraceKind.replayEnd);
+    expect(bridge.notes.runStatus[run]!['state'], 'done');
+    // Each event goes once.
+    final seqs = [for (final e in bridge.notes.runEvents[run]!) e['seq']];
+    expect(seqs.toSet().length, seqs.length);
+    await bridge.shutdown(tester);
+  });
+
   testWidgets('watch out for: the player\'s own taps are tagged agent and '
       'go into no new tape', (tester) async {
     await pumpApp(tester);

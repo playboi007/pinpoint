@@ -136,6 +136,9 @@ class TapePlayer {
     String? runId,
     NetReplay? net,
     List<String> notes = const <String>[],
+    this.stream,
+    this.streamFrom,
+    this.report,
   }) : assert(speed > 0),
        runId = runId ?? newRunId(),
        _givenNet = net {
@@ -143,6 +146,44 @@ class TapePlayer {
   }
 
   final NetReplay? _givenNet;
+
+  /// Sends a batch of the run's events to the bridge (step 14): a reload
+  /// clears the app's memory, so the bridge is where a run lives. Null: no
+  /// streaming (no bridge).
+  final Future<void> Function(List<Map<String, Object?>> events)? stream;
+
+  /// The first seq streamed: the replay's start, or 1 on a page a replay
+  /// restarted, whose whole record is the run.
+  final int? streamFrom;
+
+  /// Tells the bridge where the run is, at each hold and at the end.
+  final Future<void> Function(Map<String, Object?> status)? report;
+
+  /// How often events go to the bridge while the replay runs. A timer that
+  /// only posts: it forces no frame (rule 2).
+  static const Duration streamEvery = Duration(milliseconds: 500);
+
+  Timer? _streamTimer;
+  int _streamed = 0;
+  Future<void> _streaming = Future<void>.value();
+
+  /// Sends the events recorded since the last batch, after the batch
+  /// before it.
+  Future<void> _flush() => _streaming = _streaming.then((_) async {
+    final send = stream;
+    if (send == null) return;
+    final batch = <Map<String, Object?>>[
+      for (final e in host.session.recorder.events)
+        if (e.seq > _streamed) e.toJson(),
+    ];
+    if (batch.isEmpty) return;
+    _streamed = batch.last['seq']! as int;
+    try {
+      await send(batch);
+    } catch (error) {
+      _note('some events did not reach the bridge: $error');
+    }
+  });
 
   /// The network replay a restarted page installed before the app made
   /// its first request, and the session it is installed in. The player of
@@ -200,6 +241,7 @@ class TapePlayer {
   /// Ends any replay at once and clears the gate, for tests.
   @visibleForTesting
   static void debugReset() {
+    current?._streamTimer?.cancel();
     current?._stopRequested = true;
     current?._resume?.complete();
     current = null;
@@ -291,6 +333,10 @@ class TapePlayer {
           },
         )
         .seq;
+    _streamed = (streamFrom ?? startSeq) - 1;
+    if (stream != null) {
+      _streamTimer = Timer.periodic(streamEvery, (_) => unawaited(_flush()));
+    }
     final settled = _settled = Completer<Map<String, Object?>>();
     try {
       await host.prepare();
@@ -404,6 +450,10 @@ class TapePlayer {
     _banner();
     // Real input stays blocked: the app is in the state of that moment,
     // for picking, a state dump and a screenshot.
+    await _flush();
+    try {
+      await report?.call(result);
+    } catch (_) {}
     _settled?.complete(result);
     await resume.future;
     _resume = null;
@@ -816,9 +866,20 @@ class TapePlayer {
       },
     );
     current = null;
+    _streamTimer?.cancel();
+    _streamTimer = null;
     final answer = result;
     final settled = _settled;
-    if (settled != null && !settled.isCompleted) settled.complete(answer);
-    if (!_ended.isCompleted) _ended.complete(answer);
+    // The last batch reaches the bridge before the answer reaches the
+    // agent, so get_trace({run}) right after has the whole run.
+    unawaited(
+      _flush().then((_) async {
+        try {
+          await report?.call(answer);
+        } catch (_) {}
+        if (settled != null && !settled.isCompleted) settled.complete(answer);
+        if (!_ended.isCompleted) _ended.complete(answer);
+      }),
+    );
   }
 }
