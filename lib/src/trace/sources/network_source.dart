@@ -1,4 +1,5 @@
 import '../../core/hook_registry.dart';
+import '../../tape/net_matcher.dart';
 import '../net_record.dart';
 import '../redact.dart';
 import '../trace_recorder.dart';
@@ -56,6 +57,16 @@ class NetworkSource extends TraceSource {
 
   NetRecorder? _net;
   bool _installed = false;
+  NetReplay? _replay;
+
+  /// The replay that answers requests now, or null (PLAN-v2 Milestone 15,
+  /// step 8). Setting null puts the network back: every request reaches
+  /// the server again.
+  NetReplay? get replay => _replay;
+  set replay(NetReplay? value) {
+    _replay = value;
+    _net?.replay = value;
+  }
 
   /// The recorder of the running source, or null while stopped.
   NetRecorder? get net => _net;
@@ -82,7 +93,7 @@ class NetworkSource extends TraceSource {
       redact: redact,
       ignoreOrigins: ignoreOrigins,
       tap: tap,
-    );
+    )..replay = _replay;
     _installed = _platform.install(net, _hooks);
   }
 

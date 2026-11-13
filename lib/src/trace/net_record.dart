@@ -8,6 +8,7 @@ import 'dart:typed_data';
 
 import '../model/annotation.dart' show clipText;
 import '../model/trace_event.dart';
+import '../tape/net_matcher.dart';
 import 'cause_zone.dart';
 import 'redact.dart';
 import 'trace_recorder.dart';
@@ -28,6 +29,10 @@ class NetRecorder {
     this.tap,
   }) : readBodies = bodies,
        store = store ?? NetBodies();
+
+  /// While a replay runs, answers requests from a tape (PLAN-v2 Milestone
+  /// 15, step 8). Null: every request reaches the network.
+  NetReplay? replay;
 
   /// Sees every recorded request with its raw URL and body, and its answer
   /// (the tape recorder, Milestone 15). With a tap, kept bodies go to the
@@ -108,6 +113,45 @@ class NetRecorder {
       // The recorder only observes (rule 11).
     }
     return call;
+  }
+
+  /// What the platform hook does with a request during a replay: serve,
+  /// fail or pass it through. Null when no replay runs, and for requests
+  /// that are never recorded (the bridge, Pinpoint's own work): those
+  /// always reach the network.
+  ///
+  /// A request with no answer in the tape records `replay.unmatched`.
+  NetAnswer? replayAnswer({
+    required String method,
+    required String url,
+    List<int>? body,
+  }) {
+    final replay = this.replay;
+    if (replay == null) return null;
+    final cause = CauseZone.currentCause;
+    if ((cause != null && cause.internal) || _ignored(url)) return null;
+    final NetAnswer answer;
+    try {
+      answer = replay.answer(method: method, url: url, body: body);
+    } catch (error) {
+      // The replay only decides; a failure here lets the request go.
+      return null;
+    }
+    final unmatched =
+        (answer is FailAnswer && !answer.taped) ||
+        (answer is PassAnswer && answer.exchange == null);
+    if (unmatched) {
+      recorder.add(
+        TraceKind.replayUnmatched,
+        data: {
+          'method': method.toUpperCase(),
+          'url': clipText(redact.url(url), maxUrl),
+          'then': answer is PassAnswer ? 'passthrough' : 'fail',
+        },
+        cause: cause,
+      );
+    }
+    return answer;
   }
 
   bool _ignored(String url) {

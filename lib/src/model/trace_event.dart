@@ -63,6 +63,25 @@ abstract final class TraceKind {
   /// Level 3 sources stopped.
   static const String detailOff = 'detail.off';
 
+  /// A replay started (PLAN-v2 Milestone 15): the tape, its kind, the run.
+  static const String replayStart = 'replay.start';
+
+  /// The player sent one input of the tape.
+  static const String replayStep = 'replay.step';
+
+  /// A request had no answer in the tape (step 9).
+  static const String replayUnmatched = 'replay.unmatched';
+
+  /// An input's target was gone, and nothing like it was at its place: the
+  /// replay stopped (step 11).
+  static const String replayDiverged = 'replay.diverged';
+
+  /// The replay holds at a mark or a step (step 15).
+  static const String replayHold = 'replay.hold';
+
+  /// The replay ended: done, stopped, or diverged.
+  static const String replayEnd = 'replay.end';
+
   /// Kinds that are input from the user, the browser or the platform.
   static bool isInput(String kind) => kind.startsWith('input.');
 
