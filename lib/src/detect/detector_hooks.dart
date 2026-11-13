@@ -56,7 +56,8 @@ class DetectorHooks {
       images.uninstall();
     }
     if (findings.trackRebuilds) {
-      // DevTools holds the slot: say so, and leave it to DevTools.
+      // Shares a slot DevTools holds (RebuildHook). Fails only when another
+      // tool wrote over Pinpoint's hook: say so, and leave it to that tool.
       if (!rebuilds.install()) findings.rebuildsWereTakenOver();
     } else if (rebuilds.installed) {
       rebuilds.uninstall();
@@ -64,12 +65,13 @@ class DetectorHooks {
     paint.apply(findings.debugPaint);
   }
 
-  /// The rebuild hot spots, when tracking is on. Notices a slot DevTools
-  /// took since (watch out for: DevTools replaces or clears the hook) and
-  /// turns tracking off without writing over it.
+  /// The rebuild hot spots, when tracking is on. A slot DevTools cleared
+  /// since (it turned its tracking off) is taken back; one another tool
+  /// wrote over the hook is left to it, and tracking turns off (watch out
+  /// for: DevTools replaces or clears the hook).
   List<Finding> rebuildFindings(FindingLocator locator) {
     if (!rebuilds.installed) return const <Finding>[];
-    if (rebuilds.takenOver) {
+    if (rebuilds.takenOver && !rebuilds.reclaim()) {
       findings.rebuildsWereTakenOver();
       return const <Finding>[];
     }

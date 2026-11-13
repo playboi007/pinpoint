@@ -82,6 +82,7 @@ class TraceSession {
       content: content,
       resolver: resolver,
       onLost: _rebuildsLost,
+      onGap: this.recorder.rebuildGap,
     );
     frameSource = FrameSource(builds: () => rebuildSource.lastTotal);
     watchSource = WatchSource(
@@ -235,6 +236,7 @@ class TraceSession {
     }
     recorder.charge(watch.elapsedMicroseconds);
     if (_started.contains(frameSource)) frameSource.afterFrame();
+    if (rebuildSource.running) rebuildSource.endFrame();
   }
 
   /// Adds [reason] to what holds level 3. The first reason starts it.
@@ -278,7 +280,9 @@ class TraceSession {
             if (s.level == 3 && running.contains(s.name)) s.name,
         ],
         'for': [..._demand],
-        'reason': ?rebuildSource.failure,
+        'reason':
+            ?(rebuildSource.failure ??
+            (rebuildSource.shared ? _sharedReason : null)),
       },
     );
   }
@@ -388,13 +392,19 @@ class TraceSession {
     return false;
   }
 
+  static const String _sharedReason = 'rebuild slot shared';
+
   /// What `trace_detail` answers: whether level 3 runs, for what, which
   /// sources run, and whether rebuilds are recorded.
   Map<String, Object?> detailStatus() => {
     'on': detailOn,
     'for': [..._demand],
     'running': running,
-    'rebuilds': rebuildSource.running
+    'rebuilds': rebuildSource.shared
+        ? 'recorded; shared with another tool that held '
+              'debugOnRebuildDirtyWidget first (DevTools "track rebuilds"), '
+              'whose counts go on'
+        : rebuildSource.running
         ? 'recorded'
         : detailOn
         ? 'not recorded: rebuild slot taken (another tool holds '

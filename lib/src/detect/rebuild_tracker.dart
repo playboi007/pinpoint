@@ -43,10 +43,13 @@ class RebuildTracker {
   /// its rebuild tracking off sets the slot to null.
   bool get takenOver => _installed && _hook.takenOver;
 
-  /// Starts counting. Returns false, and writes nothing, when the slot is
-  /// already taken: DevTools' "track rebuilds" asserts that the slot is
-  /// null when it turns on (docs/api-notes.md, item 8), so Pinpoint only
-  /// writes an empty slot.
+  /// After [takenOver]: takes an emptied slot back. See
+  /// [RebuildHook.reclaim].
+  bool reclaim() => _installed && _hook.reclaim();
+
+  /// Starts counting. A callback DevTools put in the slot first is shared,
+  /// not replaced (see [RebuildHook]). Returns false, and writes nothing,
+  /// only when another tool wrote over Pinpoint's hook.
   bool install() {
     if (_installed && !takenOver) return true;
     if (!_hook.add(_listener)) return false;

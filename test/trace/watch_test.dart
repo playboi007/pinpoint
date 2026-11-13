@@ -103,14 +103,16 @@ void main() {
   });
 
   testWidgets('acceptance (other level 3 sources still start): with the '
-      'rebuild slot taken, the watch still records', (tester) async {
+      'rebuild slot shared with DevTools, the watch still records', (
+    tester,
+  ) async {
     await pumpApp(tester);
     void devTools(Element element, bool builtOnce) {}
     debugOnRebuildDirtyWidget = devTools;
     final detail = await toolResult(tester, controller, 'trace_detail', {
       'on': true,
     });
-    expect(detail['rebuilds'], contains('rebuild slot taken'));
+    expect(detail['rebuilds'], contains('shared'));
     expect(detail['running'], contains('watch'));
     await watchChild(tester);
     parent.currentState!.load();

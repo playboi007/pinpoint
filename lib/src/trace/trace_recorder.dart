@@ -273,6 +273,20 @@ class TraceRecorder {
     _coverage.last[1] = _nextSeq - 1;
   }
 
+  /// Rebuilds were not recorded from seq [from] to [to] (both included),
+  /// inside the interval that is open now.
+  void rebuildGap(int from, int to) {
+    if (!rebuildsRecorded || to < from) return;
+    final open = _coverage.last;
+    if (open[0]! >= from) {
+      open[0] = to + 1;
+    } else {
+      open[1] = from - 1;
+      _coverage.add(<int?>[to + 1, null]);
+      if (_coverage.length > maxCoverage) _coverage.removeAt(0);
+    }
+  }
+
   /// The parts of the seq range [from] to [to] (both included) in which
   /// rebuilds were not recorded, oldest first.
   List<(int, int)> rebuildGaps(int from, int to) {

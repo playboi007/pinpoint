@@ -55,37 +55,89 @@ void main() {
   });
 
   testWidgets('acceptance: DevTools "track rebuilds" can turn on while only '
-      'level 1 runs; then trace_detail says the slot is taken', (tester) async {
+      'level 1 runs; then trace_detail shares the slot with it', (
+    tester,
+  ) async {
     await pumpApp(tester);
     // What DevTools does when tracking turns on: it asserts the slot is
     // null, then writes it (api-notes item 8).
     expect(debugOnRebuildDirtyWidget, isNull);
+    var devToolsCalls = 0;
+    void devTools(Element element, bool builtOnce) => devToolsCalls++;
     debugOnRebuildDirtyWidget = devTools;
 
     final on = await toolResult(tester, controller, 'trace_detail', {
       'on': true,
     });
     expect(on['on'], isTrue);
-    expect(on['rebuilds'], contains('rebuild slot taken'));
-    expect(on['running'], isNot(contains('rebuild')));
-    // The other level 3 sources still start.
-    expect(on['running'], contains('watch'));
-    expect(debugOnRebuildDirtyWidget, same(devTools));
-    final detailOn = recorder.lastOf(TraceKind.detailOn)!;
-    expect(detailOn.data['reason'], 'rebuild slot taken');
+    expect(on['rebuilds'], contains('shared'));
+    expect(on['running'], containsAll(<String>['rebuild', 'watch']));
+    expect(
+      recorder.lastOf(TraceKind.detailOn)!.data['reason'],
+      'rebuild slot shared',
+    );
+
+    // Both get the counter's rebuild: DevTools' counts go on.
+    final from = recorder.nextSeq;
+    counter.currentState!.increment();
+    await tester.pump();
+    expect(devToolsCalls, greaterThan(0));
+    expect(
+      recorder.events.where(
+        (e) =>
+            e.seq >= from &&
+            e.kind == TraceKind.build &&
+            e.widget == '_Counter',
+      ),
+      hasLength(1),
+    );
 
     await toolResult(tester, controller, 'trace_detail', {'on': false});
-    // DevTools keeps its slot.
+    // DevTools gets its slot back.
     expect(debugOnRebuildDirtyWidget, same(devTools));
     debugOnRebuildDirtyWidget = null;
   });
 
-  testWidgets('a slot DevTools takes while level 3 runs stops the rebuild '
-      'source and is left to DevTools', (tester) async {
+  testWidgets('DevTools turning its tracking off while level 3 runs clears '
+      'the slot; the hook goes back in and the lost frame is a gap', (
+    tester,
+  ) async {
     await pumpApp(tester);
     await toolResult(tester, controller, 'trace_detail', {'on': true});
+    final hook = debugOnRebuildDirtyWidget;
     // DevTools turned its tracking off: it clears the slot.
     debugOnRebuildDirtyWidget = null;
+    final lostFrom = recorder.nextSeq;
+    counter.currentState!.increment();
+    await tester.pump();
+    expect(debugOnRebuildDirtyWidget, same(hook));
+    expect(recorder.lastOf(TraceKind.detailOff), isNull);
+    final lostTo = recorder.nextSeq - 1;
+    expect(recorder.rebuildGaps(lostFrom, lostTo), isNotEmpty);
+
+    // The next frame is recorded again.
+    final from = recorder.nextSeq;
+    counter.currentState!.increment();
+    await tester.pump();
+    expect(recorder.rebuildGaps(from, recorder.nextSeq - 1), isEmpty);
+    expect(
+      recorder.events.where(
+        (e) =>
+            e.seq >= from &&
+            e.kind == TraceKind.build &&
+            e.widget == '_Counter',
+      ),
+      hasLength(1),
+    );
+    await toolResult(tester, controller, 'trace_detail', {'on': false});
+    expect(debugOnRebuildDirtyWidget, isNull);
+  });
+
+  testWidgets('a tool that writes over the hook while level 3 runs stops '
+      'the rebuild source and keeps the slot', (tester) async {
+    await pumpApp(tester);
+    await toolResult(tester, controller, 'trace_detail', {'on': true});
+    debugOnRebuildDirtyWidget = devTools;
     counter.currentState!.increment();
     await tester.pump();
     final lost = recorder.lastOf(TraceKind.detailOff)!;
@@ -94,7 +146,8 @@ void main() {
       'on': false,
     });
     expect(status['on'], isFalse);
-    expect(debugOnRebuildDirtyWidget, isNull);
+    expect(debugOnRebuildDirtyWidget, same(devTools));
+    debugOnRebuildDirtyWidget = null;
   });
 
   testWidgets('the heat detector and the trace share one hook', (tester) async {

@@ -6,11 +6,18 @@ import 'hook_registry.dart';
 /// by every user inside Pinpoint: the rebuild heat detector
 /// (`RebuildTracker`) and the trace's rebuild source.
 ///
-/// One hook, two users (PLAN-v2 Milestone 13, watch out for): DevTools'
-/// "track rebuilds" asserts that the slot is null before it writes it
-/// (docs/api-notes.md, item 8), so a second install would fail, and so
-/// would DevTools. The slot is written only while at least one listener is
-/// added, and only when it is empty.
+/// One hook, two users (PLAN-v2 Milestone 13, watch out for). It also
+/// shares the slot with DevTools "track rebuilds" where Flutter lets it
+/// (docs/api-notes.md, item 8):
+///
+/// - DevTools first: Pinpoint writes its hook over DevTools' callback and
+///   calls that callback first on every rebuild, so DevTools' counts go on.
+///   When Pinpoint lets go, DevTools' callback goes back in the slot.
+/// - DevTools turns tracking off while Pinpoint holds the slot: DevTools
+///   writes null. [reclaim] puts the hook back, without DevTools' callback.
+/// - Pinpoint first, then DevTools turns on: DevTools asserts that the slot
+///   is null, so this order still fails. No public API lets Pinpoint get in
+///   front of that assert.
 class RebuildHook {
   RebuildHook(HookRegistry registry)
     : _slot = registry.slot<RebuildDirtyWidgetCallback?>(
@@ -21,6 +28,10 @@ class RebuildHook {
 
   final GlobalSlot<RebuildDirtyWidgetCallback?> _slot;
   late final RebuildDirtyWidgetCallback _hook = _onRebuild;
+
+  /// The other tool's callback that was in the slot when the hook went in
+  /// (DevTools' "track rebuilds"), called first on every rebuild.
+  RebuildDirtyWidgetCallback? _shared;
   final List<RebuildDirtyWidgetCallback> _listeners =
       <RebuildDirtyWidgetCallback>[];
 
@@ -32,29 +43,58 @@ class RebuildHook {
   bool get takenOver =>
       _slot.isHeld && !identical(debugOnRebuildDirtyWidget, _hook);
 
-  /// Whether the slot is held by another tool, so [add] would fail.
+  /// Whether the hook hands every rebuild on to another tool's callback,
+  /// for example DevTools "track rebuilds".
+  bool get shared => installed && !takenOver && _shared != null;
+
+  /// Whether the slot holds another tool's callback. [add] then shares it.
   static bool get heldByOther => debugOnRebuildDirtyWidget != null;
 
-  /// Adds [listener]. The first listener installs the hook. Returns false,
-  /// and adds nothing, when the slot holds another tool's callback.
+  /// Adds [listener]. The first listener installs the hook; a callback
+  /// another tool put in the slot is kept and called first (see [shared]).
+  /// Returns false, and adds nothing, only when another tool wrote over
+  /// Pinpoint's hook after Pinpoint wrote it: sharing that one could call
+  /// back into Pinpoint without end.
   bool add(RebuildDirtyWidgetCallback listener) {
-    if (_listeners.contains(listener) && !takenOver) return true;
-    final current = debugOnRebuildDirtyWidget;
-    if (current != null && !identical(current, _hook)) return false;
+    if (takenOver && !reclaim()) return false;
     if (!_listeners.contains(listener)) _listeners.add(listener);
-    if (!identical(current, _hook)) _slot.set(_hook);
+    if (!identical(debugOnRebuildDirtyWidget, _hook)) _install();
     return true;
   }
 
-  /// Removes [listener]. The last one gives the slot back, unless another
-  /// tool wrote it since: then it is theirs and is left alone.
+  /// After [takenOver]: puts the hook back when the slot is empty, which is
+  /// what DevTools leaves when it turns tracking off. Returns whether the
+  /// hook is in the slot now. A callback another tool wrote over the hook
+  /// is left alone.
+  bool reclaim() {
+    if (!takenOver) return installed;
+    if (debugOnRebuildDirtyWidget != null || _listeners.isEmpty) return false;
+    _install();
+    return true;
+  }
+
+  void _install() {
+    _slot.set(_hook);
+    // The value the slot had before the first write, or the one another
+    // tool wrote since (GlobalSlot.set): DevTools' callback, or null.
+    final before = _slot.previous;
+    _shared = identical(before, _hook) ? null : before;
+  }
+
+  /// Removes [listener]. The last one gives the slot back (DevTools'
+  /// callback, when it was shared), unless another tool wrote the slot
+  /// since: then it is theirs and is left alone.
   void remove(RebuildDirtyWidgetCallback listener) {
     _listeners.remove(listener);
-    if (_listeners.isEmpty) _slot.release();
+    if (_listeners.isEmpty) {
+      _slot.release();
+      _shared = null;
+    }
   }
 
   // Runs during build, for every rebuild: hand on, nothing else.
   void _onRebuild(Element element, bool builtOnce) {
+    _shared?.call(element, builtOnce);
     for (var i = 0; i < _listeners.length; i++) {
       _listeners[i](element, builtOnce);
     }

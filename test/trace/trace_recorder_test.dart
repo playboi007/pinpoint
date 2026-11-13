@@ -142,6 +142,29 @@ void main() {
       expect(recorder.rebuildGaps(19, 21), [(19, 20)]);
     });
 
+    test('a gap inside the open interval: DevTools cleared the slot for a '
+        'frame', () {
+      final recorder = TraceRecorder()..startRebuildCoverage();
+      for (var i = 0; i < 10; i++) {
+        recorder.add('a'); // seq 1-10
+      }
+      recorder.rebuildGap(4, 6);
+      recorder.add('b'); // 11: covered
+      expect(recorder.rebuildGaps(1, 11), [(4, 6)]);
+      expect(recorder.rebuildsRecorded, isTrue);
+      // A gap from the interval's start moves the start.
+      final fresh = TraceRecorder()..startRebuildCoverage();
+      for (var i = 0; i < 5; i++) {
+        fresh.add('a'); // seq 1-5
+      }
+      fresh.rebuildGap(1, 3);
+      expect(fresh.rebuildGaps(1, 5), [(1, 3)]);
+      // No open interval: nothing to split.
+      recorder.endRebuildCoverage();
+      recorder.rebuildGap(11, 11);
+      expect(recorder.rebuildGaps(1, 11), [(4, 6)]);
+    });
+
     test('the recorder charges and hands back its own time', () {
       final recorder = TraceRecorder()
         ..charge(120)
