@@ -51,6 +51,30 @@ void main() {
     expect(response['body'], 'not read: application/octet-stream');
   });
 
+  test('the engine\'s own fetches (fallback fonts, CanvasKit) are not '
+      'recorded and are never answered from a tape', () {
+    final net = net0();
+    for (final url in [
+      'https://fonts.gstatic.com/s/notosanssymbols/v43/a.woff2',
+      'https://fonts.googleapis.com/css2?family=Noto',
+      'https://www.gstatic.com/flutter-canvaskit/abc/canvaskit.wasm',
+    ]) {
+      expect(net.request(via: 'fetch', method: 'GET', url: url), isNull);
+      expect(net.replayAnswer(method: 'GET', url: url), isNull);
+    }
+    expect(net.ignored, 3);
+    expect(net.recorder.events, isEmpty);
+    // Another gstatic.com path is the app's.
+    expect(
+      net.request(
+        via: 'fetch',
+        method: 'GET',
+        url: 'https://www.gstatic.com/images/a.png',
+      ),
+      isNotNull,
+    );
+  });
+
   test('a JSON answer is read, hashed and kept for the tape', () {
     final net = net0();
     final call = net.request(via: 'xhr', method: 'GET', url: '/a')!;

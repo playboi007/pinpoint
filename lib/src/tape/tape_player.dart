@@ -277,6 +277,9 @@ class TapePlayer {
   bool _heldOnce = false;
   Map<String, Object?>? _firstDifference;
   final List<String> _notes = <String>[];
+
+  /// Answers waited for once in vain (see [_run]).
+  final Set<int> _givenUp = <int>{};
   Completer<void>? _resume;
   Completer<Map<String, Object?>>? _settled;
   final Completer<void> _stopSignal = Completer<void>();
@@ -388,25 +391,32 @@ class TapePlayer {
           await _hold();
           if (_stopRequested) break;
         }
-        final gap = Duration(
-          milliseconds: ((input.t - previousT) / speed).round(),
-        );
-        previousT = input.t;
-        await _sleep(gap > maxGap ? maxGap : gap);
-        if (_stopRequested) break;
-        if (input.after.isNotEmpty &&
-            !await net.waitFor(input.after, timeout: answerTimeout)) {
-          _differ(
-            input.step,
-            'answer',
-            [
-              for (final n in input.after)
-                if (!net.wasDelivered(n)) n,
-            ].join(', '),
-            'not delivered',
+        // Key events alone are not sent (see _send): they take no time and
+        // wait for nothing, so a typed word does not cost three pauses per
+        // letter.
+        final sent = input.kind != TraceKind.key;
+        if (sent) {
+          final gap = Duration(
+            milliseconds: ((input.t - previousT) / speed).round(),
           );
+          previousT = input.t;
+          await _sleep(gap > maxGap ? maxGap : gap);
+          if (_stopRequested) break;
+          // An answer that did not come once is not waited for again:
+          // every later input lists it in `after`, and each would wait
+          // [answerTimeout] for it.
+          final need = {...input.after}..removeAll(_givenUp);
+          if (need.isNotEmpty &&
+              !await net.waitFor(need, timeout: answerTimeout)) {
+            final missing = [
+              for (final n in need)
+                if (!net.wasDelivered(n)) n,
+            ];
+            _givenUp.addAll(missing);
+            _differ(input.step, 'answer', missing.join(', '), 'not delivered');
+          }
+          if (_stopRequested) break;
         }
-        if (_stopRequested) break;
         await _send(input);
         _done = input.step;
         host.session.recorder.add(

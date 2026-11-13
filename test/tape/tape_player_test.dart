@@ -218,8 +218,7 @@ void main() {
 
     final held = await replay(tester, id, {'until': 'mark:1'});
     expect(held['state'], 'held');
-    final network =
-        TraceSession.current!.source('network')! as NetworkSource;
+    final network = TraceSession.current!.source('network')! as NetworkSource;
     expect(network.replay, isNotNull);
     expect(TraceSession.current!.tapes.replaying, isTrue);
 
@@ -244,9 +243,7 @@ void main() {
     final id = await save(tester);
     final result = await replay(tester, id);
     final run = result['run']! as String;
-    final kinds = [
-      for (final e in bridge.notes.runEvents[run]!) e['kind'],
-    ];
+    final kinds = [for (final e in bridge.notes.runEvents[run]!) e['kind']];
     expect(kinds.first, TraceKind.replayStart);
     expect(kinds, contains(TraceKind.replayStep));
     expect(kinds.last, TraceKind.replayEnd);
@@ -274,6 +271,67 @@ void main() {
         if (e.kind == TraceKind.pointer && e.data['by'] == 'agent') e,
     ];
     expect(agentDowns, isNotEmpty);
+    await bridge.shutdown(tester);
+  });
+
+  testWidgets('an answer that never comes is waited for once, and key '
+      'events wait for nothing', (tester) async {
+    // Seen in Chrome: the engine's fallback font was the tape's first
+    // answer, every later input waited 10 s for it, and a form took
+    // minutes.
+    await pumpApp(tester);
+    TraceSession.current!.mark();
+    for (var i = 0; i < 3; i++) {
+      await tap(tester, find.text('Count'));
+    }
+    final id = await save(tester);
+    final stored = bridge.notes.tapes[id]!;
+    final tape = Map<String, Object?>.of(
+      stored['tape']! as Map<String, Object?>,
+    );
+    final inputs = [
+      for (final input in tape['inputs']! as List<Object?>)
+        {
+          ...input! as Map<String, Object?>,
+          'after': [0],
+        },
+    ];
+    final first = inputs.first;
+    tape['inputs'] = [
+      for (final phase in ['down', 'up'])
+        {
+          ...first,
+          'kind': TraceKind.key,
+          'data': {'phase': phase, 'key': 'Shift Right'},
+          'widget': null,
+          'source': null,
+        },
+      ...inputs,
+    ];
+    tape['net'] = [
+      {
+        'n': 0,
+        'key': 'GET https://api.test/never -',
+        'method': 'GET',
+        'url': 'https://api.test/never',
+        't': 0,
+        'status': 200,
+        'answered': 0,
+      },
+    ];
+    bridge.notes.tapes[id] = {...stored, 'tape': tape};
+
+    controller.agent.enabled = true;
+    final answer = await drive(
+      tester,
+      controller.agent.run('replay', {'tape': id}),
+      // Ten seconds once is enough; one wait per input (six) is not.
+      maxPumps: 1000,
+    );
+    final result = answer['result']! as Map<String, Object?>;
+    expect(result['state'], 'done', reason: '$result');
+    expect(app.count, 6);
+    expect((result['first_difference']! as Map)['what'], 'answer');
     await bridge.shutdown(tester);
   });
 }

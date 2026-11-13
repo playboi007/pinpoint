@@ -155,14 +155,25 @@ class NetRecorder {
   }
 
   bool _ignored(String url) {
-    if (ignoreOrigins.isEmpty) return false;
     try {
       final uri = Uri.base.resolve(url);
-      return ignoreOrigins.contains('${uri.scheme}://${uri.authority}');
+      return engineResource(uri) ||
+          ignoreOrigins.contains('${uri.scheme}://${uri.authority}');
     } catch (_) {
       return false;
     }
   }
+
+  /// Whether [uri] is a file the Flutter web engine loads for itself: a
+  /// fallback font when a glyph is missing, or CanvasKit. The app did not
+  /// ask for it and the engine asks again only when it needs it, so a
+  /// tape that kept it waits in vain for its answer at replay. Never
+  /// recorded, and it always reaches the network.
+  static bool engineResource(Uri uri) => switch (uri.host) {
+    'fonts.gstatic.com' || 'fonts.googleapis.com' => true,
+    'www.gstatic.com' => uri.path.startsWith('/flutter-'),
+    _ => false,
+  };
 
   void _tell(void Function(NetTap tap) call) {
     final tap = this.tap;
