@@ -19,6 +19,7 @@ import '../detect/truncation_detector.dart';
 import '../env/environment_controller.dart';
 import '../model/annotation.dart';
 import '../model/tape.dart';
+import '../overlay/replay_blocker.dart';
 import '../search/pick_result.dart';
 import '../search/render_search.dart';
 import '../search/source_index.dart';
@@ -27,6 +28,7 @@ import '../sink/bridge_client.dart';
 import '../sink/http_sink.dart' show HttpSinkException;
 import '../tape/browser_page.dart';
 import '../tape/net_matcher.dart';
+import '../tape/tape_boot.dart';
 import '../tape/tape_player.dart';
 import '../tape/tape_recorder.dart' show TapeSince;
 import '../trace/cause_zone.dart';
@@ -560,7 +562,128 @@ class AgentCommands {
       throw AgentError('the bridge did not give the tape: ${error.message}');
     }
     if (tape == null) throw AgentError('no tape $id');
+    if (tape.kind == TapeKind.full && args['restart'] != false) {
+      return _restart(tape, args, client);
+    }
     return _play(tapePlayer(tape, args, session), cancel);
+  }
+
+  /// The options of `replay` a restarted page needs again.
+  static const List<String> _replayOptions = [
+    'until',
+    'speed',
+    'unmatched',
+    'latency',
+  ];
+
+  /// A full tape replays after a restart (step 7): in-memory state such as
+  /// a parent's cache is part of most real bugs, and only a restart brings
+  /// it back to a known value. The flag goes to `sessionStorage`, the page
+  /// reloads, and at start Pinpoint loads the tape before the app runs.
+  /// The bridge waits for the new page to report the run.
+  Map<String, Object?> _restart(
+    Tape tape,
+    Map<String, Object?> args,
+    BridgeClient client,
+  ) {
+    final page = TapeBoot.page;
+    if (!page.available) {
+      throw const AgentError(
+        'a full tape replays after a restart, which works on web only. '
+        'Give restart: false to play it from where the app is, or save a '
+        'segment (save_tape since a mark)',
+      );
+    }
+    // Checked now: the new page cannot answer a bad option.
+    tapePlayer(tape, args, _trace());
+    final run = args['run'] is String && runIdPattern.hasMatch('${args['run']}')
+        ? args['run']! as String
+        : newRunId();
+    TapeBoot.arm(
+      BootFlag(
+        tape: tape.id,
+        run: run,
+        bridge: client.base.toString(),
+        options: {
+          for (final key in _replayOptions)
+            if (args[key] != null) key: args[key],
+        },
+        control: controller.agent.enabled,
+      ),
+    );
+    // After this answer has gone to the bridge. Watch out for: a page
+    // reload loads what the web server serves. Whether that includes code
+    // a hot reload compiled is unverified (PLAN-v2 "Verify by running");
+    // if it does not, a full replay after a fix needs a hot restart from
+    // Flutter Tools instead of a reload.
+    Timer(const Duration(milliseconds: 500), page.reload);
+    return {'run': run, 'tape': tape.id, 'kind': 'full', 'state': 'restarting'};
+  }
+
+  /// Starts the replay of a page a replay restarted (step 7), once, after
+  /// the first frame. Reports each hold and the end to the bridge, where
+  /// the agent's `replay` waits.
+  Future<void> startBootReplay() async {
+    final flag = TapeBoot.flag;
+    if (flag == null || TapeBoot.started) return;
+    TapeBoot.started = true;
+    final client = BridgeClient(Uri.parse(flag.bridge));
+    final session = TraceSession.current;
+    final tape = await TapeBoot.load();
+    if (session == null || tape == null) {
+      ReplayGate.clear();
+      session?.tapes.replaying = false;
+      await _report(client, flag.run, {
+        'run': flag.run,
+        'tape': flag.tape,
+        'state': 'stopped',
+        'reason': session == null
+            ? 'the flight recorder is off'
+            : TapeBoot.error ?? 'the tape did not load',
+      });
+      return;
+    }
+    // The replay was the agent's: control comes back on, so it can resume
+    // or stop it. Turned off after every restart otherwise.
+    if (flag.control) controller.agent.enabled = true;
+    final TapePlayer player;
+    try {
+      player = tapePlayer(
+        tape,
+        {...flag.options, 'run': flag.run},
+        session,
+        net: TapePlayer.bootNet,
+        notes: [
+          if (!TapeBoot.loadedBeforeApp)
+            'no PinPoint.run in main: requests before the tape loaded '
+                'reached the server',
+        ],
+      );
+    } on AgentError catch (error) {
+      ReplayGate.clear();
+      session.tapes.replaying = false;
+      await _report(client, flag.run, {
+        'run': flag.run,
+        'state': 'stopped',
+        'reason': error.message,
+      });
+      return;
+    }
+    unawaited(player.ended.then((result) => _report(client, flag.run, result)));
+    final first = await player.start();
+    if (first['state'] == 'held') await _report(client, flag.run, first);
+  }
+
+  static Future<void> _report(
+    BridgeClient client,
+    String run,
+    Map<String, Object?> status,
+  ) async {
+    try {
+      await client.postRunStatus(run, status);
+    } catch (error) {
+      debugPrint('pinpoint: could not report replay $run: $error');
+    }
   }
 
   /// A player for [tape] with the options in [args]. Throws an
@@ -568,8 +691,10 @@ class AgentCommands {
   TapePlayer tapePlayer(
     Tape tape,
     Map<String, Object?> args,
-    TraceSession session,
-  ) {
+    TraceSession session, {
+    NetReplay? net,
+    List<String> notes = const <String>[],
+  }) {
     final speed = args['speed'] ?? 1;
     if (speed is! num || speed <= 0 || speed > maxSpeed) {
       throw const AgentError('speed is a number above 0, at most 20');
@@ -597,6 +722,8 @@ class AgentCommands {
       unmatched: unmatched,
       latency: latency,
       runId: run is String && runIdPattern.hasMatch(run) ? run : null,
+      net: net,
+      notes: notes,
     );
   }
 

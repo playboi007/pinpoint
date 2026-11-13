@@ -32,6 +32,7 @@ import '../sink/bridge_client.dart';
 import '../sink/http_sink.dart';
 import '../sink/markdown_formatter.dart';
 import '../sink/pinpoint_sink.dart';
+import '../tape/tape_boot.dart';
 import '../theme/pinpoint_theme.dart';
 import '../theme/pinpoint_tokens.dart';
 import '../trace/note_trace.dart';
@@ -262,6 +263,13 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     });
     _startSync();
     _attachAgent();
+    // A page a replay restarted plays its tape once the app has drawn
+    // (PLAN-v2 Milestone 15, step 7).
+    if (TapeBoot.flag != null) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => unawaited(_agentCommands.startBootReplay()),
+      );
+    }
     _lifecycle; // starts listening
   }
 

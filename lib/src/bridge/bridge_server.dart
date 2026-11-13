@@ -14,6 +14,7 @@ import 'command_queue.dart';
 import 'hot_reload.dart';
 import 'mcp_server.dart';
 import 'note_store.dart';
+import 'run_store.dart';
 import 'tape_store.dart';
 
 /// Why the bridge could not start.
@@ -111,12 +112,16 @@ class PinPointBridge {
   /// Tapes on disk (PLAN-v2 Milestone 15).
   late final TapeStore tapes = TapeStore(store.root);
 
+  /// Replay runs on disk.
+  late final RunStore runs = RunStore(store.root);
+
   final List<String> _allowedOrigins;
   late final McpServer _mcp = McpServer(
     store,
     commands: commands,
     reloader: HotReloader(store.root),
     tapes: tapes,
+    runs: runs,
     log: _log,
   );
   final void Function(String line) _log;
@@ -258,6 +263,7 @@ class PinPointBridge {
     if (path == tapesPath || path.startsWith('$tapesPath/')) {
       return _tape(request, path);
     }
+    if (path.startsWith('$runsPath/')) return _run(request, path);
     switch ((method, path)) {
       case ('POST', mcpPath):
         return _mcpCall(request);
@@ -327,6 +333,41 @@ class PinPointBridge {
       'tape': tape.toJson(),
       'bodies': tape.bodiesToJson(),
     });
+  }
+
+  /// A replay run from the app (PLAN-v2 Milestone 15, step 14):
+  /// `POST /runs/<id>/events` with `{events: [...]}`, and
+  /// `POST /runs/<id>/status` with where the replay is.
+  Future<void> _run(HttpRequest request, String path) async {
+    final response = request.response;
+    final match = RegExp(
+      '^${RegExp.escape(runsPath)}/([^/]+)/(events|status)\$',
+    ).firstMatch(path);
+    if (match == null) {
+      return _error(response, HttpStatus.notFound, 'Not found: $path');
+    }
+    final id = match[1]!;
+    // The id becomes a file name.
+    if (!RunStore.valid(id)) {
+      return _error(response, HttpStatus.badRequest, 'Not a run id: $id');
+    }
+    if (request.method != 'POST') {
+      response.headers.set('allow', 'POST, OPTIONS');
+      return _error(response, HttpStatus.methodNotAllowed, 'Use POST');
+    }
+    final body = await _jsonBody(request);
+    if (body == null) return;
+    if (match[2] == 'events') {
+      final events = body['events'];
+      if (events is! List<Object?>) {
+        return _error(response, HttpStatus.badRequest, 'Give {events: [...]}');
+      }
+      await runs.addEvents(id, events);
+      return _json(response, HttpStatus.ok, {'ok': true});
+    }
+    await runs.setStatus(id, body);
+    _log('pinpoint: replay $id is ${body['state']}');
+    _json(response, HttpStatus.ok, {'ok': true});
   }
 
   /// The app's side of the command channel: its long poll, its answers,

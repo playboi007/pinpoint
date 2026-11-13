@@ -13,6 +13,7 @@ import '../search/render_search.dart';
 import '../trace/sources/network_source.dart';
 import '../trace/trace_session.dart';
 import 'net_matcher.dart';
+import 'tape_boot.dart';
 
 /// What the player needs from the app it replays into. The overlay's agent
 /// commands make one.
@@ -133,8 +134,64 @@ class TapePlayer {
     this.unmatched = Unmatched.fail,
     this.latency = const ReplayLatency.recorded(),
     String? runId,
+    NetReplay? net,
+    List<String> notes = const <String>[],
   }) : assert(speed > 0),
-       runId = runId ?? newRunId();
+       runId = runId ?? newRunId(),
+       _givenNet = net {
+    _notes.addAll(notes);
+  }
+
+  final NetReplay? _givenNet;
+
+  /// The network replay a restarted page installed before the app made
+  /// its first request, and the session it is installed in. The player of
+  /// that start takes it over.
+  static NetReplay? bootNet;
+
+  /// Called by the wrapper when its recorder starts. On a page a replay
+  /// restarted, answers requests from the tape from now on: when
+  /// `PinPoint.run` loaded it before `runApp`, from the app's first
+  /// request; otherwise from when it arrives, and the requests before that
+  /// were real.
+  static void bootNetwork(TraceSession session, {required bool storage}) {
+    final flag = TapeBoot.flag;
+    if (flag == null || TapeBoot.started) return;
+    session.tapes.replaying = true;
+    ReplayGate.show('Replaying tape: loading it');
+    void install(Tape tape) {
+      final network = session.source('network');
+      final options = flag.options;
+      final net = bootNet = NetReplay(
+        tape,
+        matcher: session.tapes.matcher,
+        unmatched:
+            Unmatched.byName(options['unmatched'] ?? 'fail') ?? Unmatched.fail,
+        latency:
+            ReplayLatency.parse(options['latency']) ??
+            const ReplayLatency.recorded(),
+        speed: options['speed'] is num
+            ? (options['speed']! as num).toDouble()
+            : 1,
+      );
+      if (network is NetworkSource) network.replay = net;
+    }
+
+    final tape = TapeBoot.tape;
+    if (tape != null) {
+      install(tape);
+      return;
+    }
+    debugPrint(
+      'pinpoint: replay without PinPoint.run in main: requests made before '
+      'the tape loaded reach the server.',
+    );
+    unawaited(
+      TapeBoot.load(restoreStorage: storage).then((tape) {
+        if (tape != null) install(tape);
+      }),
+    );
+  }
 
   /// The replay running or holding now, or null. A static (api-notes item
   /// 29): Esc finds it from the wrapper.
@@ -208,13 +265,15 @@ class TapePlayer {
     }
     current = this;
     final session = host.session;
-    net = NetReplay(
-      tape,
-      matcher: session.tapes.matcher,
-      unmatched: unmatched,
-      latency: latency,
-      speed: speed,
-    );
+    net =
+        _givenNet ??
+        NetReplay(
+          tape,
+          matcher: session.tapes.matcher,
+          unmatched: unmatched,
+          latency: latency,
+          speed: speed,
+        );
     host.network?.replay = net;
     session.tapes.replaying = true;
     _banner();
@@ -742,6 +801,7 @@ class TapePlayer {
     // tape store, the input gate and the banner.
     host.network?.replay = null;
     net.close();
+    if (identical(bootNet, net)) bootNet = null;
     host.session.tapes.replaying = false;
     ReplayGate.clear();
     host.session.recorder.add(

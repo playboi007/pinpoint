@@ -10,6 +10,8 @@ import 'dart:typed_data';
 
 import '../model/annotation.dart' show NoteStatus;
 import '../sink/markdown_formatter.dart' show verificationLines;
+import '../trace/trace_format.dart';
+import '../trace/trace_recorder.dart';
 import 'agent_tools.dart';
 import 'command_queue.dart';
 import 'hot_reload.dart';
@@ -17,6 +19,7 @@ import 'note_detail.dart';
 import 'note_store.dart';
 import 'png_resize.dart';
 import 'probe_scan.dart';
+import 'run_store.dart';
 import 'tape_store.dart';
 
 /// The MCP protocol versions this server speaks, newest first.
@@ -45,11 +48,16 @@ class McpServer {
     this.commands,
     this.reloader,
     this._tapes,
+    this._runs,
     this.version = '0.0.1',
     this._log = _noLog,
   });
 
   final TapeStore? _tapes;
+  final RunStore? _runs;
+
+  /// Replay runs on disk.
+  late final RunStore runs = _runs ?? RunStore(store.root);
 
   final NoteStore store;
 
@@ -273,6 +281,7 @@ class McpServer {
       'update_note' => _updateNote(input),
       'list_probes' => _listProbes(),
       'list_tapes' => _listTapes(),
+      'get_trace' when input['run'] != null => _runTrace(input),
       'get_tape' => _getTape(input),
       'verify_note' when commands != null => _verifyNote(input),
       'hot_reload' when reloader != null => _hotReload(input),
@@ -396,6 +405,28 @@ class McpServer {
     for (final p in probes.take(10)) '  ${p.file}:${p.line}',
     if (probes.length > 10) '  … and ${probes.length - 10} more',
   ].join('\n');
+
+  /// `get_trace({run})`: a stored replay run, read with the same query as
+  /// the live record. A reload cleared the app's memory; the bridge kept
+  /// the run (PLAN-v2 Milestone 15, step 14).
+  Future<Map<String, Object?>> _runTrace(Map<String, Object?> input) async {
+    final run = input['run'];
+    if (run is! String) throw const _InvalidParams('run is a run id (run_…)');
+    final events = await runs.events(run);
+    if (events == null) return _text('No run $run', isError: true);
+    final status = await runs.status(run);
+    final Map<String, Object?> answer;
+    try {
+      answer = traceAnswer(
+        TraceRecorder.of(events),
+        TraceQuery.fromArgs(input),
+      );
+    } on FormatException catch (error) {
+      return _text(error.message, isError: true);
+    }
+    answer.remove('hint');
+    return _resultContent({'run': run, 'state': ?status?['state'], ...answer});
+  }
 
   /// `list_tapes`: every tape's summary, newest first. Never a body.
   Future<Map<String, Object?>> _listTapes() async {
@@ -535,6 +566,27 @@ class McpServer {
           ),
         );
       }
+    }
+    // A full tape restarted the page (PLAN-v2 Milestone 15, step 7). The
+    // new page reports the run when it holds or ends.
+    if (tool == 'replay' &&
+        result is Map<String, Object?> &&
+        result['state'] == 'restarting' &&
+        result['run'] is String) {
+      final run = result['run']! as String;
+      final status = await runs.nextStatus(
+        run,
+        timeout: agentToolTimeout(tool, input),
+      );
+      if (status == null) {
+        return _text(
+          'The page restarted for replay $run but did not report it within '
+          '${agentToolTimeout(tool, input).inSeconds} s. Is the tab shown? '
+          'Read what arrived with get_trace({run: "$run"}).',
+          isError: true,
+        );
+      }
+      return _resultContent({...status});
     }
     if (tool == 'stress_matrix' && result is Map<String, Object?>) {
       return _text(jsonEncode(await _stressThumbnails({...result})));

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui' show KeyData, PointerDataPacket;
 
 import 'package:flutter/foundation.dart';
@@ -6,6 +7,7 @@ import 'package:flutter/widgets.dart';
 
 import '../model/annotation.dart' show clipText;
 import '../model/trace_event.dart';
+import '../tape/tape_boot.dart';
 import 'cause_zone.dart';
 import 'sources/error_source.dart';
 import 'trace_config.dart';
@@ -41,6 +43,25 @@ abstract final class PinPoint {
     R Function() body, {
     TraceConfig trace = const TraceConfig(),
   }) {
+    // A replay restarted this page (PLAN-v2 Milestone 15, step 7): load
+    // the tape before the app starts, so the network source can answer the
+    // app's first request from it. Only for a body that returns nothing
+    // (`runApp`), whose result nobody waits for.
+    if (kDebugMode && trace.enabled && null is R && TapeBoot.flag != null) {
+      return _inZone(() {
+        unawaited(
+          TapeBoot.load(restoreStorage: trace.storage).then((tape) {
+            TapeBoot.loadedBeforeApp = tape != null;
+            body();
+          }),
+        );
+        return null as R;
+      }, trace);
+    }
+    return _inZone(body, trace);
+  }
+
+  static R _inZone<R>(R Function() body, TraceConfig trace) {
     if (!kDebugMode || !trace.enabled || !trace.causes) return body();
     if (CauseZone.current != null) return body();
     if (BindingBase.debugBindingType() != null) {

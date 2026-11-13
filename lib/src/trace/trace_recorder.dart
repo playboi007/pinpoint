@@ -28,6 +28,25 @@ class TraceRecorder {
        _clock = clock,
        frameOf = frameOf ?? _noFrame;
 
+  /// A recorder that holds [events] as they were recorded, with their
+  /// seqs, for reading a stored run with the same queries as the live one
+  /// (PLAN-v2 Milestone 15, `get_trace({run})`). Its clock stands at the
+  /// last event.
+  factory TraceRecorder.of(List<TraceEvent> events) {
+    final last = events.isEmpty ? 0 : events.last.t;
+    final recorder = TraceRecorder(
+      maxEvents: events.isEmpty ? 1 : events.length,
+      maxBytes: 1 << 40,
+      clock: () => last,
+    )..readCauses = false;
+    for (final event in events) {
+      recorder._ring[recorder._length++] = event;
+      recorder._bytes += event.approxBytes;
+      recorder._nextSeq = event.seq + 1;
+    }
+    return recorder;
+  }
+
   static const int defaultMaxEvents = 20000;
   static const int defaultMaxBytes = 4 * 1024 * 1024;
 

@@ -475,6 +475,13 @@ final List<Map<String, Object?>> agentTools = [
         'enum': ['compact', 'full'],
         'description': 'full: whole events as JSON.',
       },
+      'run': {
+        'type': 'string',
+        'description':
+            'A replay run id (run_…) from replay: reads that run as the '
+            'bridge stored it, also after the page reloaded. Without it, '
+            'the live record.',
+      },
     },
   ),
   _tool(

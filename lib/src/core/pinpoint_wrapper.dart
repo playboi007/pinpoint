@@ -202,6 +202,9 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
       ],
     );
     session.thumbnail = _thumbnail;
+    // A page a replay restarted: answer requests from the tape now, before
+    // the app's first build makes any (PLAN-v2 Milestone 15, step 7).
+    TapePlayer.bootNetwork(session, storage: widget.config.trace.storage);
   }
 
   /// The page now, for the start of a tape (PLAN-v2 Milestone 15, step 1).

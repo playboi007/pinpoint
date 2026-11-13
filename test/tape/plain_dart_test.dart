@@ -38,4 +38,9 @@ const List<String> plainTapeFiles = [
   'lib/src/model/tape.dart',
   'lib/src/tape/net_matcher.dart',
   'lib/src/tape/tape_recorder.dart',
+  // The bridge runs with `dart run`: no Flutter anywhere below it.
+  'lib/src/bridge/tape_store.dart',
+  'lib/src/bridge/run_store.dart',
+  'lib/src/bridge/mcp_server.dart',
+  'lib/src/bridge/bridge_server.dart',
 ];

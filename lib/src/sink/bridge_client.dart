@@ -220,6 +220,21 @@ class BridgeClient {
     }
   }
 
+  /// Where the replay run [run] is: `{state, step, of, first_difference,
+  /// …}` as the player answers. The bridge's `replay` waits for it after a
+  /// restart.
+  Future<void> postRunStatus(String run, Map<String, Object?> status) =>
+      _send('POST', _at('$runsPath/$run/status'), body: status);
+
+  /// A batch of the run's events, as JSON (step 14).
+  Future<void> postRunEvents(String run, List<Map<String, Object?>> events) =>
+      _send(
+        'POST',
+        _at('$runsPath/$run/events'),
+        body: {'events': events},
+        timeout: const Duration(seconds: 30),
+      );
+
   static List<Annotation> _notes(Object? list) => [
     for (final note in list is List<Object?> ? list : const <Object?>[])
       if (note is Map<String, Object?>) ?Annotation.fromJson(note),
