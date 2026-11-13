@@ -127,6 +127,25 @@ class TapeStore {
     ];
   }
 
+  /// Deletes every tape saved before [cutoff], with its bodies: the
+  /// bridge's `--ttl`. Returns the ids.
+  Future<List<String>> expire(DateTime cutoff) async {
+    if (!dir.existsSync()) return const <String>[];
+    final gone = <String>[];
+    await for (final entry in dir.list()) {
+      final name = entry.uri.pathSegments.last;
+      if (entry is! File || !name.endsWith('.json')) continue;
+      final id = name.substring(0, name.length - 5);
+      if (!tapeIdPattern.hasMatch(id)) continue;
+      if (!(await entry.lastModified()).isBefore(cutoff)) continue;
+      await entry.delete();
+      final folder = Directory('${dir.path}/$id');
+      if (folder.existsSync()) await folder.delete(recursive: true);
+      gone.add(id);
+    }
+    return gone;
+  }
+
   /// The body [n] of tape [id], or null.
   Future<Uint8List?> body(String id, int n) async {
     if (!tapeIdPattern.hasMatch(id)) return null;

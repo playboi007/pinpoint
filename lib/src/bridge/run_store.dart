@@ -78,6 +78,33 @@ class RunStore {
     }
   }
 
+  /// Deletes every run last written before [cutoff]: the bridge's
+  /// `--ttl`. Returns the ids.
+  Future<List<String>> expire(DateTime cutoff) async {
+    if (!dir.existsSync()) return const <String>[];
+    final newest = <String, DateTime>{};
+    await for (final entry in dir.list()) {
+      if (entry is! File) continue;
+      final id = entry.uri.pathSegments.last.replaceFirst(
+        RegExp(r'\.jsonl?$'),
+        '',
+      );
+      if (!valid(id)) continue;
+      final at = await entry.lastModified();
+      final known = newest[id];
+      if (known == null || at.isAfter(known)) newest[id] = at;
+    }
+    final gone = <String>[];
+    for (final MapEntry(key: id, value: at) in newest.entries) {
+      if (!at.isBefore(cutoff)) continue;
+      for (final file in [_events(id), _status(id)]) {
+        if (file.existsSync()) await file.delete();
+      }
+      gone.add(id);
+    }
+    return gone;
+  }
+
   /// The last status of [id], or null.
   Future<Map<String, Object?>?> status(String id) async {
     if (!valid(id)) return null;

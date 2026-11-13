@@ -52,8 +52,48 @@ class PinPointBridge {
     this._allowedOrigins,
     this._log, {
     required bool timing,
+    this.ttl,
   }) : commands = CommandQueue(log: timing ? _log : null) {
     _subscription = _server.listen(_handle);
+    if (ttl != null) {
+      unawaited(expire());
+      _expireTimer = Timer.periodic(expireEvery, (_) => unawaited(expire()));
+    }
+  }
+
+  /// How long notes, tapes and runs live after their last change
+  /// (`--ttl`); null keeps them.
+  final Duration? ttl;
+
+  /// How often [ttl] is checked after the start.
+  static const Duration expireEvery = Duration(hours: 1);
+
+  Timer? _expireTimer;
+
+  /// Deletes what is older than [ttl] at [now]: notes in every folder with
+  /// their screenshots, tapes with their bodies, and replay runs. Returns
+  /// how many of each. Does nothing without a [ttl].
+  Future<Map<String, int>> expire({DateTime? now}) async {
+    final ttl = this.ttl;
+    if (ttl == null) return const <String, int>{};
+    final cutoff = (now ?? DateTime.now()).subtract(ttl);
+    try {
+      final counts = {
+        'notes': (await store.expire(cutoff)).length,
+        'tapes': (await tapes.expire(cutoff)).length,
+        'runs': (await runs.expire(cutoff)).length,
+      };
+      if (counts.values.any((n) => n > 0)) {
+        _log(
+          'pinpoint: --ttl deleted ${counts['notes']} notes, '
+          '${counts['tapes']} tapes and ${counts['runs']} runs',
+        );
+      }
+      return counts;
+    } on FileSystemException catch (error) {
+      _log('pinpoint: --ttl could not delete: ${error.message}');
+      return const <String, int>{};
+    }
   }
 
   /// Creates `<dir>/drafts/`, `<dir>/open/` and `<dir>/resolved/`, reads
@@ -67,6 +107,7 @@ class PinPointBridge {
     bool lan = false,
     List<String> allowedOrigins = const <String>[],
     bool timing = false,
+    Duration? ttl,
     void Function(String line) log = _noLog,
   }) async {
     final folder = Directory(dir).absolute;
@@ -98,7 +139,14 @@ class PinPointBridge {
         '${server.port}.',
       );
     }
-    return PinPointBridge._(server, store, allowedOrigins, log, timing: timing);
+    return PinPointBridge._(
+      server,
+      store,
+      allowedOrigins,
+      log,
+      timing: timing,
+      ttl: ttl,
+    );
   }
 
   final HttpServer _server;
@@ -138,6 +186,7 @@ class PinPointBridge {
 
   /// Stops listening and drops open connections.
   Future<void> close() async {
+    _expireTimer?.cancel();
     commands.close();
     await _subscription.cancel();
     await _server.close(force: true);
