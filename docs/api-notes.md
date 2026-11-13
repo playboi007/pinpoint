@@ -588,6 +588,26 @@ Session 16 of PLAN-v2 (spikes and cost table) was not run first: the user starte
 | network bodies | 2 | One `clone()` per text or JSON answer up to 256 KB, read in chunks into an FNV-1a hash; a copy kept, bounded by count and bytes |
 | message | 1 | `JSON.stringify`, `jsonDecode`, masking, a hash, per message |
 
+## 33. Facts found in Session 18 (PLAN-v2 Milestone 15, tapes)
+
+- **[run-web]** A `Response` made in script (`new Response(bytes, {status, headers})`) and returned as a resolved promise from the patched `fetch` is what `package:http` 1.6 `BrowserClient` hands the app: status, headers and body as given, in DDC and wasm (`test/tape/web/net_replay_web_test.dart`). Its `url` is empty. A body is not allowed with status 101, 103, 204, 205 or 304.
+- **[run-web]** An XHR can be served without a server: at `send`, call the browser's own `open` again on a blob URL of the body, then `send`. A blob always answers 200, so `status`, `statusText`, `responseURL`, `getAllResponseHeaders` and `getResponseHeader` are set on that one object with `Object.defineProperty`; an own property shadows the prototype's getter. Dio reads only these.
+- **[run-web]** An XHR opened on an unknown scheme (`pinpoint-replay:no-answer`) fires `error`, as with the server off.
+- **[run-web]** A listener the source adds at `send` runs after the app's own `loadend` listener (added before `send`). "Delivered" for a replay's `after` is therefore marked just after the app saw the answer.
+- **[run-vm]** In a widget test, `tester.pump()` with no duration does not fire a zero-duration `Timer`; `pump(Duration.zero)` does. The pointer source fills a down's anchor from such a timer, so a test must pump with a duration before it reads the anchor. In the app the timer runs at once.
+- **[run-vm]** A `Stopwatch` does not follow a test's fake clock. The player's deadlines are `Timer`s, which follow it in tests and keep real time in the app.
+- **[source]** `SourceIndex.resolve` falls back to the nearest line of the same widget type in the file (made for pins after an edit). When the tapped widget is gone, that is another widget: a replay accepts the resolved element only on the same line, or on the same column within 50 lines (`AgentCommands.sameSpot`).
+- **[unverified]** Whether `location.reload()` after a hot reload loads the new code. The full replay after a fix depends on it (PLAN-v2 "Verify by running").
+
+**Source levels and cost (rule 18).** **[unverified]** Not measured in Chrome.
+
+| Part | Level | Work per event |
+| --- | --- | --- |
+| tape recorder, inputs and marks | 1 | One kind check per recorded event (a recorder listener); inputs, marks and routes kept in their own bounded lists |
+| tape recorder, exchanges | 1 | Per request: one request key (`Uri` split, a JSON decode and re-encode for a JSON body, an FNV-1a hash) |
+| tape recorder, bodies | 2 | The bodies the network source read; held once, by the tape recorder (20 MB), not in `NetBodies` as well |
+| replay | none | Only while a replay runs: one tape lookup per request, one anchor resolve per pointer down |
+
 ---
 
 ## Other plan errors and gaps found while scaffolding

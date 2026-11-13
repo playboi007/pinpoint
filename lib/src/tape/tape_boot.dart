@@ -132,6 +132,11 @@ abstract final class TapeBoot {
         error = 'the bridge has no tape ${flag.tape}';
         return null;
       }
+      // Watch out for: the app checks the clock, and v2 does not fake time.
+      // A token that was fresh when recorded is expired now, and the app
+      // may log out; the first difference shows it. Putting back the
+      // storage of the recording (TraceConfig.storage) is the fix, or an
+      // app TraceSource for the session.
       final storage = loaded.start.storage;
       if (restoreStorage && storage != null) page.writeStorage(storage);
       return tape = loaded;

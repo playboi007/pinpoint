@@ -86,6 +86,17 @@ void main() => PinPoint.run(() => runApp(const MyApp()));
 
 Limits: a post-frame callback runs with the cause of the frame that calls it. A frame is linked to every cause that ran since the frame before it, and `why` picks the one that set state, answered a request or took input. A timer or a stream keeps the cause of the moment it was made; `why` shows the age of an old cause.
 
+## Tapes (v2, Milestone 15)
+
+A tape is the inputs and network answers of a run, saved so the run can happen again. The recorder keeps them from app start, apart from the ring buffer, with up to 20 MB of answer bodies.
+
+- **Attach what happened.** The comment form has this switch, with the size next to it. A note then carries a tape: a **full** tape from app start when nothing was dropped, else a **segment** from the last mark. Its pin shows a Replay button; the agent's header says "has tape". The tape is on the bridge in `.pinpoint/tapes/`, which `setup` git-ignores, and no tool answer shows a body.
+- **Replay.** `replay({tape})` plays the inputs into the app while `fetch` and XHR are answered from the tape: no request reaches a server with `unmatched: "fail"` (the default). A full tape reloads the page first, so in-memory state starts from a known value; `PinPoint.run` then loads the tape before `runApp`. Inputs go by logical order: each waits for the answers that came before it and for its widget, found by anchor, so a button that moved is still hit. Real taps are blocked and a banner shows the step; Esc stops and puts everything back.
+- **What it answers.** `state` (done, held, stopped, diverged), `first_difference` (route order, request keys, anchors), and the requests the tape had no answer for. `until: "mark"` holds at the user's mark: pick, `get_state` and `screenshot` work there; `resume_replay` goes on. Each run streams to the bridge, so `get_trace({run})` reads it after the page reloaded.
+- **Config.** `TraceConfig(storage: true)` copies `localStorage` and `sessionStorage` at app start and puts them back on replay (off by default: they hold session tokens). `TraceConfig(matchIgnore: ['ts', 'requestId'])` leaves fields that change on every run out of a request's key. `bodies: false` gives segments only, whose requests reach the server.
+
+Limits: replay does not control the clock or random numbers; a token that expired since the recording shows as the first difference. Key events alone are not replayed (the text they made is). WebSockets reach the server during a replay.
+
 ## What it will do
 
 - Inspect mode: hover to outline a widget, click to select it.

@@ -16,6 +16,11 @@ import 'network_source.dart';
 /// Wasm builds use the same `dart:js_interop` calls. Whether the wasm
 /// runtime's `package:http` calls the patched `fetch` is a manual check
 /// (watch out for).
+///
+/// Watch out for: WebSockets are not hooked, so they are neither recorded
+/// nor answered from a tape: during a replay they reach the server. A
+/// server-sent event stream is recorded as `unsupported` and passes
+/// through (`NetRecorder._skipReason`, `NetReplay.answer`).
 NetworkHooks createPlatformNetworkHooks() => _WebNetworkHooks();
 
 bool _sameJs(JSAny? a, JSAny? b) =>

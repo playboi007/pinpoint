@@ -152,7 +152,11 @@ class McpServer {
                     'widget started, caused_by. For a value no '
                     'diagnostics show, add a PinPoint.probe line, '
                     'hot_reload, read it with get_trace, and remove it '
-                    'before you set the note fixed (list_probes).'}',
+                    'before you set the note fixed (list_probes). A note '
+                    'that "has tape" can happen again: replay({tape}) '
+                    'plays what the user did and answers first_difference; '
+                    'until: "mark" holds at the user\'s mark for get_state '
+                    'and screenshot. Read the run with get_trace({run}).'}',
     };
   }
 
