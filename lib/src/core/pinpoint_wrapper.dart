@@ -11,10 +11,12 @@ import '../env/environment_controller.dart';
 import '../env/environment_host.dart';
 import '../model/tape.dart';
 import '../overlay/inspector_overlay.dart';
+import '../overlay/replay_blocker.dart';
 import '../search/render_search.dart';
 import '../search/source_resolver.dart';
 import '../sink/bridge_client.dart';
 import '../tape/browser_page.dart';
+import '../tape/tape_player.dart';
 import '../trace/redact.dart';
 import '../trace/sources/error_source.dart';
 import '../trace/sources/finding_source.dart';
@@ -310,6 +312,13 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
         _controller.agent.enabled) {
       _controller.agent.abort();
     }
+    // Esc ends a replay, also one that holds with no command running, and
+    // the player puts input, environment and network back.
+    if (event is KeyDownEvent &&
+        event.logicalKey == LogicalKeyboardKey.escape &&
+        TapePlayer.current != null) {
+      TapePlayer.current!.stop(reason: 'Esc');
+    }
     // Alt alone is not claimed: it only switches the rulers to measuring
     // the gap between the selection and the hovered widget.
     _controller.setMeasuring(HardwareKeyboard.instance.isAltPressed);
@@ -472,6 +481,9 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
             ),
           ),
         ),
+        // Over the app, under Pinpoint's UI: takes real pointer input while
+        // a replay runs (PLAN-v2 Milestone 15, step 17). Always present.
+        const ReplayBlocker(),
         // Beside the app's TickerMode, not inside it: the comment field's
         // caret and the panel's animations keep running while the app is
         // frozen.

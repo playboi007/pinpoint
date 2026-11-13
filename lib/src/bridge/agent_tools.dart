@@ -31,6 +31,9 @@ const List<String> agentToolNames = [
   'unwatch',
   'mark',
   'save_tape',
+  'replay',
+  'resume_replay',
+  'stop_replay',
   'why',
   'caused_by',
 ];
@@ -47,6 +50,8 @@ Duration agentToolTimeout(String tool, Map<String, Object?> args) {
     case 'save_tape':
       return const Duration(seconds: 60);
     case 'stress_matrix':
+    case 'replay':
+    case 'resume_replay':
       return const Duration(seconds: 240);
     case 'run_steps':
       // The sum of its steps' own timeouts.
@@ -574,5 +579,57 @@ final List<Map<String, Object?>> agentTools = [
       'since': {'description': '"start", "mark", "mark:2", 30 or "30s".'},
       'name': {'type': 'string', 'description': 'A short name.'},
     },
+  ),
+  _tool(
+    'replay',
+    'Replay a tape',
+    'Plays a tape\'s inputs into the app while requests are answered from '
+        'the tape: the app does what the user did. Inputs go by logical '
+        'order: each waits for the answers that came before it and for its '
+        'widget (found by anchor, so a moved button is still hit). Real '
+        'input is blocked; Esc stops. Answers when it ends or holds: state '
+        '(done, held, stopped, diverged), step of total, first_difference '
+        '{step, what, expected, got} (route order, request keys, anchors), '
+        'unmatched requests, and partial for a partial tape. Read what '
+        'happened with get_trace. Needs agent control on.',
+    {
+      'tape': {'type': 'string', 'description': 'A tape id (tp_…).'},
+      'until': {
+        'type': 'string',
+        'description':
+            '"mark", "mark:N" or "step:N": hold there. The app stays in '
+            'that moment for get_state, screenshot, inspect; then '
+            'resume_replay or stop_replay.',
+      },
+      'speed': {
+        'type': 'number',
+        'description': 'Faster than recorded (2, 4); default 1, at most 20.',
+      },
+      'unmatched': {
+        'type': 'string',
+        'enum': ['fail', 'passthrough', 'last'],
+        'description':
+            'A request the tape has no answer for: fail (default, no '
+            'request reaches a server), passthrough (to the real server; '
+            'use it after a fix that changes requests), last.',
+      },
+      'latency': {
+        'description': '"recorded" (default), "instant", or ms per answer.',
+      },
+    },
+    ['tape'],
+  ),
+  _tool(
+    'resume_replay',
+    'Go on after a hold',
+    'Goes on with a replay that holds at until. Answers as replay does.',
+    const <String, Object?>{},
+  ),
+  _tool(
+    'stop_replay',
+    'Stop the replay',
+    'Ends the replay that holds, and gives input and the network back. '
+        'Answers its last state.',
+    const <String, Object?>{},
   ),
 ];

@@ -64,6 +64,8 @@ class AgentControl extends ChangeNotifier {
     'stress_matrix',
     // Its steps can drive.
     'run_steps',
+    'replay',
+    'resume_replay',
   };
 
   /// Tools that only read. They reach the app only through the command
@@ -83,6 +85,8 @@ class AgentControl extends ChangeNotifier {
     'unwatch',
     'mark',
     'save_tape',
+    // Only ends a replay: always allowed.
+    'stop_replay',
     'why',
     'caused_by',
   };
