@@ -18,7 +18,8 @@ import '../sink/markdown_formatter.dart';
 /// by the bridge.
 /// 7 (PLAN-v2 Milestone 13): `trace`, what happened in the seconds before
 /// the pick.
-const int annotationSchema = 7;
+/// 8 (PLAN-v2 Milestone 15): `tape`, the tape attached to the note.
+const int annotationSchema = 8;
 
 /// The start of the first line of a note's trace when rebuilds were not
 /// recorded in all or part of its window (PLAN-v2 Milestone 13, step 12).
@@ -138,6 +139,7 @@ class Annotation {
     this.tweaks = const <Map<String, Object?>>[],
     this.verification,
     this.trace,
+    this.tape,
     this.screenshot,
     this.errors = const <String>[],
     this.truncated = const <String>[],
@@ -203,6 +205,12 @@ class Annotation {
   /// recorder was off.
   final Map<String, Object?>? trace;
 
+  /// The tape attached with "Attach what happened" (PLAN-v2 Milestone 15,
+  /// step 18): `id`, `kind` (full or segment), `inputs`, `requests`,
+  /// `marks`, and `partial` when a limit dropped data. The tape itself is
+  /// on the bridge, in `.pinpoint/tapes/`. Null when none is attached.
+  final Map<String, Object?>? tape;
+
   /// Whether the last verification passed; null when none ran.
   bool? get checksPassed => switch (verification?['passed']) {
     final bool passed => passed,
@@ -242,6 +250,7 @@ class Annotation {
     List<Map<String, Object?>>? tweaks,
     Map<String, Object?>? Function()? verification,
     Map<String, Object?>? Function()? trace,
+    Map<String, Object?>? Function()? tape,
     List<String>? errors,
     List<String>? truncated,
   }) => Annotation(
@@ -266,6 +275,7 @@ class Annotation {
     tweaks: tweaks ?? this.tweaks,
     verification: verification == null ? this.verification : verification(),
     trace: trace == null ? this.trace : trace(),
+    tape: tape == null ? this.tape : tape(),
     screenshot: screenshot == null ? this.screenshot : screenshot(),
     errors: errors ?? this.errors,
     truncated: truncated ?? this.truncated,
@@ -476,6 +486,10 @@ class Annotation {
         final Map<String, Object?> t when t['lines'] is List<Object?> => t,
         _ => null,
       },
+      tape: switch (json['tape']) {
+        final Map<String, Object?> t when t['id'] is String => t,
+        _ => null,
+      },
       target: TargetInfo._fromJson(target),
       anchor: json['anchor'] is Map<String, Object?>
           ? NoteAnchor.fromJson(json['anchor']! as Map<String, Object?>)
@@ -530,6 +544,7 @@ class Annotation {
     if (tweaks.isNotEmpty) 'tweaks': tweaks,
     'verification': ?verification,
     'trace': ?trace,
+    'tape': ?tape,
     'target': target.toJson(),
     'anchor': anchor?.toJson(),
     'messages': [for (final m in messages) m.toJson()],

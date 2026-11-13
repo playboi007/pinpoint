@@ -162,7 +162,10 @@ String markdownFromJson(Map<String, Object?> json) {
     replies.forEach(out.writeln);
   }
 
-  final happened = whatHappenedLines(json);
+  final happened = [
+    ?tapeLine(json['tape']),
+    ...whatHappenedLines(json),
+  ];
   if (happened.isNotEmpty) {
     out.writeln();
     happened.forEach(out.writeln);
@@ -193,6 +196,26 @@ List<String> whatHappenedLines(Map<String, Object?> json) {
         '${partial ? ' (partial: ${_line(_string(trace['reason']) ?? 'older events dropped')})' : ''}:',
     for (final line in lines) '  ${_line(line)}',
   ];
+}
+
+/// The tape line of a note (its `tape` JSON), for example `Tape:
+/// tp_… (full, 12 inputs, 3 requests, 1 mark). Replay it with replay.`,
+/// or null without a tape (PLAN-v2 Milestone 15, step 18).
+String? tapeLine(Object? tape) {
+  final t = _map(tape);
+  final id = _string(t['id']);
+  if (id == null) return null;
+  String count(String key, String word) {
+    final n = _number(t[key]) ?? 0;
+    return '$n $word${n == 1 ? '' : 's'}';
+  }
+
+  final partial = t['partial'];
+  return 'Tape: $id (${_string(t['kind']) ?? 'segment'}, '
+      '${count('inputs', 'input')}, ${count('requests', 'request')}, '
+      '${count('marks', 'mark')}'
+      '${partial == null || partial == false ? '' : ', partial: ${_line('$partial')}'}'
+      '). Replay it with replay({tape: "$id"}).';
 }
 
 /// The what-if overrides of a note (its `environment` JSON) on one line,

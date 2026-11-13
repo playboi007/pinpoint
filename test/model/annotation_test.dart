@@ -123,6 +123,26 @@ void main() {
     expect(actual, expected);
   });
 
+  test('schema 8: tape only when attached, after trace; round trip', () {
+    expect(example().toJson().containsKey('tape'), isFalse);
+    const tape = {
+      'id': 'tp_20261113_100000_ab12',
+      'kind': 'full',
+      'inputs': 12,
+      'requests': 3,
+      'marks': 1,
+    };
+    final json = example()
+        .copyWith(trace: () => const {'lines': <Object?>[]}, tape: () => tape)
+        .toJson();
+    final keys = json.keys.toList();
+    expect(keys.indexOf('tape'), keys.indexOf('trace') + 1);
+    final back = Annotation.fromJson(
+      jsonDecode(jsonEncode(json)) as Map<String, Object?>,
+    )!;
+    expect(back.tape, tape);
+  });
+
   test('schema 6: verification only once verify_note ran; round trip', () {
     expect(example().toJson().containsKey('verification'), isFalse);
     expect(example().checksPassed, isNull);
@@ -147,9 +167,9 @@ void main() {
     );
   });
 
-  test('schema is version 7 and keys come in a fixed order', () {
+  test('schema is version 8 and keys come in a fixed order', () {
     final json = example().toJson();
-    expect(json['schema'], 7);
+    expect(json['schema'], 8);
     expect(json.keys.take(6), [
       'schema',
       'id',

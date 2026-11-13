@@ -14,7 +14,12 @@ class NoteActions {
     required this.accept,
     required this.reopen,
     required this.edit,
+    this.replay,
   });
+
+  /// Plays the note's tape (PLAN-v2 Milestone 15, step 16). Null: no
+  /// Replay button.
+  final ValueChanged<String>? replay;
 
   /// Submits a draft to every sink.
   final ValueChanged<String> send;
@@ -55,6 +60,7 @@ class NoteView extends StatefulWidget {
   static const Key deleteKey = ValueKey<String>('pinpoint.note.delete');
   static const Key acceptKey = ValueKey<String>('pinpoint.note.accept');
   static const Key reopenKey = ValueKey<String>('pinpoint.note.reopen');
+  static const Key replayKey = ValueKey<String>('pinpoint.note.replay');
 
   /// "What is still wrong?": sent with Reopen.
   static const Key reasonKey = ValueKey<String>('pinpoint.note.reason');
@@ -272,6 +278,12 @@ class _NoteViewState extends State<NoteView> {
                 label: 'Delete',
                 onPressed: () => widget.actions.delete(id),
               ),
+              if (note.tape != null && widget.actions.replay != null)
+                DraftButton.outline(
+                  key: NoteView.replayKey,
+                  label: 'Replay',
+                  onPressed: () => widget.actions.replay!(id),
+                ),
               if (draft && widget.drafts > 1)
                 DraftButton.outline(
                   key: NoteView.sendAllKey,

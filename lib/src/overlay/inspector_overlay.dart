@@ -8,6 +8,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
+import '../agent/agent_control.dart' show AgentCancel;
 import '../agent/command_channel.dart';
 import '../agent/commands.dart';
 import '../agent/reload_counter.dart';
@@ -33,6 +34,7 @@ import '../sink/http_sink.dart';
 import '../sink/markdown_formatter.dart';
 import '../sink/pinpoint_sink.dart';
 import '../tape/tape_boot.dart';
+import '../tape/tape_recorder.dart' show TapeSince;
 import '../theme/pinpoint_theme.dart';
 import '../theme/pinpoint_tokens.dart';
 import '../trace/note_trace.dart';
@@ -242,6 +244,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     accept: (id) => _setStatus(id, NoteStatus.verified),
     reopen: _reopen,
     edit: _editNote,
+    replay: (id) => unawaited(_replayNote(id)),
   );
 
   @override
@@ -658,6 +661,10 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
       note = await _withScreenshot(note, pair: note.tweaks.isNotEmpty);
       if (!mounted) return;
     }
+    if (draft.attachTape) {
+      note = await _withTape(note);
+      if (!mounted) return;
+    }
     final results = await sendToSinks(note, sinks);
     if (!mounted) return;
     for (final result in results) {
@@ -700,6 +707,10 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
       note = await _withScreenshot(note, pair: note.tweaks.isNotEmpty);
       if (!mounted) return;
     }
+    if (draft.attachTape) {
+      note = await _withTape(note);
+      if (!mounted) return;
+    }
     _pin(note, selection);
     draft.text.clear();
     draft.clearChecks();
@@ -711,6 +722,66 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     // On the bridge too, so it survives a restart. Drafts go to a folder
     // no agent reads.
     unawaited(_sync?.save(note));
+  }
+
+  /// [note] with a tape of what happened (PLAN-v2 Milestone 15, step 16),
+  /// stored on the bridge: a full tape when one is possible, else a
+  /// segment from the last mark. Without a bridge, or when it fails, the
+  /// note goes without one and a toast says why.
+  Future<Annotation> _withTape(Annotation note) async {
+    final session = TraceSession.current;
+    if (session == null) return note;
+    final client = BridgeClient.find(
+      url: widget.config.bridgeUrl,
+      sinks: widget.config.sinks,
+    );
+    if (client == null) {
+      _toasts.show('No tape: "Attach what happened" needs the bridge');
+      return note;
+    }
+    try {
+      final hasMark = session.recorder.lastOf(TraceKind.mark) != null;
+      final tape = session.saveTape(
+        since: session.tapes.canSaveFull || !hasMark
+            ? TapeSince.start
+            : TapeSince.parse('mark'),
+      );
+      await client.saveTape(tape);
+      return note.copyWith(
+        tape: () => {
+          'id': tape.id,
+          'kind': tape.kind.name,
+          'inputs': tape.inputs.length,
+          'requests': tape.net.length,
+          'marks': tape.marks.length,
+          if (tape.partial) 'partial': tape.partialReason ?? true,
+        },
+      );
+    } catch (error) {
+      _toasts.show('No tape: ${_short(error)}', error: true);
+      return note.withError('tape');
+    }
+  }
+
+  /// Plays the tape of the note [id] (its pin's Replay button). The
+  /// user's own action, so it needs no agent control; Pinpoint goes idle
+  /// first. A full tape restarts the page.
+  Future<void> _replayNote(String id) async {
+    final tape = widget.controller.notes.byId(id)?.tape?['id'];
+    if (tape is! String) return;
+    widget.controller.stop();
+    try {
+      final result = await _agentCommands.replay({'tape': tape}, AgentCancel());
+      if (!mounted) return;
+      final difference = result['first_difference'];
+      _toasts.show(
+        'Replay ${result['state']}'
+        '${difference is Map ? ': first difference at step '
+                  '${difference['step']} (${difference['what']})' : ''}',
+      );
+    } on AgentError catch (error) {
+      if (mounted) _toasts.show('Replay failed: ${error.message}', error: true);
+    }
   }
 
   /// Shows [note] as a pin on [selection]'s widget.

@@ -56,6 +56,20 @@ class CommentDraft extends ChangeNotifier {
     notifyListeners();
   }
 
+  // Nullable and read with `!= false`: a field added to a long-lived object
+  // is undefined after a web hot reload (api-notes item 29).
+  bool? _attachTape;
+
+  /// "Attach what happened" (PLAN-v2 Milestone 15, step 16): a tape of the
+  /// run goes to the bridge with the note. On by default; the tape stays
+  /// on this machine, in `.pinpoint/tapes/`.
+  bool get attachTape => _attachTape != false;
+  set attachTape(bool value) {
+    if (value == attachTape) return;
+    _attachTape = value;
+    notifyListeners();
+  }
+
   List<Map<String, Object?>> _checks = const <Map<String, Object?>>[];
 
   /// What Milestone 12's `verify_note` will measure on this note, chosen

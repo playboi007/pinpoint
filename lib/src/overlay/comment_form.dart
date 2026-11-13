@@ -7,6 +7,7 @@ import '../core/pinpoint_controller.dart';
 import '../model/annotation.dart';
 import '../theme/controls.dart';
 import '../theme/pinpoint_tokens.dart';
+import '../trace/trace_session.dart';
 
 /// The Comment tab of the info panel: intent, comment, and whether to attach
 /// a screenshot. Its buttons are in [CommentFooter], which the info panel
@@ -25,6 +26,26 @@ class CommentForm extends StatelessWidget {
   static const Key screenshotKey = ValueKey<String>(
     'pinpoint.comment.screenshot',
   );
+
+  /// "Attach what happened".
+  static const Key tapeKey = ValueKey<String>('pinpoint.comment.tape');
+
+  /// The label of "Attach what happened", with what it would attach, or
+  /// null when the flight recorder is off.
+  static String? tapeLabel() {
+    final session = TraceSession.current;
+    if (session == null) return null;
+    final tapes = session.tapes;
+    if (!tapes.bodiesRead) return 'Attach what happened (inputs only)';
+    final bytes = tapes.estimatedBytes;
+    final size = bytes >= 1024 * 1024
+        ? '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB'
+        : '${(bytes / 1024).ceil()} KB';
+    final ago = tapes.startsAgo;
+    return 'Attach what happened ($size'
+        '${tapes.canSaveFull || ago == null ? '' : ', tape starts '
+                  '${ago < 90 ? '$ago s' : '${(ago / 60).round()} min'} ago'})';
+  }
   static const Key sendKey = ValueKey<String>('pinpoint.comment.send');
   static const Key draftKey = ValueKey<String>('pinpoint.comment.draft');
   static const Key copyKey = ValueKey<String>('pinpoint.comment.copy');
@@ -134,6 +155,18 @@ class CommentForm extends StatelessWidget {
                 label: 'Include screenshot',
               ),
             ),
+            if (tapeLabel() case final label?)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: DraftCheckbox(
+                  key: tapeKey,
+                  value: draft.attachTape,
+                  onChanged: sending
+                      ? null
+                      : (value) => draft.attachTape = value,
+                  label: label,
+                ),
+              ),
           ],
         );
       },

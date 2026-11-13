@@ -71,6 +71,9 @@ String _header(Map<String, Object?> note) {
     ?_string(note['status']),
     if (reopened is int && reopened > 0)
       reopened == 1 ? 'reopened' : 'reopened $reopened times',
+    // PLAN-v2 Milestone 15, step 18: the agent can replay what the user
+    // did.
+    if (note['tape'] is Map<String, Object?>) 'has tape',
   ];
   return parts.isEmpty ? id : '$id (${parts.join(', ')})';
 }
@@ -173,6 +176,7 @@ String _standard(Map<String, Object?> note) {
   }
   final replies = _replies(note);
   if (replies.isNotEmpty) lines.addAll(['Replies:', ...replies]);
+  if (tapeLine(note['tape']) case final line?) lines.add(line);
   lines.addAll(whatHappenedLines(note));
   return lines.join('\n');
 }
