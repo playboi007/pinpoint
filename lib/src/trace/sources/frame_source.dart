@@ -1,8 +1,8 @@
-import '../../model/trace_event.dart';
 import '../trace_recorder.dart';
 import '../trace_source.dart';
 
-/// One `frame` event per frame the app draws (level 1).
+/// One `frame` event per frame the app draws, or per run of frames with
+/// nothing else between them (level 1).
 ///
 /// The tick comes from [FrameClock], which reads the persistent frame
 /// callback; this source only writes. The event carries the recorder's own
@@ -37,10 +37,8 @@ class FrameSource extends TraceSource with FrameWork {
   void afterFrame() {
     final recorder = _recorder;
     if (recorder == null) return;
-    final count = builds();
-    recorder.add(
-      TraceKind.frame,
-      data: {'us': recorder.takeSelfMicros(), 'builds': ?count},
-    );
+    // Folded into the last frame event when nothing happened since
+    // (TraceRecorder.addFrame).
+    recorder.addFrame(us: recorder.takeSelfMicros(), builds: builds());
   }
 }

@@ -165,6 +165,66 @@ void main() {
       expect(recorder.rebuildGaps(1, 11), [(4, 6)]);
     });
 
+    test('frames with nothing between fold into one event: same seq, '
+        'a count, the first frame and time, total and largest own time', () {
+      var now = 0;
+      var frame = 0;
+      final recorder = TraceRecorder(clock: () => now, frameOf: () => frame);
+      recorder.add('a');
+      for (var i = 1; i <= 3; i++) {
+        now += 16;
+        frame = i;
+        recorder.addFrame(us: 10 * i, builds: 2);
+      }
+      expect(recorder.length, 2);
+      final folded = recorder.newest!;
+      expect(folded.seq, 2);
+      expect(recorder.nextSeq, 3);
+      expect(folded.kind, TraceKind.frame);
+      expect(folded.frame, 3);
+      expect(folded.t, 48);
+      expect(folded.data, {
+        'us': 60,
+        'builds': 6,
+        'n': 3,
+        'from': 1,
+        'since': 16,
+        'max': 30,
+      });
+
+      // An event between: the next frame starts a new event.
+      recorder.add('b');
+      now += 16;
+      frame = 4;
+      final single = recorder.addFrame(us: 5, builds: 1);
+      expect(single.seq, 4);
+      expect(single.data, {'us': 5, 'builds': 1});
+      expect(
+        recorder.bytes,
+        recorder.events.fold<int>(0, (n, e) => n + e.approxBytes),
+      );
+    });
+
+    test('a folded frame event covers at most maxFoldMs, and frames with '
+        'and without a rebuild count do not fold together', () {
+      var now = 0;
+      final recorder = TraceRecorder(clock: () => now);
+      for (var i = 0; i < 200; i++) {
+        now += 16;
+        recorder.addFrame(us: 1);
+      }
+      // 3.2 s of frames: one event per second, not 200.
+      expect(recorder.length, inInclusiveRange(3, 4));
+      for (final event in recorder.events) {
+        final since = event.data['since'] as int? ?? event.t;
+        expect(event.t - since, lessThan(TraceRecorder.maxFoldMs));
+      }
+      final before = recorder.length;
+      now += 16;
+      recorder.addFrame(us: 1, builds: 0);
+      expect(recorder.length, before + 1);
+    });
+
     test('the recorder charges and hands back its own time', () {
       final recorder = TraceRecorder()
         ..charge(120)

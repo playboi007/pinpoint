@@ -14,6 +14,7 @@ void main() {
   setUp(() => controller = PinPointController());
   tearDown(() {
     TimelinePanel.open.value = false;
+    TimelinePanel.showCount.value = false;
     controller.dispose();
   });
 
@@ -90,6 +91,62 @@ void main() {
     expect(debugOnRebuildDirtyWidget, isNull);
     controller.stop();
     await tester.pump(const Duration(seconds: 2));
+  });
+
+  testWidgets('the event count is hidden behind an eye button', (tester) async {
+    await pumpApp(tester);
+    await tester.tap(find.byKey(TimelinePanel.buttonKey));
+    await tester.pump();
+    expect(find.byKey(TimelinePanel.countKey), findsNothing);
+    expect(find.byTooltip('Show event count'), findsOneWidget);
+
+    await tester.tap(find.byKey(TimelinePanel.countToggleKey));
+    await tester.pump();
+    final count = find.byKey(TimelinePanel.countKey);
+    expect(count, findsOneWidget);
+    expect(
+      find.descendant(of: count, matching: find.text('${recorder.length}')),
+      findsOneWidget,
+    );
+    expect(find.byTooltip('Hide event count'), findsOneWidget);
+
+    // It stays shown when the Timeline opens again.
+    await tester.tap(find.byKey(TimelinePanel.closeKey));
+    await tester.pump();
+    await tester.tap(find.byKey(TimelinePanel.buttonKey));
+    await tester.pump();
+    expect(find.byKey(TimelinePanel.countKey), findsOneWidget);
+
+    await tester.tap(find.byKey(TimelinePanel.countToggleKey));
+    await tester.pump();
+    expect(find.byKey(TimelinePanel.countKey), findsNothing);
+    controller.stop();
+    await tester.pump(const Duration(seconds: 2));
+  });
+
+  testWidgets('an animating screen folds its frames: seq stays put while '
+      'nothing else happens', (tester) async {
+    await pumpApp(tester);
+    await tester.pump(const Duration(milliseconds: 16));
+    final before = recorder.nextSeq;
+    // A spinner: one frame every 16 ms for half a second.
+    await tester.pumpWidget(
+      traceApp(
+        controller: controller,
+        home: const Center(child: CircularProgressIndicator()),
+      ),
+    );
+    final afterSwap = recorder.nextSeq;
+    for (var i = 0; i < 30; i++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(afterSwap, greaterThanOrEqualTo(before));
+    // 30 frames in under a second: at most one new event.
+    expect(recorder.nextSeq - afterSwap, lessThanOrEqualTo(1));
+    final frame = recorder.newest!;
+    expect(frame.kind, TraceKind.frame);
+    expect(frame.data['n'], greaterThanOrEqualTo(29));
+    await tester.pumpWidget(const SizedBox.shrink());
   });
 
   testWidgets('a mark from the Timeline can be named', (tester) async {

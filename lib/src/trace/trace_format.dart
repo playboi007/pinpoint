@@ -97,7 +97,8 @@ String traceSummary(TraceEvent event) {
       final self = d['us'] is int && (d['us']! as int) > 0
           ? ' rec=${((d['us']! as int) / 1000).toStringAsFixed(2)}ms'
           : '';
-      return 'drawn$builds$self';
+      final n = d['n'] is int ? ' ×${d['n']} from f${d['from']}' : '';
+      return 'drawn$n$builds$self';
     case TraceKind.build:
       final n = d['n'];
       return '${widget ?? '?'}${n is int && n > 1 ? ' n=$n' : ''}$where';
@@ -426,7 +427,10 @@ Map<String, Object?> traceAnswer(TraceRecorder recorder, TraceQuery query) {
     if (toSeq != null && event.seq > toSeq) continue;
     if (fromT != null && event.t < fromT) continue;
     if (toT != null && event.t > toT) continue;
-    if (event.kind == TraceKind.frame) frames++;
+    if (event.kind == TraceKind.frame) {
+      // A folded frame event counts every frame it covers.
+      frames += event.data['n'] is int ? event.data['n']! as int : 1;
+    }
     if (query.matches(event)) inWindow.add(event);
   }
 

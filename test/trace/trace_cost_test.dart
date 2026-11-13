@@ -70,11 +70,15 @@ void main() {
         expect(TraceSession.current == null, !trace);
         (trace ? on : off).add(await scrollFrames(tester, 120));
         if (trace) {
-          selfTimes.addAll([
-            for (final e in recorder.events)
-              if (e.kind == TraceKind.frame && e.data['us'] is int)
-                e.data['us']! as int,
-          ]);
+          // A folded frame event holds the total of `n` frames: count
+          // each frame at the event's mean, and its largest once.
+          for (final e in recorder.events) {
+            if (e.kind != TraceKind.frame || e.data['us'] is! int) continue;
+            final us = e.data['us']! as int;
+            final n = e.data['n'] as int? ?? 1;
+            selfTimes.addAll(List<int>.filled(n - 1, us ~/ n));
+            selfTimes.add(e.data['max'] as int? ?? us);
+          }
         }
       }
     }

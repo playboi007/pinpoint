@@ -438,6 +438,8 @@ abstract final class PinPointIcons {
   static const IconData tune = Icons.tune;
   static const IconData warning = Icons.warning;
   static const IconData timeline = Icons.timeline;
+  static const IconData visibility = Icons.visibility;
+  static const IconData visibilityOff = Icons.visibility_off;
   static const IconData smartToy = Icons.smart_toy;
   static const IconData palette = Icons.palette;
 

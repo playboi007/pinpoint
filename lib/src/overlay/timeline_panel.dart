@@ -31,11 +31,20 @@ class TimelinePanel extends StatefulWidget {
 
   static const Key buttonKey = ValueKey<String>('pinpoint.timeline.button');
   static const Key panelKey = ValueKey<String>('pinpoint.timeline.panel');
+
   /// The "Clear recording" button.
   static const Key clearKey = ValueKey<String>('pinpoint.timeline.clear');
 
   static const Key markKey = ValueKey<String>('pinpoint.timeline.mark');
   static const Key closeKey = ValueKey<String>('pinpoint.timeline.close');
+
+  /// The eye button that shows or hides [countKey].
+  static const Key countToggleKey = ValueKey<String>(
+    'pinpoint.timeline.countToggle',
+  );
+
+  /// How many events the record holds.
+  static const Key countKey = ValueKey<String>('pinpoint.timeline.count');
 
   static Key chipKey(String kind) =>
       ValueKey<String>('pinpoint.timeline.chip.$kind');
@@ -49,6 +58,11 @@ class TimelinePanel extends StatefulWidget {
   /// `State`: a new instance field is undefined after a web hot reload
   /// (api-notes item 29, watch out for).
   static final ValueNotifier<bool> open = ValueNotifier<bool>(false);
+
+  /// Whether the header shows how many events the record holds. Hidden by
+  /// default: the number climbs to the limit (20,000) and says little.
+  /// A static for the same reason as [open].
+  static final ValueNotifier<bool> showCount = ValueNotifier<bool>(false);
 
   /// The kinds a chip filters, by prefix.
   static const List<String> filterKinds = [
@@ -188,8 +202,25 @@ class _TimelinePanelState extends State<TimelinePanel> {
       child: Row(
         children: [
           Text('Timeline', style: tokens.title),
-          const SizedBox(width: 8),
-          CountBadge(recorder.length),
+          const SizedBox(width: 4),
+          DraftIconButton(
+            key: TimelinePanel.countToggleKey,
+            icon: TimelinePanel.showCount.value
+                ? PinPointIcons.visibilityOff
+                : PinPointIcons.visibility,
+            iconSize: 16,
+            tooltip: TimelinePanel.showCount.value
+                ? 'Hide event count'
+                : 'Show event count',
+            onPressed: () => setState(
+              () => TimelinePanel.showCount.value =
+                  !TimelinePanel.showCount.value,
+            ),
+          ),
+          if (TimelinePanel.showCount.value) ...[
+            const SizedBox(width: 4),
+            CountBadge(key: TimelinePanel.countKey, recorder.length),
+          ],
           if (recorder.partial)
             Padding(
               padding: const EdgeInsets.only(left: 8),
@@ -248,8 +279,11 @@ class _TimelinePanelState extends State<TimelinePanel> {
     List<TraceEvent> events,
     TraceEvent? frameEvent,
   ) {
-    final us = frameEvent?.data['us'];
-    final builds = frameEvent?.data['builds'];
+    // A folded frame event (TraceRecorder.addFrame) holds totals for many
+    // frames, not this one's: leave them out.
+    final single = frameEvent?.data['n'] == null;
+    final us = single ? frameEvent?.data['us'] : null;
+    final builds = single ? frameEvent?.data['builds'] : null;
     final parts = [
       'f$frame',
       formatTraceTime(events.first.t),
@@ -279,13 +313,15 @@ class _TimelinePanelState extends State<TimelinePanel> {
     final first = events.last.frame;
     final last = events.first.frame;
     final frameEvent = cause?.kind == CauseKind.frame ? frames[first] : null;
+    // A folded frame event holds totals for many frames: left out.
+    final folded = frameEvent?.data['n'] != null;
     final us = frameEvent?.data['us'];
     final parts = [
       'c$id',
       cause?.kind ?? '?',
       first == last ? 'f$first' : 'f$first-f$last',
       formatTraceTime(events.last.t),
-      if (us is int) 'rec ${(us / 1000).toStringAsFixed(2)} ms',
+      if (us is int && !folded) 'rec ${(us / 1000).toStringAsFixed(2)} ms',
     ];
     return Container(
       key: TimelinePanel.causeKey(id),

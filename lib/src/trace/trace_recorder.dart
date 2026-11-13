@@ -2,6 +2,7 @@
 // the limits are tested without a widget tree.
 
 import 'dart:collection';
+import 'dart:math' show max;
 
 import '../model/trace_event.dart';
 import 'cause_zone.dart';
@@ -49,6 +50,11 @@ class TraceRecorder {
 
   static const int defaultMaxEvents = 20000;
   static const int defaultMaxBytes = 4 * 1024 * 1024;
+
+  /// Most time one folded frame event covers (see [addFrame]): a screen
+  /// that animates adds about one event a second, not sixty, and a "30s"
+  /// bound still cuts to within a second.
+  static const int maxFoldMs = 1000;
 
   /// Most intervals of rebuild coverage kept. Older ones are forgotten,
   /// and the seqs before the oldest kept count as not covered.
@@ -214,6 +220,50 @@ class TraceRecorder {
       }
     }
     return event;
+  }
+
+  /// Records a frame the app drew, with the recorder's own time in it
+  /// ([us]) and its rebuild count ([builds], null while rebuilds are not
+  /// counted).
+  ///
+  /// When the newest event is a frame event, nothing came after it, both
+  /// do or do not count rebuilds, and it began less than [maxFoldMs] ago,
+  /// this frame is folded into it instead: the same seq, this frame's time
+  /// and number, and in `data` the frame count `n`, the first frame `from`
+  /// and its time `since`, the total `us` and the largest `max`, and the
+  /// total `builds`. So frames where nothing else happened do not push
+  /// older events out (a spinner draws sixty a second). Listeners only see
+  /// the first frame of a fold.
+  TraceEvent addFrame({required int us, int? builds}) {
+    final last = newest;
+    final now = _ms();
+    if (last != null && last.kind == TraceKind.frame) {
+      final d = last.data;
+      final since = d['since'] is int ? d['since']! as int : last.t;
+      final lastBuilds = d['builds'];
+      final lastUs = d['us'] is int ? d['us']! as int : 0;
+      if (now - since < maxFoldMs && (lastBuilds is int) == (builds != null)) {
+        final folded = TraceEvent(
+          seq: last.seq,
+          t: now,
+          frame: frameOf(),
+          kind: TraceKind.frame,
+          cause: last.cause,
+          data: {
+            'us': lastUs + us,
+            if (builds != null) 'builds': (lastBuilds! as int) + builds,
+            'n': (d['n'] is int ? d['n']! as int : 1) + 1,
+            'from': d['from'] is int ? d['from'] : last.frame,
+            'since': since,
+            'max': max(d['max'] is int ? d['max']! as int : lastUs, us),
+          },
+        );
+        _ring[(_head + _length - 1) % maxEvents] = folded;
+        _bytes += folded.approxBytes - last.approxBytes;
+        return folded;
+      }
+    }
+    return add(TraceKind.frame, data: {'us': us, 'builds': ?builds});
   }
 
   final List<void Function(TraceEvent event)> _listeners =
