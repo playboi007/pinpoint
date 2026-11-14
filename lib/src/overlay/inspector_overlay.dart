@@ -34,6 +34,7 @@ import '../sink/markdown_formatter.dart';
 import '../sink/pinpoint_sink.dart';
 import '../tape/tape_boot.dart';
 import '../tape/tape_recorder.dart' show SinceTime, TapeSince;
+import '../theme/pinpoint_motion.dart';
 import '../theme/pinpoint_tokens.dart';
 import '../trace/note_trace.dart';
 import '../trace/trace_format.dart' show parseTraceSource;
@@ -41,6 +42,9 @@ import '../trace/trace_session.dart';
 import '../tweak/tweak_scope.dart';
 import '../tweak/tweak_session.dart';
 import 'agent_layer.dart';
+import 'construction/construction_capture.dart';
+import 'construction/construction_sites.dart';
+import 'construction/construction_stage.dart';
 import 'environment_panel.dart';
 import 'findings_panel.dart';
 import 'highlight_painter.dart';
@@ -173,6 +177,28 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     resolver: SourceResolver.forConfig(widget.config),
   );
 
+  /// The "under construction" cover on a widget the agent works on. It is
+  /// HTML over the canvas, so the app draws no frame for it.
+  late final ConstructionSites _construction = ConstructionSites(
+    stage: constructionStage(),
+    capture: _captureSite,
+  );
+
+  Future<Uint8List?> _captureSite(Rect rect) async {
+    final boundary = widget.appKey.currentContext?.findRenderObject();
+    if (!mounted || boundary is! RenderRepaintBoundary) return null;
+    return captureRegion(
+      boundary,
+      rect,
+      pixelRatio: MediaQuery.devicePixelRatioOf(context),
+    );
+  }
+
+  void _followConstruction() => _construction.follow(
+    placements: _pins.placements,
+    palette: widget.controller.palette,
+  );
+
   /// The bridge sync, or null without a bridge.
   NoteSync? _sync;
 
@@ -273,6 +299,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     });
     _startSync();
     _attachAgent();
+    _followConstruction();
     // A page a replay restarted plays its tape once the app has drawn
     // (PLAN-v2 Milestone 15, step 7).
     if (TapeBoot.flag != null) {
@@ -367,6 +394,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
       _tracker = _newTracker();
       _pins.dispose();
       _pins = _newPins();
+      _followConstruction();
     } else if (oldWidget.config.projectRoot != widget.config.projectRoot ||
         !listEquals(
           oldWidget.config.localPathHints,
@@ -403,6 +431,12 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _construction.reduced = PinPointMotion.of(context).reduced;
+  }
+
+  @override
   void reassemble() {
     super.reassemble();
     // After a hot reload held elements may be stale and lines may have
@@ -422,6 +456,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     widget.controller.removeListener(_onControllerChanged);
     widget.controller.environment.removeListener(_onEnvironmentChanged);
     _tracker.dispose();
+    _construction.dispose();
     _pins.dispose();
     _sync?.dispose();
     _editTimer?.cancel();
