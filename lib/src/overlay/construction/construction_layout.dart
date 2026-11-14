@@ -51,8 +51,10 @@ class ConstructionLayout {
     final tapeFont = math.min(fs, math.max(4.0, th - 5));
     final tapeTop = h >= minWorkersHeight ? 0.0 : (h - th) / 2;
 
-    // About min(56 px, 85% of the height), and never behind the tape.
-    var wh = math.min(maxWorkerHeight, 0.85 * widgetHeight);
+    // 56 px, or half the height on a big widget (at most 110 px, the
+    // assets' own size), never over 85% of the height or behind the tape.
+    final cap = (0.5 * widgetHeight).clamp(baseWorkerHeight, maxWorkerHeight);
+    var wh = math.min(cap, 0.85 * widgetHeight);
     wh = math.min(wh, h - th - 2);
     // The hammer worker must fit the width as well.
     wh = math.min(wh, (w - 2 * pad) / _hammerWidth * _hammerHeight);
@@ -134,8 +136,12 @@ class ConstructionLayout {
   /// Pixels the cover goes past the widget on each side.
   static const double overscan = 1;
 
-  /// The tallest a worker is drawn.
-  static const double maxWorkerHeight = 56;
+  /// A worker's height on an ordinary widget.
+  static const double baseWorkerHeight = 56;
+
+  /// The tallest a worker is drawn, on a big widget: about the assets' own
+  /// size, so they stay sharp.
+  static const double maxWorkerHeight = 110;
 
   /// Under this widget height there are no workers: hatching and tape only.
   static const double minWorkersHeight = 24;
@@ -227,5 +233,15 @@ class ConstructionLayout {
       '--sc:${_n(coneScale)};--hl:${_n(hammerLeft)}px;'
       '--bl:${_n(barrowLeft)}px;--run:${_n(barrowRun)}px;'
       '--pr:${_n(painterRight)}px;--th:${_n(tapeHeight)}px;'
-      '--tf:${_n(tapeFont)}px;--tt:${_n(tapeTop)}px;--wd:${_n(walkSeconds)}s';
+      '--tf:${_n(tapeFont)}px;--tt:${_n(tapeTop)}px;--wd:${_n(walkSeconds)}s;'
+      '--fa:${_n(fallDegrees)}deg';
+
+  /// How far each half of the snapped tape swings down from its outer end:
+  /// its free end drops about 70% of the height, so it stays over the
+  /// widget and never sweeps across the page.
+  double get fallDegrees =>
+      (math.atan2(0.7 * height, math.max(width / 2, 1)) * 180 / math.pi).clamp(
+        6.0,
+        35.0,
+      );
 }

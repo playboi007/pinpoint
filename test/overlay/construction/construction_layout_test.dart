@@ -23,11 +23,22 @@ void main() {
       expect(tall.hammer, isTrue);
     });
 
-    test('a worker is min(56 px, 85% of the height) at most', () {
-      expect(ConstructionLayout.of(600, 400).workerHeight, 56);
+    test('a worker is 56 px, or half the height on a big widget (at most '
+        '110 px), and never over 85% of the height', () {
+      expect(ConstructionLayout.of(600, 100).workerHeight, 56);
+      expect(ConstructionLayout.of(900, 180).workerHeight, 90);
+      expect(ConstructionLayout.of(900, 400).workerHeight, 110);
       final short = ConstructionLayout.of(600, 40);
       expect(short.workerHeight, lessThanOrEqualTo(0.85 * 40));
       expect(short.workerHeight, greaterThanOrEqualTo(14));
+    });
+
+    test('the snapped tape swings down at most 35 degrees, less on a wide '
+        'widget, so it stays over it', () {
+      expect(ConstructionLayout.of(900, 180).fallDegrees, closeTo(15.6, 0.2));
+      expect(ConstructionLayout.of(60, 200).fallDegrees, 35);
+      expect(ConstructionLayout.of(2000, 20).fallDegrees, 6);
+      expect(ConstructionLayout.of(900, 180).variables, contains('--fa:'));
     });
 
     test('the workers stay below the tape', () {

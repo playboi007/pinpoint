@@ -147,8 +147,8 @@ abstract final class ConstructionMarkup {
 #$rootId .ppc-painter{position:absolute;right:var(--pr);bottom:2px;width:calc(114px*var(--sp));height:calc(189px*var(--sp))}
 #$rootId .ppc-roller{animation:ppc-roll 1.2s ease-in-out infinite}
 #$rootId .ppc-half{position:absolute;left:-4px;right:-4px;top:var(--tt);height:var(--th);z-index:5}
-#$rootId .ppc-half-l{clip-path:inset(-4px 50% -4px -4px)}
-#$rootId .ppc-half-r{clip-path:inset(-4px -4px -4px 50%)}
+#$rootId .ppc-half-l{clip-path:inset(-4px 50% -4px -4px);transform-origin:0 50%}
+#$rootId .ppc-half-r{clip-path:inset(-4px -4px -4px 50%);transform-origin:100% 50%}
 #$rootId .ppc-tape{position:absolute;left:0;top:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;overflow:hidden;border:1px solid var(--ppc-ink);box-shadow:2px 2px 0 var(--ppc-shadow);background:repeating-linear-gradient(-45deg,var(--ppc-accent) 0,var(--ppc-accent) 6px,var(--ppc-paper) 6px,var(--ppc-paper) 12px)}
 #$rootId .ppc-label{padding:0 4px;border:1px solid var(--ppc-ink);background:var(--ppc-paper);color:var(--ppc-ink);font:500 var(--tf)/1 "packages/pinpoint/RobotoMono","RobotoMono",ui-monospace,monospace;letter-spacing:.08em;white-space:nowrap;text-transform:uppercase}
 #$rootId .ppc-done-box{position:absolute;left:0;right:0;bottom:2px;z-index:4;display:none;justify-content:center}
@@ -173,8 +173,8 @@ abstract final class ConstructionMarkup {
 @keyframes ppc-roll{0%,100%{transform:translateY(0)}50%{transform:translateY(calc(-14px*var(--sp)))}}
 @keyframes ppc-hop{0%{transform:translateY(0);opacity:1}30%{transform:translateY(-14px);opacity:1}100%{transform:translateY(10px);opacity:0}}
 @keyframes ppc-pop{0%{opacity:0;transform:translateY(40%) scale(.3);animation-timing-function:cubic-bezier(.34,1.56,.64,1)}45%{opacity:1;transform:translateY(0) scale(1)}80%{opacity:1;transform:translateY(0) scale(1)}100%{opacity:0;transform:translateY(-10px) scale(1)}}
-@keyframes ppc-fall-l{0%{transform:none;opacity:1}12%{transform:translate(-4px,-2px) rotate(-2deg);opacity:1}100%{transform:translate(-18px,40px) rotate(-38deg);opacity:0}}
-@keyframes ppc-fall-r{0%{transform:none;opacity:1}12%{transform:translate(4px,-2px) rotate(2deg);opacity:1}100%{transform:translate(18px,40px) rotate(38deg);opacity:0}}
+@keyframes ppc-fall-l{0%{transform:none;opacity:1}15%{transform:rotate(-2deg);opacity:1}70%{transform:rotate(var(--fa));opacity:1}100%{transform:rotate(var(--fa)) translateY(6px);opacity:0}}
+@keyframes ppc-fall-r{0%{transform:none;opacity:1}15%{transform:rotate(2deg);opacity:1}70%{transform:rotate(calc(-1 * var(--fa)));opacity:1}100%{transform:rotate(calc(-1 * var(--fa))) translateY(6px);opacity:0}}
 @keyframes ppc-peel{0%{clip-path:polygon(0 0,100% 0,100% 100%,0 100%)}100%{clip-path:polygon(130% 0,100% 0,100% 100%,100% 100%)}}
 @keyframes ppc-bounce{0%{opacity:0;transform:scale(.9);outline-color:var(--ppc-accent)}1%{opacity:1;transform:scale(.9)}40%{transform:scale(1.06)}70%{transform:scale(.98)}100%{opacity:1;transform:scale(1);outline-color:transparent}}
 #$rootId.$reducedClass .ppc-site,#$rootId.$reducedClass .ppc-site *{animation:none!important}
