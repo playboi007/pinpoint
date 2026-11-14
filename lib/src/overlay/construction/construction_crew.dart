@@ -184,9 +184,17 @@ class ConstructionCrew {
 
   double get _spotTop => layout.groundY - layout.stackerBoxHeight;
 
+  /// The lowest the top of his canvas goes: his highest content (the block
+  /// over his head) stays 1 px under the tape.
+  static double _minTop(ConstructionLayout layout) =>
+      layout.tapeTop +
+      layout.tapeHeight +
+      1 -
+      ConstructionAssets.stackerContentTop * layout.stackerBoxHeight;
+
   /// Where the stacker hovers to work on [box], as an offset from the spot:
-  /// the block over his head is on the box's top edge, and he is centred on
-  /// the box, but never out of the site or behind the tape.
+  /// the block of his place pose is on the box's top edge, centred on the
+  /// box; but his content never leaves the site or goes behind the tape.
   static (double, double) _hover(
     ConstructionLayout layout,
     ConstructionBox box,
@@ -194,27 +202,19 @@ class ConstructionCrew {
     const o = ConstructionLayout.overscan;
     final w = layout.stackerBoxWidth;
     final h = layout.stackerBoxHeight;
-    final left = (box.left + o + box.width / 2 - w / 2).clamp(
-      ConstructionLayout.pad,
-      math.max(
-        ConstructionLayout.pad,
-        layout.width - ConstructionLayout.pad - w,
-      ),
-    );
+    const pad = ConstructionLayout.pad;
+    final low = pad - ConstructionAssets.stackerContentLeft * w;
+    final high =
+        layout.width - pad - ConstructionAssets.stackerContentRight * w;
+    final left =
+        (box.left +
+                o +
+                box.width / 2 -
+                ConstructionAssets.stackerPlaceBlockX * w)
+            .clamp(low, math.max(low, high));
     final spotTop = layout.groundY - h;
-    // The block over his head stays under the tape: its top is at least
-    // 1 px below the band.
-    final blockHeight = ConstructionAssets.blockSize * layout.stackerScale;
-    final minTop =
-        layout.tapeTop +
-        layout.tapeHeight +
-        1 +
-        blockHeight -
-        ConstructionAssets.stackerBlockBottom * h;
-    final top = (box.top + o - ConstructionAssets.stackerBlockBottom * h).clamp(
-      math.min(minTop, spotTop),
-      spotTop,
-    );
+    final top = (box.top + o - ConstructionAssets.stackerPlaceBlockBottom * h)
+        .clamp(math.min(_minTop(layout), spotTop), spotTop);
     return (left - layout.stackerLeft, top - spotTop);
   }
 
@@ -259,7 +259,7 @@ class ConstructionCrew {
   /// over the head of the wheelbarrow worker if there is room under the
   /// tape, and higher when his box is.
   double _cruise(StackerTrip t) {
-    final room = layout.tapeTop + layout.tapeHeight + 1 - _spotTop;
+    final room = _minTop(layout) - _spotTop;
     return math.min(
       t.dy,
       math.max(-(layout.barrowBoxHeight + 8), math.min(0.0, room)),
@@ -402,7 +402,7 @@ class ConstructionCrew {
     // The block's arc: a parabola, in a few straight pieces.
     final (sx, sy) = _arcStart;
     final (ex, ey) = _arcEnd;
-    final lift = math.max(8.0, 0.22 * layout.stackerBoxHeight);
+    final lift = math.max(8.0, 0.14 * layout.stackerBoxHeight);
     String at(double u) {
       final x = sx + (ex - sx) * u - _block / 2;
       final y = sy + (ey - sy) * u - 4 * lift * u * (1 - u) - _block / 2;

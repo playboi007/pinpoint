@@ -124,7 +124,8 @@ class ConstructionLayout {
     // The builder, the planners and the stacker are as tall as wh.
     final sh = wh / _hammerHeight;
     final spl = wh / _plannerHeight;
-    final ss = wh / _stackerHeight;
+    // His standing figure, not his whole canvas, is as tall as the others.
+    final ss = wh / (_stackerHeight * ConstructionAssets.stackerFigure);
     // The wheelbarrow worker is a little smaller than the builder.
     final sb = 0.8 * wh / _barrowHeight;
     // The painter, with the ladder, is a little taller.

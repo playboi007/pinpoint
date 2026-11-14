@@ -575,19 +575,12 @@ void main() {
       expect(css, contains('width:119.0px;height:130.5px'));
     });
 
-    test('the stacker has placeholders until his files exist', () {
-      expect(ConstructionAssets.stackerArt, isFalse);
-      // His poses are pictures that exist now.
-      for (final name in [
-        ConstructionAssets.stackerStand,
-        ConstructionAssets.stackerFlyA,
-        ConstructionAssets.stackerFlyB,
-        ConstructionAssets.stackerPlace,
-      ]) {
-        expect(ConstructionAssets.names, contains(name));
-      }
-      expect(ConstructionAssets.names, isNot(contains('block')));
-      // The files he will have: one canvas, a block.
+    test('the stacker has his own art: four poses on one canvas, a block', () {
+      expect(ConstructionAssets.stackerArt, isTrue);
+      expect(ConstructionAssets.stackerStand, 'stacker_stand');
+      expect(ConstructionAssets.stackerFlyA, 'stacker_fly_a');
+      expect(ConstructionAssets.stackerFlyB, 'stacker_fly_b');
+      expect(ConstructionAssets.stackerPlace, 'stacker_place');
       expect(ConstructionAssets.stackerSet.map((a) => a.name), [
         'stacker_stand',
         'stacker_fly_a',
@@ -595,29 +588,61 @@ void main() {
         'stacker_place',
         'block',
       ]);
-      final poses = ConstructionAssets.stackerSet.take(4);
-      for (final a in poses) {
-        expect((a.width, a.height), (90, 135), reason: a.name);
+      // The manifest in use has them, with the files in place.
+      for (final a in ConstructionAssets.stackerSet) {
+        expect(ConstructionAssets.names, contains(a.name));
         expect(a.file, a.name);
+        expect(
+          File('assets/construction/${a.file}.webp').existsSync(),
+          isTrue,
+          reason: a.name,
+        );
       }
-      final block = ConstructionAssets.stackerSet.last;
-      expect((block.width, block.height), (40, 40));
+      // One canvas for the four poses: half the pixels of the files.
+      for (final a in ConstructionAssets.stackerSet.take(4)) {
+        final (w, h) = _webpSize(
+          File('assets/construction/${a.file}.webp').readAsBytesSync(),
+        );
+        expect((w, h), (220, 330), reason: a.name);
+        expect((a.width, a.height), (110, 165), reason: a.name);
+      }
+      final (bw, bh) = _webpSize(
+        File('assets/construction/block.webp').readAsBytesSync(),
+      );
+      expect((bw, bh), (80, 80));
     });
 
-    test('the placeholder stacker is drawn in CSS: flames and a block', () {
+    test('the marks on the canvas are inside it and in a sane order', () {
+      const a = ConstructionAssets.stackerBlockBottom;
+      const p = ConstructionAssets.stackerPlaceBlockBottom;
+      expect(a, inExclusiveRange(0, 1));
+      // The place pose holds the block lower than the flying poses.
+      expect(p, greaterThan(a));
+      expect(ConstructionAssets.stackerContentTop, inExclusiveRange(0, a));
+      expect(ConstructionAssets.stackerContentLeft, inExclusiveRange(0, 0.5));
+      expect(ConstructionAssets.stackerContentRight, inExclusiveRange(0.5, 1));
+      expect(ConstructionAssets.stackerPlaceBlockX, inExclusiveRange(0, 1));
+      // The palms are on the left (he faces the wheelbarrow, at his left).
+      expect(ConstructionAssets.stackerHandX, lessThan(0.5));
+      expect(ConstructionAssets.stackerHandY, inExclusiveRange(0.4, 0.9));
+      // The standing figure fills about two thirds of the canvas height.
+      expect(ConstructionAssets.stackerFigure, closeTo(224 / 330, 1e-9));
+    });
+
+    test('his art has the flames and the block in it: none drawn in CSS', () {
       final html = ConstructionMarkup.siteHtml(urls);
-      expect(html, contains('class="ppc-fl ppc-fl-a"'));
-      expect(html, contains('class="ppc-fl ppc-fl-b"'));
-      expect(RegExp('class="ppc-blk"').allMatches(html), hasLength(2));
-      // The block: paper, a 1 px ink border, a hard 2 px shadow.
-      final blk = rule('.ppc-blk');
-      expect(blk, contains('border:1px solid var(--ppc-ink)'));
-      expect(blk, contains('background:var(--ppc-paper)'));
-      expect(blk, contains('box-shadow:2px 2px 0 var(--ppc-shadow)'));
-      // The flames are triangles of the accent and yellow, no blur.
-      expect(rule('.ppc-fl'), contains('var(--ppc-accent)'));
-      expect(css, contains('#ffc933'));
-      expect(rule('.ppc-fl'), contains('step-end infinite'));
+      expect(html, isNot(contains('ppc-fl ')));
+      expect(html, isNot(contains('ppc-blk"')));
+      expect(html, isNot(contains('ppc-scb')));
+      expect(html, contains('x/block.webp'));
+      for (final name in [
+        'stacker_stand',
+        'stacker_fly_a',
+        'stacker_fly_b',
+        'stacker_place',
+      ]) {
+        expect(html, contains('x/$name.webp'));
+      }
     });
   });
 }

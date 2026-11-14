@@ -23,11 +23,9 @@ class ConstructionAsset {
 /// jump); the page switches between them by CSS steps. A character is drawn
 /// at its real proportions: the layout scales it by its height.
 ///
-/// The stacker (the worker with booster shoes) has no art yet. Until the
-/// files named in [stackerSet] exist, [stackerArt] is false: his poses use
-/// `planner_point_a/b`, his flames and his block are drawn in CSS. To
-/// switch, put the five files in `assets/construction/` and set [stackerArt]
-/// to true. Nothing else changes.
+/// The stacker (the worker with booster shoes) has his own art in
+/// [stackerSet]. With [stackerArt] false, his poses fall back to
+/// `planner_point_a/b` with CSS flames and a CSS block.
 abstract final class ConstructionAssets {
   // The sizes of the files in CSS pixels (the file is twice as big).
   static const double plannerReadWidth = 84;
@@ -51,29 +49,47 @@ abstract final class ConstructionAssets {
   static const double hammerHeadY = 0.398;
 
   /// Whether the stacker's own files are used. False: placeholders.
-  static const bool stackerArt = false;
+  static const bool stackerArt = true;
 
   /// The canvas of the four stacker poses: the same size for all of them,
-  /// the feet on the bottom edge and the figure in the middle (about 112 px
-  /// tall: the rest, at the top, is room for the block over his head).
-  /// 180 x 270 pixels in the files.
-  static const double stackerWidth = 90;
-  static const double stackerHeight = 135;
+  /// 220 x 330 pixels in the files. Standing, his feet are on the bottom
+  /// edge; flying, his flames are. The three flying poses share one
+  /// placement, so switching between them does not move him.
+  static const double stackerWidth = stackerArt ? 110 : 86.5;
+  static const double stackerHeight = stackerArt ? 165 : 129;
 
-  /// The block (a light foam cube): 80 x 80 pixels in the file.
-  static const double blockSize = 40;
+  /// How much of the canvas height the standing figure fills: the layout
+  /// makes that part as tall as the other workers.
+  static const double stackerFigure = stackerArt ? 224 / 330 : 1;
 
-  /// Where the hands of `stacker_stand` are, as a fraction of the canvas:
-  /// the block flies there from the wheelbarrow.
-  static const double stackerHandX = 0.2;
-  static const double stackerHandY = 0.55;
+  /// The block (a light foam cube), as wide as the one he carries in the
+  /// poses: 22 canvas pixels (80 x 80 pixels in the file, drawn smaller).
+  static const double blockSize = stackerArt ? 22 : 40;
 
-  /// Where the bottom of the block over his head is, as a fraction of the
-  /// canvas height from the top: he flies so that this line is on the top
-  /// edge of the box he repairs. In the art the block is inside the canvas;
-  /// the placeholder's block sits on the head of `planner_point` (6 px from
-  /// the top of the canvas).
-  static const double stackerBlockBottom = stackerArt ? 0.22 : 0.045;
+  /// Where the palms of `stacker_stand` are, as a fraction of the canvas
+  /// (he faces left, toward the wheelbarrow): the block flies there.
+  static const double stackerHandX = stackerArt ? 0.36 : 0.2;
+  static const double stackerHandY = stackerArt ? 0.65 : 0.55;
+
+  /// Where the bottom of the block is in the flying poses, as a fraction of
+  /// the canvas height from the top (measured at row 88 of 330 in `fly_a`).
+  /// The placeholder's block sits on the head of `planner_point`, 6 px from
+  /// the top of the canvas.
+  static const double stackerBlockBottom = stackerArt ? 0.27 : 0.045;
+
+  /// The same line in `stacker_place`, which holds the block lower and more
+  /// to the left (bottom at row 130 of 330, centre at x 53 of 220). He
+  /// flies so that this line is on the top edge of the box he repairs, so
+  /// that the block comes down onto the box as he places it.
+  static const double stackerPlaceBlockBottom = stackerArt ? 0.39 : 0.045;
+  static const double stackerPlaceBlockX = stackerArt ? 0.24 : 0.5;
+
+  /// The highest and widest content of the flying poses, as a fraction of
+  /// the canvas (the block's top at row 42; the content from x 28 to 173):
+  /// he is kept under the tape and inside the site by these.
+  static const double stackerContentTop = stackerArt ? 42 / 330 : -0.2;
+  static const double stackerContentLeft = stackerArt ? 28 / 220 : 0;
+  static const double stackerContentRight = stackerArt ? 173 / 220 : 1;
 
   /// The names of the stacker's poses: his own art, or the placeholders.
   static const String stackerStand = stackerArt

@@ -382,7 +382,6 @@ void main() {
       expect(animation('.ppc-stk'), 'ppc-k1-sf, ppc-k1-sf-l');
       expect(animation('.ppc-thrown'), 'ppc-k1-thr, ppc-k1-thr-l');
       expect(animation('.ppc-sbob'), 'ppc-sbob');
-      expect(animation('.ppc-fl'), 'ppc-flick');
       expect(animation('.ppc-box'), 'ppc-break');
       expect(animation('.ppc-fix'), 'ppc-fix');
       expect(animation('.ppc-measure'), 'ppc-sweep');
@@ -480,8 +479,7 @@ void main() {
       expect(css, ConstructionMarkup.siteCss(layout, card, 'k1'));
     });
 
-    test('the pieces are there: poses, flames, the carried and thrown '
-        'block', () {
+    test('the pieces are there: his poses, and the block that is thrown', () {
       stage.add('a', wide, card);
       final site = sitesNow().single;
       for (final sel in [
@@ -489,29 +487,42 @@ void main() {
         '.ppc-sfa',
         '.ppc-sfb',
         '.ppc-sp-pl',
-        '.ppc-fl-a',
-        '.ppc-fl-b',
-        '.ppc-scb .ppc-blk',
-        '.ppc-thrown .ppc-blk',
+        '.ppc-thrown img',
       ]) {
         expect(first(sel, site), isNotNull, reason: sel);
       }
+      // His art has the flames and the carried block in it: no CSS parts.
+      expect(first('.ppc-fl', site), isNull);
+      expect(first('.ppc-scb', site), isNull);
       // At rest only the standing pose shows; the rest waits for its time.
       expect(computed(first('.ppc-sp-st', site)!, 'opacity'), '1');
-      for (final sel in ['.ppc-sfly', '.ppc-sp-pl', '.ppc-sfl', '.ppc-scb']) {
-        // They are animated (opacity steps) once building starts: the
-        // keyframes start at 0.
+      for (final sel in ['.ppc-sfly', '.ppc-sp-pl']) {
         expect(computed(first(sel, site)!, 'opacity'), '0', reason: sel);
       }
       expect(computed(first('.ppc-thrown', site)!, 'opacity'), '0');
-      // The flames are triangles of borders, the block has a hard shadow.
-      final flame = first('.ppc-fl-a', site)!;
-      expect(computed(flame, 'border-top-style'), 'solid');
-      expect(computed(flame, 'border-radius'), '0px');
-      final blk = first('.ppc-thrown .ppc-blk', site)!;
-      expect(computed(blk, 'border-top-width'), '1px');
-      expect(computed(blk, 'box-shadow'), contains('2px 2px 0px'));
-      expect(computed(blk, 'border-radius'), '0px');
+      // The poses fill his canvas, which the layout scales.
+      final layout = ConstructionLayout.of(700, 190, boxes: card);
+      final canvas = first(
+        '.ppc-lnd',
+        site,
+      )!.callMethod<JSObject>('getBoundingClientRect'.toJS);
+      expect(
+        (canvas['height']! as JSNumber).toDartDouble,
+        closeTo(layout.stackerBoxHeight, 0.5),
+      );
+      expect(
+        (canvas['width']! as JSNumber).toDartDouble,
+        closeTo(layout.stackerBoxWidth, 0.5),
+      );
+      // The thrown block is as big as the one in his hands.
+      final thrown = first(
+        '.ppc-thrown',
+        site,
+      )!.callMethod<JSObject>('getBoundingClientRect'.toJS);
+      expect(
+        (thrown['width']! as JSNumber).toDartDouble,
+        closeTo(ConstructionAssets.blockSize * layout.stackerScale, 0.5),
+      );
     });
 
     test('a small site has no stacker and no style of its own', () {
@@ -618,15 +629,12 @@ void main() {
         '.ppc-stk',
         '.ppc-sp-st',
         '.ppc-sfly',
-        '.ppc-sfl',
-        '.ppc-scb',
         '.ppc-thrown',
         '.ppc-tb',
         '.ppc-bwalk',
         '.ppc-flip',
         '.ppc-slip',
         '.ppc-sbob',
-        '.ppc-fl-a',
       ]) {
         expect(
           computed(first(sel, site)!, 'animation-name'),
@@ -835,7 +843,6 @@ void main() {
         '.ppc-ha',
         '.ppc-stk',
         '.ppc-sbob',
-        '.ppc-fl',
         '.ppc-thrown',
         '.ppc-dust',
         '.ppc-box',

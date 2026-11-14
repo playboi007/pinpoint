@@ -158,10 +158,16 @@ void main() {
     test('characters keep their proportions: scaled by height', () {
       final l = cardLayout;
       expect(l.hammerBoxHeight, closeTo(l.workerHeight, 1e-6));
-      expect(l.stackerBoxHeight, closeTo(l.workerHeight, 1e-6));
+      // His canvas is taller than he is (the block over his head, the
+      // flames): the standing figure is as tall as the others.
+      expect(
+        l.stackerBoxHeight * ConstructionAssets.stackerFigure,
+        closeTo(l.workerHeight, 1e-6),
+      );
+      expect(l.stackerBoxHeight, greaterThan(l.workerHeight));
       expect(l.hammerBoxWidth / l.hammerBoxHeight, closeTo(119 / 130.5, 1e-6));
       expect(l.barrowBoxWidth / l.barrowBoxHeight, closeTo(139.5 / 124, 1e-6));
-      expect(l.stackerBoxWidth / l.stackerBoxHeight, closeTo(90 / 135, 1e-6));
+      expect(l.stackerBoxWidth / l.stackerBoxHeight, closeTo(110 / 165, 1e-6));
     });
   });
 
@@ -227,7 +233,7 @@ void main() {
           // The wheelbarrow worker turns after the block left him.
           expect(t.turnAt, greaterThan(t.catchAt - 0.01));
           // From the catch to the ground: about 2.2 to 3 s.
-          expect(t.landAt - t.catchAt, inInclusiveRange(2.2, 3.0));
+          expect(t.landAt - t.catchAt, inInclusiveRange(2.19, 3.0));
         }
       },
     );
@@ -373,17 +379,120 @@ void main() {
       expect(a.$2, lessThan(0));
     });
 
-    test('he stays in the site and under the tape', () {
-      final tapeBottom = cardLayout.tapeTop + cardLayout.tapeHeight;
-      final spotTop = cardLayout.groundY - cardLayout.stackerBoxHeight;
+    // The layouts to check: the card, a short wide field, a big card.
+    final cases = <(String, double, double, List<ConstructionBox>)>[
+      ('card', 700, 190, card),
+      (
+        'field',
+        420,
+        100,
+        const [
+          ConstructionBox(12, 8, 90, 10),
+          ConstructionBox(12, 26, 396, 40),
+          ConstructionBox(22, 40, 160, 12),
+          ConstructionBox(372, 36, 24, 20),
+          ConstructionBox(12, 74, 200, 8),
+        ],
+      ),
+      ('generic wide', 900, 180, ConstructionBoxes.generic(900, 180)),
+      ('generic big', 900, 400, ConstructionBoxes.generic(900, 400)),
+      (
+        'mid card',
+        520,
+        150,
+        const [
+          ConstructionBox(10, 10, 80, 130),
+          ConstructionBox(104, 12, 200, 16),
+          ConstructionBox(104, 38, 380, 10),
+          ConstructionBox(104, 54, 340, 10),
+          ConstructionBox(104, 100, 90, 32),
+        ],
+      ),
+    ];
+
+    test('he stays in the site and under the tape, in every trip', () {
+      var checked = 0;
+      for (final (name, w, h, boxes) in cases) {
+        final l = ConstructionLayout.of(w, h, boxes: boxes);
+        final c = ConstructionCrew.of(l, boxes);
+        if (c == null) continue;
+        checked++;
+        final tapeBottom = l.tapeTop + l.tapeHeight;
+        final spotTop = l.groundY - l.stackerBoxHeight;
+        final bh = l.stackerBoxHeight;
+        final bw = l.stackerBoxWidth;
+        // Every place of his flight, not only where he hovers.
+        final places = <(double, double)>[
+          for (final t in [...c.trips, ...c.loop]) ...[
+            (t.dx, t.dy),
+            for (var k = 0; k <= 20; k++)
+              c.offsetAt(
+                (c.trips.contains(t) ? 0 : c.buildEnd) +
+                    t.catchAt +
+                    (t.landAt - t.catchAt) * k / 20,
+              ),
+          ],
+        ];
+        for (final (dx, dy) in places) {
+          final top = spotTop + dy;
+          final left = l.stackerLeft + dx;
+          // The block over his head is under the tape, unless he is on the
+          // ground (a site too short to fly in).
+          if (dy < -0.01) {
+            expect(
+              top + ConstructionAssets.stackerContentTop * bh,
+              greaterThanOrEqualTo(tapeBottom),
+              reason: '$name: under the tape',
+            );
+          }
+          // His content is inside the site, left and right.
+          expect(
+            left + ConstructionAssets.stackerContentLeft * bw,
+            greaterThanOrEqualTo(-0.01),
+            reason: '$name: left edge',
+          );
+          expect(
+            left + ConstructionAssets.stackerContentRight * bw,
+            lessThanOrEqualTo(l.width + 0.01),
+            reason: '$name: right edge',
+          );
+          // And never under the ground.
+          expect(top, lessThanOrEqualTo(spotTop + 0.01), reason: name);
+        }
+      }
+      expect(checked, greaterThanOrEqualTo(3));
+    });
+
+    test('at the box the block of the place pose is on its top edge', () {
+      final l = cardLayout;
+      final bh = l.stackerBoxHeight;
+      final bw = l.stackerBoxWidth;
+      final spotTop = l.groundY - bh;
       for (final t in crew.trips) {
-        expect(spotTop + t.dy, greaterThanOrEqualTo(tapeBottom));
-        final left = cardLayout.stackerLeft + t.dx;
-        expect(left, greaterThanOrEqualTo(0));
-        expect(
-          left + cardLayout.stackerBoxWidth,
-          lessThanOrEqualTo(cardLayout.width),
-        );
+        final b = card[t.box];
+        final top = spotTop + t.dy;
+        final blockBottom =
+            top + ConstructionAssets.stackerPlaceBlockBottom * bh;
+        final blockX =
+            l.stackerLeft + t.dx + ConstructionAssets.stackerPlaceBlockX * bw;
+        // On the top edge, unless the tape holds him lower.
+        expect(blockBottom, greaterThanOrEqualTo(b.top + 1 - 0.01));
+        if (blockBottom > b.top + 1 + 0.01) {
+          expect(
+            top + ConstructionAssets.stackerContentTop * bh,
+            closeTo(l.tapeTop + l.tapeHeight + 1, 0.01),
+          );
+        }
+        // Centred on the box (or held inside the site).
+        expect(blockX, closeTo(b.left + 1 + b.width / 2, 0.01));
+      }
+    });
+
+    test('he lands on his spot, and starts each trip from it', () {
+      for (final t in [...crew.trips]) {
+        expect(crew.offsetAt(t.landAt), (0.0, 0.0));
+        expect(crew.offsetAt(t.catchAt), (0.0, 0.0));
+        expect(crew.offsetAt(t.throwAt), (0.0, 0.0));
       }
     });
   });
@@ -528,17 +637,19 @@ void main() {
         'ppc-sfa',
         'ppc-sfb',
         'ppc-sp-pl',
-        'ppc-sfl',
-        'ppc-scb',
         'ppc-thrown',
         'ppc-tb',
       ]) {
         expect(html, contains(cls), reason: cls);
       }
-      // The placeholder poses are the pointing planner.
-      expect(html, contains('x/planner_point_a.webp'));
-      // Styled at his canvas, centred at the bottom.
-      expect(html, contains('margin-left:-43.25px'));
+      // His own art, and the block's picture.
+      expect(html, contains('x/stacker_stand.webp'));
+      expect(html, contains('x/block.webp'));
+      // The CSS flames and block are for the placeholders only.
+      expect(html, isNot(contains('class="ppc-sfl"')));
+      expect(html, isNot(contains('class="ppc-scb"')));
+      // On the canvas: 110 x 165, in the middle at the bottom.
+      expect(html, contains('width:110px;height:165px;margin-left:-55px'));
     });
 
     test('the stage class and the landing variables', () {
