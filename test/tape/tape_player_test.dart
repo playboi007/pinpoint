@@ -89,6 +89,9 @@ void main() {
     expect(app.count, 2);
     expect(result['first_difference'], isNull);
     expect(ReplayGate.blocking.value, isFalse);
+    // Input is back, and the banner says "Done" for a moment.
+    expect(ReplayGate.outcome.value, ReplayOutcome.done);
+    expect(ReplayGate.banner.value, 'Done');
     await bridge.shutdown(tester);
   });
 
@@ -111,6 +114,9 @@ void main() {
     // Restored after the stop.
     expect(TapePlayer.current, isNull);
     expect(ReplayGate.blocking.value, isFalse);
+    expect(ReplayGate.outcome.value, ReplayOutcome.diverged);
+    expect(ReplayGate.banner.value, contains('diverged'));
+    expect(ReplayGate.banner.value, contains('step 1'));
     await bridge.shutdown(tester);
   });
 
@@ -226,6 +232,9 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
     expect(TapePlayer.current, isNull);
     expect(ReplayGate.blocking.value, isFalse);
+    // A stop clears the banner: no "Done" for a replay that did not finish.
+    expect(ReplayGate.banner.value, isNull);
+    expect(ReplayGate.outcome.value, isNull);
     expect(network.replay, isNull);
     expect(TraceSession.current!.tapes.replaying, isFalse);
     // Input reaches the app again.

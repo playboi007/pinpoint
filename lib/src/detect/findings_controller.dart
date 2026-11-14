@@ -17,6 +17,14 @@ class FindingsController extends ChangeNotifier {
   /// The finding under the pointer in the list; its rect is outlined.
   final ValueNotifier<Finding?> hovered = ValueNotifier<Finding?>(null);
 
+  /// Counts the scans the user asked for with "Scan this screen". The scan
+  /// sweep layer plays once for each change. A rescan after a what-if
+  /// change and the agent's `scan` never count: only the button does.
+  final ValueNotifier<int> sweeps = ValueNotifier<int>(0);
+
+  /// Asks for one scan sweep over the findings now in the list.
+  void sweep() => sweeps.value++;
+
   List<Finding> _scanned = const <Finding>[];
   List<Finding> _audited = const <Finding>[];
   final List<Finding> _captured = <Finding>[];
@@ -150,6 +158,7 @@ class FindingsController extends ChangeNotifier {
   @override
   void dispose() {
     hovered.dispose();
+    sweeps.dispose();
     super.dispose();
   }
 }

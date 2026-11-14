@@ -805,7 +805,7 @@ class TapePlayer {
       ReplayState.held => 'Replay holds at step $_done of $total',
       _ => 'Replaying tape, step $_done of $total',
     };
-    ReplayGate.show(text);
+    ReplayGate.show(text, step: _done);
   }
 
   /// Where the replay is, for the tools.
@@ -863,7 +863,19 @@ class TapePlayer {
     net.close();
     if (identical(bootNet, net)) bootNet = null;
     host.session.tapes.replaying = false;
-    ReplayGate.clear();
+    // Input is back at once. The banner stays a moment with the last words,
+    // then slides out: "Done", or why it diverged. Stopped ends it now.
+    switch (state) {
+      case ReplayState.done:
+        ReplayGate.finish(ReplayOutcome.done, 'Done');
+      case ReplayState.diverged:
+        ReplayGate.finish(
+          ReplayOutcome.diverged,
+          'Replay diverged: ${_stopReason ?? 'it cannot go on'}',
+        );
+      case ReplayState.running || ReplayState.held || ReplayState.stopped:
+        ReplayGate.clear();
+    }
     host.session.recorder.add(
       TraceKind.replayEnd,
       data: {
