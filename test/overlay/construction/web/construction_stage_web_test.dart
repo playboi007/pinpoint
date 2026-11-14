@@ -9,6 +9,7 @@ import 'dart:ui';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pinpoint/src/overlay/construction/construction_assets.dart';
 import 'package:pinpoint/src/overlay/construction/construction_boxes.dart';
+import 'package:pinpoint/src/overlay/construction/construction_crew.dart';
 import 'package:pinpoint/src/overlay/construction/construction_layout.dart';
 import 'package:pinpoint/src/overlay/construction/construction_markup.dart';
 import 'package:pinpoint/src/overlay/construction/construction_stage.dart';
@@ -371,12 +372,17 @@ void main() {
           .callMethod<JSObject>('getComputedStyle'.toJS, first(selector, site)!)
           .callMethod<JSString>('getPropertyValue'.toJS, 'animation-name'.toJS)
           .toDart;
-      expect(animation('.ppc-arm'), 'ppc-swing');
+      expect(animation('.ppc-ha'), 'ppc-ha');
       expect(animation('.ppc-hin'), 'ppc-hin');
-      expect(animation('.ppc-bwalk'), 'ppc-walk');
       expect(animation('.ppc-barrow'), 'ppc-bin');
-      expect(animation('.ppc-roller'), 'ppc-roll');
       expect(animation('.ppc-dust'), 'ppc-dust');
+      // The stacker's site has its own keyframes for him and the barrow.
+      expect(animation('.ppc-bwalk'), startsWith('ppc-k'));
+      expect(animation('.ppc-bwalk'), endsWith('-bx, ppc-k1-bx-l'));
+      expect(animation('.ppc-stk'), 'ppc-k1-sf, ppc-k1-sf-l');
+      expect(animation('.ppc-thrown'), 'ppc-k1-thr, ppc-k1-thr-l');
+      expect(animation('.ppc-sbob'), 'ppc-sbob');
+      expect(animation('.ppc-fl'), 'ppc-flick');
       expect(animation('.ppc-box'), 'ppc-break');
       expect(animation('.ppc-fix'), 'ppc-fix');
       expect(animation('.ppc-measure'), 'ppc-sweep');
@@ -398,8 +404,33 @@ void main() {
       expect(delay('.ppc-box'), '2.5s');
       // The hammer starts when the builder is in; the wheelbarrow walks
       // its lane when it is in.
-      expect(delay('.ppc-arm'), '3.6s');
-      expect(delay('.ppc-bwalk'), '4.1s');
+      expect(delay('.ppc-ha'), '3.6s');
+      // The wheelbarrow's loop (no stacker here: only a box in the lower
+      // half) starts when it is in.
+      stage.add('low', const Rect.fromLTWH(40, 300, 900, 180), const [
+        ConstructionBox(20, 110, 300, 40),
+      ]);
+      final low = sitesNow().last;
+      String delayOf(String selector, JSObject within) => globalContext
+          .callMethod<JSObject>(
+            'getComputedStyle'.toJS,
+            first(selector, within)!,
+          )
+          .callMethod<JSString>('getPropertyValue'.toJS, 'animation-delay'.toJS)
+          .toDart;
+      expect(delayOf('.ppc-bwalk', low), '4.1s');
+      // With the stacker, his keyframes start at once and loop when the
+      // building trips end.
+      final crew = ConstructionCrew.of(
+        ConstructionLayout.of(900, 180, boxes: sample),
+        sample,
+      )!;
+      final delays = [
+        for (final d in delay('.ppc-bwalk').split(','))
+          double.parse(d.trim().replaceAll('s', '')),
+      ];
+      expect(delays.first, 0);
+      expect(delays.last, closeTo(crew.buildEnd, 0.001));
       // Planning draws the outlines at once, then ticks and the measure.
       expect(delay('.ppc-measure'), '0.25s');
       String animationCount(String selector) => globalContext
@@ -410,9 +441,199 @@ void main() {
           )
           .toDart;
       // The loops never end.
-      expect(animationCount('.ppc-arm'), 'infinite');
-      expect(animationCount('.ppc-bwalk'), 'infinite');
+      expect(animationCount('.ppc-ha'), 'infinite');
+      expect(animationCount('.ppc-bwalk'), '1, infinite');
       expect(animationCount('.ppc-measure'), '1');
+    });
+  });
+
+  group('the stacker and the block', () {
+    const wide = Rect.fromLTWH(40, 60, 700, 190);
+    const card = [
+      ConstructionBox(12, 12, 150, 166),
+      ConstructionBox(178, 14, 260, 18),
+      ConstructionBox(178, 44, 500, 10),
+      ConstructionBox(178, 138, 96, 36),
+    ];
+
+    String computed(JSObject el, String prop) => globalContext
+        .callMethod<JSObject>('getComputedStyle'.toJS, el)
+        .callMethod<JSString>('getPropertyValue'.toJS, prop.toJS)
+        .toDart;
+
+    List<JSObject> siteStyles() =>
+        all('style[id^="pinpoint-construction-style-"]');
+
+    test('a site with room has the stacker, his keyframes in a style of '
+        'its own', () {
+      stage.add('a', wide, card);
+      final site = sitesNow().single;
+      expect(text(site, 'className'), contains('ppc-stacker-on'));
+      expect(text(site, 'className'), contains('ppc-k1'));
+      expect(computed(first('.ppc-w-stack', site)!, 'display'), 'block');
+      final styles = siteStyles();
+      expect(styles, hasLength(1));
+      final css = text(styles.single, 'textContent');
+      expect(css, contains('@keyframes ppc-k1-sf{'));
+      expect(css, isNot(contains('blur')));
+      final layout = ConstructionLayout.of(700, 190, boxes: card);
+      expect(css, ConstructionMarkup.siteCss(layout, card, 'k1'));
+    });
+
+    test('the pieces are there: poses, flames, the carried and thrown '
+        'block', () {
+      stage.add('a', wide, card);
+      final site = sitesNow().single;
+      for (final sel in [
+        '.ppc-sp-st',
+        '.ppc-sfa',
+        '.ppc-sfb',
+        '.ppc-sp-pl',
+        '.ppc-fl-a',
+        '.ppc-fl-b',
+        '.ppc-scb .ppc-blk',
+        '.ppc-thrown .ppc-blk',
+      ]) {
+        expect(first(sel, site), isNotNull, reason: sel);
+      }
+      // At rest only the standing pose shows; the rest waits for its time.
+      expect(computed(first('.ppc-sp-st', site)!, 'opacity'), '1');
+      for (final sel in ['.ppc-sfly', '.ppc-sp-pl', '.ppc-sfl', '.ppc-scb']) {
+        // They are animated (opacity steps) once building starts: the
+        // keyframes start at 0.
+        expect(computed(first(sel, site)!, 'opacity'), '0', reason: sel);
+      }
+      expect(computed(first('.ppc-thrown', site)!, 'opacity'), '0');
+      // The flames are triangles of borders, the block has a hard shadow.
+      final flame = first('.ppc-fl-a', site)!;
+      expect(computed(flame, 'border-top-style'), 'solid');
+      expect(computed(flame, 'border-radius'), '0px');
+      final blk = first('.ppc-thrown .ppc-blk', site)!;
+      expect(computed(blk, 'border-top-width'), '1px');
+      expect(computed(blk, 'box-shadow'), contains('2px 2px 0px'));
+      expect(computed(blk, 'border-radius'), '0px');
+    });
+
+    test('a small site has no stacker and no style of its own', () {
+      stage.add('a', const Rect.fromLTWH(40, 60, 230, 70), card);
+      final site = sitesNow().single;
+      expect(text(site, 'className'), isNot(contains('ppc-stacker-on')));
+      expect(computed(first('.ppc-w-stack', site)!, 'display'), 'none');
+      expect(siteStyles(), isEmpty);
+    });
+
+    test('each site has its own key; up to three, no clash', () {
+      stage.add('a', wide, card);
+      stage.add('b', const Rect.fromLTWH(40, 300, 700, 190), card);
+      stage.add('c', const Rect.fromLTWH(40, 540, 700, 190), card);
+      final ids = [for (final s in siteStyles()) text(s, 'id')];
+      expect(ids, hasLength(3));
+      expect(ids.toSet(), hasLength(3));
+      final keys = [
+        for (final s in sitesNow())
+          RegExp(r'ppc-k\d+').firstMatch(text(s, 'className'))!.group(0),
+      ];
+      expect(keys.toSet(), hasLength(3));
+    });
+
+    test('the style goes with the site: removal, fade, dispose', () async {
+      stage.add('a', wide, card);
+      stage.add('b', const Rect.fromLTWH(40, 300, 700, 190), card);
+      expect(siteStyles(), hasLength(2));
+      stage.remove('a', fade: false);
+      expect(siteStyles(), hasLength(1));
+      stage.remove('b');
+      // Still there while it fades, gone after.
+      expect(siteStyles(), hasLength(1));
+      await wait(ConstructionMarkup.fadeMillis + 200);
+      expect(siteStyles(), isEmpty);
+      stage.add('c', wide, card);
+      stage.dispose();
+      expect(siteStyles(), isEmpty);
+    });
+
+    test('a stale style from a hot restart is removed at the start', () {
+      stage.dispose();
+      final stale = document().callMethod<JSObject>(
+        'createElement'.toJS,
+        'style'.toJS,
+      );
+      stale['id'] = '${ConstructionMarkup.styleId}-k9'.toJS;
+      (document()['head']! as JSObject).callMethod<JSAny?>(
+        'appendChild'.toJS,
+        stale,
+      );
+      stage = createConstructionStage();
+      expect(siteStyles(), isEmpty);
+      expect(all('#${ConstructionMarkup.styleId}'), hasLength(1));
+    });
+
+    test('the builder stands where the Dart layout aims him', () {
+      stage.add('a', wide, card);
+      final site = sitesNow().single;
+      final layout = ConstructionLayout.of(700, 190, boxes: card);
+      expect(layout.aimed, isTrue);
+      expect(
+        double.parse(styleOf(site, '--hl').replaceAll('px', '')),
+        closeTo(layout.hammerLeft, 0.001),
+      );
+      // In the page, the picture's box is where the layout says.
+      final hammer = first('.ppc-hammer', site)!;
+      final box = hammer.callMethod<JSObject>('getBoundingClientRect'.toJS);
+      final siteBox = site.callMethod<JSObject>('getBoundingClientRect'.toJS);
+      double v(JSObject r, String k) => (r[k]! as JSNumber).toDartDouble;
+      // Before building starts the builder is off to the left: check the
+      // custom property of the CSS instead.
+      expect(computed(hammer, 'left'), styleOf(site, '--hl'));
+      expect(v(box, 'width'), closeTo(layout.hammerBoxWidth, 0.5));
+      expect(v(siteBox, 'width'), closeTo(layout.width, 0.5));
+    });
+
+    test('the finish lands the stacker from where he is', () {
+      stage.add('a', wide, card);
+      stage.reveal('a', null);
+      final site = sitesNow().single;
+      expect(text(site, 'className'), contains(ConstructionMarkup.revealClass));
+      // Planning: he is above the site, so he lands from above.
+      expect(styleOf(site, '--ax'), isNotEmpty);
+      expect(styleOf(site, '--ay'), endsWith('px'));
+      expect(computed(first('.ppc-lnd', site)!, 'animation-name'), 'ppc-land');
+      // His flight stops; the wheelbarrow is paused.
+      expect(computed(first('.ppc-stk', site)!, 'animation-name'), 'none');
+      expect(
+        computed(first('.ppc-bwalk', site)!, 'animation-play-state'),
+        'paused',
+      );
+      // A site without the stacker sets no landing.
+      stage.add('b', const Rect.fromLTWH(40, 300, 230, 70), card);
+      stage.reveal('b', null);
+      expect(styleOf(sitesNow().last, '--ax'), isEmpty);
+    });
+
+    test('reduced motion: no part of the stacker animates', () {
+      stage.setReducedMotion(true);
+      stage.add('a', wide, card);
+      final site = sitesNow().single;
+      for (final sel in [
+        '.ppc-stk',
+        '.ppc-sp-st',
+        '.ppc-sfly',
+        '.ppc-sfl',
+        '.ppc-scb',
+        '.ppc-thrown',
+        '.ppc-tb',
+        '.ppc-bwalk',
+        '.ppc-flip',
+        '.ppc-slip',
+        '.ppc-sbob',
+        '.ppc-fl-a',
+      ]) {
+        expect(
+          computed(first(sel, site)!, 'animation-name'),
+          'none',
+          reason: sel,
+        );
+      }
     });
   });
 
@@ -552,7 +773,7 @@ void main() {
       );
     });
 
-    test('line art is multiplied, the picture of the widget is not', () {
+    test('the art is coloured: nothing is multiplied', () {
       stage.add('a', rect, sample);
       stage.reveal('a', Uint8List.fromList([0x89, 0x50]));
       final site = sitesNow().single;
@@ -560,8 +781,8 @@ void main() {
           .callMethod<JSObject>('getComputedStyle'.toJS, first(selector, site)!)
           .callMethod<JSString>('getPropertyValue'.toJS, 'mix-blend-mode'.toJS)
           .toDart;
-      expect(blend('.ppc-body'), 'multiply');
-      expect(blend('.ppc-cone'), 'multiply');
+      expect(blend('.ppc-body'), 'normal');
+      expect(blend('.ppc-cone'), 'normal');
       expect(blend('.ppc-shotbox img'), 'normal');
     });
 
@@ -608,11 +829,14 @@ void main() {
       stage.add('a', rect, sample);
       final site = sitesNow().single;
       for (final selector in [
-        '.ppc-arm',
         '.ppc-barrow',
         '.ppc-bwalk',
         '.ppc-hin',
-        '.ppc-roller',
+        '.ppc-ha',
+        '.ppc-stk',
+        '.ppc-sbob',
+        '.ppc-fl',
+        '.ppc-thrown',
         '.ppc-dust',
         '.ppc-box',
         '.ppc-fix',
@@ -655,7 +879,7 @@ void main() {
   test('the layout in the page matches the layout in Dart', () {
     // The same class text and variables as the Dart side builds.
     stage.add('a', const Rect.fromLTWH(10, 10, 360, 70), sample);
-    final layout = ConstructionLayout.of(360, 70);
+    final layout = ConstructionLayout.of(360, 70, boxes: sample);
     final site = sitesNow().single;
     expect(styleOf(site, '--sh'), isNotEmpty);
     expect(

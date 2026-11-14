@@ -93,7 +93,7 @@ void main() {
       expect(layout.painter, isFalse);
       // The builder stays left of the planners.
       expect(
-        layout.hammerLeft + 95 * layout.hammerScale,
+        layout.hammerLeft + layout.hammerBoxWidth,
         lessThanOrEqualTo(layout.zoneEnd),
       );
       expect(
@@ -125,14 +125,14 @@ void main() {
         ]),
       );
       // The wheelbarrow never walks into the builder or the planners.
-      final barrowWidth = 121 * layout.barrowScale;
+      final barrowWidth = layout.barrowBoxWidth;
       expect(
         layout.barrowLeft + layout.barrowRun + barrowWidth,
         lessThanOrEqualTo(layout.zoneEnd),
       );
       expect(
         layout.barrowLeft,
-        greaterThanOrEqualTo(layout.hammerLeft + 95 * layout.hammerScale),
+        greaterThanOrEqualTo(layout.hammerLeft + layout.hammerBoxWidth),
       );
     });
 
@@ -172,6 +172,9 @@ void main() {
       expect(vars, matches(RegExp(r'--bl:[\d.]+px')));
       expect(vars, contains('--wd:'));
       for (final name in [
+        '--spl',
+        '--ss',
+        '--kl',
         '--sw',
         '--hin',
         '--bin',
@@ -260,11 +263,12 @@ void main() {
     test('the CSS has the motion, and a reduced-motion switch', () {
       const css = ConstructionMarkup.css;
       for (final name in [
-        'ppc-swing',
         'ppc-dust',
         'ppc-walk',
         'ppc-la',
-        'ppc-roll',
+        'ppc-sbob',
+        'ppc-flick',
+        'ppc-land',
         'ppc-pop',
         'ppc-fall-l',
         'ppc-fall-r',
@@ -287,7 +291,7 @@ void main() {
       }
       expect(css, contains('prefers-reduced-motion:reduce'));
       expect(css, contains('.${ConstructionMarkup.reducedClass}'));
-      expect(css, contains('mix-blend-mode:multiply'));
+      expect(css, isNot(contains('mix-blend-mode')));
       expect(css, contains('repeating-linear-gradient'));
     });
 

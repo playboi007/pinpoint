@@ -90,9 +90,6 @@ void main() {
   group('building: from 2.5 s until fixed, by delays only', () {
     test('the builder walks in, then hits every 0.6 s without end', () {
       expect(ConstructionTimeline.hammerStart, closeTo(3.6, 1e-9));
-      expect(animationOf('.ppc-arm'), contains('.6s'));
-      expect(animationOf('.ppc-arm'), contains('3.6s'));
-      expect(animationOf('.ppc-arm'), contains('infinite'));
       expect(animationOf('.ppc-dip'), contains('3.6s infinite'));
       expect(animationOf('.ppc-ha'), contains('3.6s infinite'));
       expect(animationOf('.ppc-bwalk'), contains('4.1s infinite'));
@@ -214,7 +211,6 @@ void main() {
           contains('ppc-paint .8s'),
         );
         expect(animationOf('.ppc-reveal .ppc-dip'), 'none');
-        expect(animationOf('.ppc-reveal .ppc-arm'), 'none');
         expect(rule('.ppc-reveal .ppc-bwalk'), contains('paused'));
         expect(animationOf('.ppc-reveal .ppc-done'), contains('ppc-pop 1.2s'));
         // The done worker comes when the painter is nearly through.
@@ -256,7 +252,8 @@ void main() {
       expect(
         css,
         contains(
-          '.ppc-early .ppc-w-hammer,#${ConstructionMarkup.rootId} .ppc-early .ppc-w-barrow{display:none}',
+          '.ppc-early .ppc-w-hammer,#${ConstructionMarkup.rootId} .ppc-early .ppc-w-barrow,'
+          '#${ConstructionMarkup.rootId} .ppc-early .ppc-w-stack{display:none}',
         ),
       );
     });
@@ -481,97 +478,163 @@ void main() {
       'cone',
     ];
 
-    test('both sets have the names of the coloured set', () {
-      for (final set in [
-        ConstructionAssets.placeholders,
-        ConstructionAssets.colouredSet,
-      ]) {
-        final have = {for (final a in set) a.name};
-        expect(have, containsAll(names));
-        expect(set.map((a) => a.name).toSet().length, set.length);
-      }
-      expect(ConstructionAssets.colouredSet, hasLength(names.length));
-    });
-
-    test('the coloured files are named like their assets, all coloured', () {
-      for (final a in ConstructionAssets.colouredSet) {
+    test('the files are named like their assets and exist', () {
+      for (final a in ConstructionAssets.base) {
         expect(a.file, a.name);
-        expect(a.lineArt, isFalse, reason: a.name);
-      }
-    });
-
-    test('the placeholders are the existing files, all line art', () {
-      for (final a in ConstructionAssets.placeholders) {
-        expect(a.lineArt, isTrue, reason: a.name);
         expect(
           File('assets/construction/${a.file}.webp').existsSync(),
           isTrue,
-          reason: '${a.name} -> ${a.file}',
+          reason: a.name,
         );
       }
+      expect(ConstructionAssets.base.map((a) => a.name), names);
+      // The placeholder files and loose parts are gone.
+      for (final gone in ['hammer_arm', 'hammer_body', 'painter', 'roller']) {
+        expect(
+          File('assets/construction/$gone.webp').existsSync(),
+          isFalse,
+          reason: gone,
+        );
+        expect(ConstructionAssets.names, isNot(contains(gone)));
+      }
     });
 
-    test('the set in use is the placeholders until the coloured one lands', () {
-      expect(ConstructionAssets.coloured, isFalse);
-      expect(ConstructionAssets.all, ConstructionAssets.placeholders);
-      expect(ConstructionAssets.looseParts, isTrue);
-      expect(ConstructionAssets.names, contains('hammer_arm'));
-      expect(ConstructionAssets.of('cone').file, 'cone');
+    test('the sizes are the coloured files\' (half their pixels)', () {
+      Map<String, (double, double)> sizes(List<ConstructionAsset> set) => {
+        for (final a in set) a.name: (a.width, a.height),
+      };
+      final c = sizes(ConstructionAssets.base);
+      expect(c['planner_read_a'], (84, 127));
+      expect(c['planner_read_b'], (84, 127));
+      expect(c['planner_point_a'], (86.5, 129));
+      expect(c['planner_point_b'], (86.5, 129));
+      expect(c['builder_a'], (119, 130.5));
+      expect(c['builder_b'], (119, 130.5));
+      expect(c['walk_a'], (139.5, 124));
+      expect(c['walk_b'], (139.5, 124));
+      expect(c['painter_a'], (84.5, 146));
+      expect(c['painter_b'], (84.5, 146));
+      expect(c['done'], (70, 128.5));
+      expect(c['cone'], (61.5, 70));
     });
 
-    test('the sizes keep each character\'s design box', () {
-      // Both frames of a character have one size, so it does not jump.
-      for (final set in [
-        ConstructionAssets.placeholders,
-        ConstructionAssets.colouredSet,
+    test('the sizes are half the pixels of the files', () {
+      // webp: the VP8X chunk has the canvas size minus one; VP8L and VP8
+      // headers differ, so read the size with the file's own header.
+      for (final a in ConstructionAssets.base) {
+        final bytes = File('assets/construction/${a.file}.webp')
+            .readAsBytesSync();
+        final (w, h) = _webpSize(bytes);
+        expect(w / 2, a.width, reason: '${a.name} width');
+        expect(h / 2, a.height, reason: '${a.name} height');
+      }
+    });
+
+    test('both frames of a character have one size, so it does not jump', () {
+      for (final base in [
+        'planner_read',
+        'planner_point',
+        'builder',
+        'walk',
+        'painter',
       ]) {
-        for (final base in [
-          'planner_read',
-          'planner_point',
-          'builder',
-          'walk',
-          'painter',
-        ]) {
-          final a = set.firstWhere((x) => x.name == '${base}_a');
-          final b = set.firstWhere((x) => x.name == '${base}_b');
-          expect((a.width, a.height), (b.width, b.height), reason: base);
-        }
+        final a = ConstructionAssets.of('${base}_a');
+        final b = ConstructionAssets.of('${base}_b');
+        expect((a.width, a.height), (b.width, b.height), reason: base);
       }
-      final c = {for (final a in ConstructionAssets.colouredSet) a.name: a};
-      expect((c['builder_a']!.width, c['builder_a']!.height), (95, 123));
-      expect((c['walk_a']!.width, c['walk_a']!.height), (121, 112));
-      expect((c['painter_a']!.width, c['painter_a']!.height), (114, 189));
-      expect((c['done']!.width, c['done']!.height), (88, 146));
-      expect((c['cone']!.width, c['cone']!.height), (65, 81));
-      expect(
-        (c['planner_read_a']!.width, c['planner_read_a']!.height),
-        (74, 123),
-      );
     });
 
-    test('multiply is only for line art', () {
-      // The CSS multiplies only the class of line art.
-      expect(RegExp(r'mix-blend-mode:multiply').allMatches(css).length, 1);
-      expect(css, contains('img.ppc-line{mix-blend-mode:multiply}'));
-      // Every picture of a line-art asset has the class, others do not.
+    test('the art is coloured: normal blending, no multiply anywhere', () {
+      expect(css, isNot(contains('mix-blend-mode')));
+      expect(css, isNot(contains('ppc-line')));
       final html = ConstructionMarkup.siteHtml(urls);
-      for (final img in RegExp(r'<img [^>]*>').allMatches(html)) {
-        final tag = img.group(0)!;
-        final src = RegExp(r'src="x/([a-z_]+)\.webp"')
-            .firstMatch(tag)!
-            .group(1)!;
-        final asset = ConstructionAssets.of(src);
-        expect(tag.contains('ppc-line'), asset.lineArt, reason: src);
-      }
-      // A site built from the coloured set would carry no multiply class.
-      expect(ConstructionAssets.colouredSet.where((a) => a.lineArt), isEmpty);
+      expect(html, isNot(contains('ppc-line')));
+      expect(html, isNot(contains('ppc-arm')));
+      expect(html, isNot(contains('ppc-roller')));
+      expect(css, isNot(contains('ppc-arm')));
+      expect(css, isNot(contains('ppc-roller')));
     });
 
     test('the pictures have inline sizes from the manifest', () {
       final html = ConstructionMarkup.siteHtml(urls);
-      expect(html, contains('style="width:60px;height:123px"'));
-      expect(html, contains('style="width:74px;height:123px"'));
-      expect(html, contains('style="width:68px;height:68px"'));
+      expect(html, contains('style="width:119px;height:130.5px"'));
+      expect(html, contains('style="width:86.5px;height:129px"'));
+      expect(html, contains('style="width:84px;height:127px"'));
+      expect(
+        RegExp(r'style="width:139\.5px').allMatches(html).length,
+        0,
+        reason: 'the walkers are sized by the CSS, not inline',
+      );
+    });
+
+    test('the CSS sizes come from the manifest too', () {
+      expect(css, contains('calc(61.5px*var(--sc));height:calc(70.0px'));
+      expect(css, contains('calc(139.5px*var(--sb));height:calc(124.0px'));
+      expect(css, contains('calc(84.5px*var(--sp));height:calc(146.0px'));
+      expect(css, contains('height:calc(128.5px*var(--sd));width:calc(70.0px'));
+      expect(css, contains('width:119.0px;height:130.5px'));
+    });
+
+    test('the stacker has placeholders until his files exist', () {
+      expect(ConstructionAssets.stackerArt, isFalse);
+      // His poses are pictures that exist now.
+      for (final name in [
+        ConstructionAssets.stackerStand,
+        ConstructionAssets.stackerFlyA,
+        ConstructionAssets.stackerFlyB,
+        ConstructionAssets.stackerPlace,
+      ]) {
+        expect(ConstructionAssets.names, contains(name));
+      }
+      expect(ConstructionAssets.names, isNot(contains('block')));
+      // The files he will have: one canvas, a block.
+      expect(ConstructionAssets.stackerSet.map((a) => a.name), [
+        'stacker_stand',
+        'stacker_fly_a',
+        'stacker_fly_b',
+        'stacker_place',
+        'block',
+      ]);
+      final poses = ConstructionAssets.stackerSet.take(4);
+      for (final a in poses) {
+        expect((a.width, a.height), (90, 135), reason: a.name);
+        expect(a.file, a.name);
+      }
+      final block = ConstructionAssets.stackerSet.last;
+      expect((block.width, block.height), (40, 40));
+    });
+
+    test('the placeholder stacker is drawn in CSS: flames and a block', () {
+      final html = ConstructionMarkup.siteHtml(urls);
+      expect(html, contains('class="ppc-fl ppc-fl-a"'));
+      expect(html, contains('class="ppc-fl ppc-fl-b"'));
+      expect(RegExp('class="ppc-blk"').allMatches(html), hasLength(2));
+      // The block: paper, a 1 px ink border, a hard 2 px shadow.
+      final blk = rule('.ppc-blk');
+      expect(blk, contains('border:1px solid var(--ppc-ink)'));
+      expect(blk, contains('background:var(--ppc-paper)'));
+      expect(blk, contains('box-shadow:2px 2px 0 var(--ppc-shadow)'));
+      // The flames are triangles of the accent and yellow, no blur.
+      expect(rule('.ppc-fl'), contains('var(--ppc-accent)'));
+      expect(css, contains('#ffc933'));
+      expect(rule('.ppc-fl'), contains('step-end infinite'));
     });
   });
+}
+
+/// The width and height in pixels of a webp file (lossy, lossless or
+/// extended).
+(int, int) _webpSize(List<int> b) {
+  int le16(int o) => b[o] | b[o + 1] << 8;
+  int le24(int o) => b[o] | b[o + 1] << 8 | b[o + 2] << 16;
+  final kind = String.fromCharCodes(b.sublist(12, 16));
+  switch (kind) {
+    case 'VP8X':
+      return (le24(24) + 1, le24(27) + 1);
+    case 'VP8L':
+      final bits = b[21] | b[22] << 8 | b[23] << 16 | b[24] << 24;
+      return ((bits & 0x3fff) + 1, ((bits >> 14) & 0x3fff) + 1);
+    default:
+      return (le16(26) & 0x3fff, le16(28) & 0x3fff);
+  }
 }
