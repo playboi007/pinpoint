@@ -34,7 +34,7 @@ import '../sink/http_sink.dart';
 import '../sink/markdown_formatter.dart';
 import '../sink/pinpoint_sink.dart';
 import '../tape/tape_boot.dart';
-import '../tape/tape_recorder.dart' show TapeSince;
+import '../tape/tape_recorder.dart' show SinceTime, TapeSince;
 import '../theme/pinpoint_theme.dart';
 import '../theme/pinpoint_tokens.dart';
 import '../trace/note_trace.dart';
@@ -740,11 +740,18 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
       return note;
     }
     try {
+      final draft = widget.controller.draft;
+      final from = draft.tapeFrom;
       final hasMark = session.recorder.lastOf(TraceKind.mark) != null;
+      // The range picker's choice; a start at the earliest time is app
+      // start, so the tape can be full.
       final tape = session.saveTape(
-        since: session.tapes.canSaveFull || !hasMark
+        since: from != null && from > session.tapes.earliestT
+            ? SinceTime(from)
+            : from != null || session.tapes.canSaveFull || !hasMark
             ? TapeSince.start
             : TapeSince.parse('mark'),
+        untilT: draft.tapeTo,
       );
       await client.saveTape(tape);
       return note.copyWith(

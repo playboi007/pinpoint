@@ -8,6 +8,7 @@ import '../model/annotation.dart';
 import '../theme/controls.dart';
 import '../theme/pinpoint_tokens.dart';
 import '../trace/trace_session.dart';
+import 'tape_range_picker.dart';
 
 /// The Comment tab of the info panel: intent, comment, and whether to attach
 /// a screenshot. Its buttons are in [CommentFooter], which the info panel
@@ -46,6 +47,7 @@ class CommentForm extends StatelessWidget {
         '${tapes.canSaveFull || ago == null ? '' : ', tape starts '
                   '${ago < 90 ? '$ago s' : '${(ago / 60).round()} min'} ago'})';
   }
+
   static const Key sendKey = ValueKey<String>('pinpoint.comment.send');
   static const Key draftKey = ValueKey<String>('pinpoint.comment.draft');
   static const Key copyKey = ValueKey<String>('pinpoint.comment.copy');
@@ -165,6 +167,30 @@ class CommentForm extends StatelessWidget {
                       ? null
                       : (value) => draft.attachTape = value,
                   label: label,
+                ),
+              ),
+            // Which part of the run goes with the note.
+            if (TraceSession.current?.tapes case final tapes?)
+              AnimatedSize(
+                duration: const Duration(milliseconds: 260),
+                curve: Curves.easeOutCubic,
+                alignment: Alignment.topCenter,
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 200),
+                  child: draft.attachTape && tapeLabel() != null
+                      ? Padding(
+                          key: const ValueKey<String>('range'),
+                          padding: const EdgeInsets.only(top: 12, left: 22),
+                          child: TapeRangePicker(
+                            draft: draft,
+                            tapes: tapes,
+                            enabled: !sending,
+                          ),
+                        )
+                      : const SizedBox(
+                          key: ValueKey<String>('none'),
+                          width: double.infinity,
+                        ),
                 ),
               ),
           ],

@@ -4,9 +4,11 @@ import 'package:pinpoint/pinpoint.dart';
 import 'package:pinpoint/src/bridge/note_detail.dart';
 import 'package:pinpoint/src/overlay/comment_form.dart';
 import 'package:pinpoint/src/overlay/note_view.dart';
+import 'package:pinpoint/src/overlay/tape_range_picker.dart';
 import 'package:pinpoint/src/sink/bridge_client.dart';
 import 'package:pinpoint/src/sink/markdown_formatter.dart';
 import 'package:pinpoint/src/tape/tape_player.dart';
+import 'package:pinpoint/src/trace/trace_session.dart';
 
 import '../fixtures/pin_fixture.dart';
 import '../support/fake_bridge.dart';
@@ -45,7 +47,11 @@ void main() {
   Finder appText(String text) =>
       find.descendant(of: find.byType(Scaffold), matching: find.text(text));
 
-  Future<String> writeNote(WidgetTester tester, {bool tape = true}) async {
+  Future<String> writeNote(
+    WidgetTester tester, {
+    bool tape = true,
+    void Function()? range,
+  }) async {
     // What the user did before noticing the bug.
     await tester.tap(appText('row 1'));
     await tester.pump(Duration.zero);
@@ -61,6 +67,7 @@ void main() {
       await tester.tap(find.byKey(CommentForm.tapeKey));
       await tester.pump();
     }
+    range?.call();
     await tester.enterText(find.byKey(CommentForm.fieldKey), 'Row 1 is off');
     await tester.pump();
     await tester.tap(find.byKey(CommentForm.sendKey));
@@ -87,6 +94,24 @@ void main() {
     // The agent's header and the Markdown say so.
     expect(noteText(note, NoteDetail.compact), contains('has tape'));
     expect(markdownFromJson(note), contains('Tape: ${tape['id']} (full'));
+  });
+
+  testWidgets('the range picker shows with the switch, and the tape holds '
+      'only the chosen range', (tester) async {
+    await tester.pumpWidget(host());
+    final id = await writeNote(
+      tester,
+      range: () {
+        expect(find.byType(TapeRangePicker), findsOneWidget);
+        // From after the tap on row 1 to now: no input in it.
+        controller.draft.setTapeRange(TraceSession.current!.tapes.now, null);
+      },
+    );
+    final tape = bridge.notes[id]!['tape']! as Map<String, Object?>;
+    expect(tape['kind'], 'segment');
+    expect(tape['inputs'], 0);
+    // The range belongs to that note: the next one starts from the default.
+    expect(controller.draft.tapeFrom, isNull);
   });
 
   testWidgets('with the switch off, no tape goes', (tester) async {

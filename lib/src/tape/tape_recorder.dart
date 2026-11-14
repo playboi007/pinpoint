@@ -68,6 +68,14 @@ class SinceSeconds extends TapeSince {
   final double seconds;
 }
 
+/// From a recorder time [t] (ms since the recording began): the comment
+/// form's range picker.
+class SinceTime extends TapeSince {
+  const SinceTime(this.t);
+
+  final int t;
+}
+
 /// One request the tape recorder follows.
 class _Exchange {
   _Exchange(this.call, this.key);
@@ -154,6 +162,25 @@ class TapeRecorder implements NetTap {
     _replaying = value;
     if (!value) _lose('a replay ran before it');
   }
+
+  /// The recorder's time now, in ms.
+  int get now => recorder.now;
+
+  /// The earliest time a tape can start at: app start, or later when
+  /// something was dropped.
+  int get earliestT => _lostAtT ?? appStart?.t ?? 0;
+
+  /// The inputs held, oldest first, for the range picker's track.
+  Iterable<TraceEvent> get inputs => _inputs;
+
+  /// The marks held, oldest first.
+  Iterable<TraceEvent> get marks => _marks;
+
+  /// The route changes held, oldest first.
+  Iterable<TraceEvent> get routes => _routes;
+
+  /// The times of the requests held.
+  Iterable<int> get requestTimes => _net.values.map((e) => e.call.request.t);
 
   /// Bytes of the bodies held.
   int get bodyBytes => _bodyBytes;
@@ -288,6 +315,7 @@ class TapeRecorder implements NetTap {
     required TapeStart Function({required int t, required int seq}) startAt,
     String? id,
     String? name,
+    int? untilT,
   }) {
     var startSeq = 1;
     var startT = 0;
@@ -309,6 +337,9 @@ class TapeRecorder implements NetTap {
         }
         startSeq = mark.seq;
         startT = mark.t;
+      case SinceTime(:final t):
+        startT = t < 0 ? 0 : t;
+        startSeq = _firstSeqFrom(startT);
       case SinceSeconds(:final seconds):
         startT = recorder.now - (seconds * 1000).round();
         if (startT < 0) startT = 0;
@@ -330,16 +361,21 @@ class TapeRecorder implements NetTap {
     final full = wantsFull && canSaveFull;
     final start = full ? appStart! : startAt(t: startT, seq: startSeq);
 
+    // [untilT]: the end of the range. Inputs, requests, marks and routes
+    // after it are left out; an answer to a request made before it is kept,
+    // whenever it came.
+    bool inRange(TraceEvent e) =>
+        e.seq >= startSeq && (untilT == null || e.t <= untilT);
     final inputs = <TraceEvent>[
       for (final e in _inputs)
-        if (e.seq >= startSeq) e,
+        if (inRange(e)) e,
     ];
     final net = <NetExchange>[];
     final bodies = <int, Uint8List>{};
     final nth = <String, int>{};
     for (final exchange in _net.values) {
       final call = exchange.call;
-      if (call.request.seq < startSeq) continue;
+      if (!inRange(call.request)) continue;
       final n = net.length;
       final count = nth[exchange.key] = (nth[exchange.key] ?? 0) + 1;
       final response = call.response;
@@ -396,7 +432,7 @@ class TapeRecorder implements NetTap {
       net: net,
       marks: [
         for (final m in _marks)
-          if (m.seq >= startSeq)
+          if (inRange(m))
             TapeMark(
               seq: m.seq,
               t: m.t,
@@ -406,8 +442,7 @@ class TapeRecorder implements NetTap {
       ],
       routes: [
         for (final r in _routes)
-          if (r.seq >= startSeq && r.data['to'] is String)
-            r.data['to']! as String,
+          if (inRange(r) && r.data['to'] is String) r.data['to']! as String,
       ],
       partial: partial,
       partialReason: reason,

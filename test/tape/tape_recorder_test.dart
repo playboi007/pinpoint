@@ -130,6 +130,53 @@ void main() {
     expect(tape.net.single.n, 0);
   });
 
+  test('a range: from a time to a time leaves out what came before and '
+      'after, and keeps the answer of a request made inside it', () {
+    setUpWith();
+    now = 100;
+    tap('down'); // before the range
+    now = 1000;
+    request('https://api.test/in', '{"in":1}');
+    tap('down');
+    recorder.add(TraceKind.route, data: {'from': '/', 'to': '/form'});
+    recorder.add(TraceKind.mark, data: {'text': 'in', 'by': 'user'});
+    now = 2000;
+    tap('up');
+    now = 3000;
+    tap('down'); // after the range
+    request('https://api.test/out', '{"out":1}');
+
+    final tape = tapes.save(
+      since: const SinceTime(900),
+      untilT: 2500,
+      startAt: startAt,
+    );
+    expect(tape.kind, TapeKind.segment);
+    expect([for (final i in tape.inputs) i.t], [1005, 2000]);
+    expect([for (final n in tape.net) n.url], ['https://api.test/in']);
+    expect(tape.bodies, hasLength(1));
+    expect(tape.routes, ['/form']);
+    expect(tape.marks.single.text, 'in');
+    expect(tape.inputs.first.after, [0]);
+  });
+
+  test('a range from app start that ends early is still full', () {
+    setUpWith();
+    now = 100;
+    tap('down');
+    now = 3000;
+    tap('down');
+    final tape = tapes.save(
+      since: TapeSince.start,
+      untilT: 2000,
+      startAt: startAt,
+    );
+    expect(tape.kind, TapeKind.full);
+    expect(tape.inputs, hasLength(1));
+    expect(tapes.earliestT, 0);
+    expect(tapes.inputs, hasLength(2));
+  });
+
   test('since: seconds back, and mark:N names the Nth mark', () {
     setUpWith();
     recorder.add(TraceKind.mark, data: {'text': 'one'});

@@ -144,18 +144,22 @@ class TraceSession {
 
   /// A tape of the run from [since], or a [FormatException] for a mark
   /// that is not held.
-  Tape saveTape({TapeSince since = TapeSince.start, String? name}) =>
-      tapes.save(
-        since: since,
-        name: name,
-        startAt:
-            pageStart ??
-            ({required int t, required int seq}) => TapeStart(
-              t: t,
-              seq: seq,
-              wallTime: DateTime.now().toUtc().toIso8601String(),
-            ),
-      );
+  Tape saveTape({
+    TapeSince since = TapeSince.start,
+    String? name,
+    int? untilT,
+  }) => tapes.save(
+    since: since,
+    name: name,
+    untilT: untilT,
+    startAt:
+        pageStart ??
+        ({required int t, required int seq}) => TapeStart(
+          t: t,
+          seq: seq,
+          wallTime: DateTime.now().toUtc().toIso8601String(),
+        ),
+  );
 
   /// "Clear recording": drops the record and the tape stores at once.
   void clearRecording() {
