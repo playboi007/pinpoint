@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 import 'dart:ui' show Rect;
 
+import 'construction_boxes.dart';
 import 'construction_stage.dart';
 
 /// No page outside a browser: sites are never drawn.
@@ -19,7 +20,7 @@ class _NoStage implements ConstructionStage {
   void setReducedMotion(bool reduced) {}
 
   @override
-  void add(String id, Rect rect) {}
+  void add(String id, Rect rect, List<ConstructionBox> boxes) {}
 
   @override
   void move(String id, Rect rect) {}

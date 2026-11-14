@@ -42,6 +42,8 @@ import '../trace/trace_session.dart';
 import '../tweak/tweak_scope.dart';
 import '../tweak/tweak_session.dart';
 import 'agent_layer.dart';
+import 'construction/construction_blueprint.dart';
+import 'construction/construction_boxes.dart';
 import 'construction/construction_capture.dart';
 import 'construction/construction_sites.dart';
 import 'construction/construction_stage.dart';
@@ -182,7 +184,20 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
   late final ConstructionSites _construction = ConstructionSites(
     stage: constructionStage(),
     capture: _captureSite,
+    blueprint: _blueprintOf,
   );
+
+  /// The boxes of the widget of a note, read once when its site goes up.
+  List<ConstructionBox> _blueprintOf(String id, Rect rect) {
+    final RenderObject? object;
+    try {
+      object = _pins.elementOf(id)?.renderObject;
+    } catch (_) {
+      return const <ConstructionBox>[];
+    }
+    if (object == null) return const <ConstructionBox>[];
+    return ConstructionBlueprint.read(object, rect);
+  }
 
   Future<Uint8List?> _captureSite(Rect rect) async {
     final boundary = widget.appKey.currentContext?.findRenderObject();

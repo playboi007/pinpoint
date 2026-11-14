@@ -3,6 +3,7 @@ import 'dart:ui' show Color, Rect;
 import 'package:flutter/foundation.dart';
 
 import '../../theme/pinpoint_tokens.dart';
+import 'construction_boxes.dart';
 import 'construction_stage_stub.dart'
     if (dart.library.js_interop) 'construction_stage_web.dart'
     as platform;
@@ -82,15 +83,19 @@ abstract interface class ConstructionStage {
   /// Whether motion is reduced: the site shows still.
   void setReducedMotion(bool reduced);
 
-  /// Puts up the site [id] over [rect].
-  void add(String id, Rect rect);
+  /// Puts up the site [id] over [rect]. [boxes] are the blueprint of the
+  /// widget, relative to [rect]'s top left; the stage draws them and breaks
+  /// them from a seed made of [id]. The site starts at once: planning for
+  /// 2.5 s, then building, all by CSS delays, until [reveal] or [remove].
+  void add(String id, Rect rect, List<ConstructionBox> boxes);
 
   /// Moves the site [id] to [rect].
   void move(String id, Rect rect);
 
-  /// Plays the finish of the site [id]: the workers leave, the cover comes
-  /// off and, with [png] (a picture of the widget as it is now), the widget
-  /// pops in. The controller removes the site when it is done.
+  /// Plays the finish of the site [id]: the boxes snap into place, the
+  /// painter rolls across, the workers leave, the cover comes off and, with
+  /// [png] (a picture of the widget as it is now), the widget pops in. The
+  /// controller removes the site when it is done.
   void reveal(String id, Uint8List? png);
 
   /// Takes the site [id] away: it fades, or with [fade] false goes at once.

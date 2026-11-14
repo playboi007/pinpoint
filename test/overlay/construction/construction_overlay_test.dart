@@ -26,22 +26,23 @@ void main() {
     controller.dispose();
   });
 
-  Widget host({bool reduced = false}) => MaterialApp(
-    builder: (context, child) => MediaQuery(
-      data: MediaQuery.of(context).copyWith(disableAnimations: reduced),
-      child: PinPointWrapper(
-        controller: controller,
-        config: const PinPointConfig(sinks: []),
-        child: child,
-      ),
-    ),
-    home: const PinFixture(),
-  );
+  Widget host({bool reduced = false, Widget home = const PinFixture()}) =>
+      MaterialApp(
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context).copyWith(disableAnimations: reduced),
+          child: PinPointWrapper(
+            controller: controller,
+            config: const PinPointConfig(sinks: []),
+            child: child,
+          ),
+        ),
+        home: home,
+      );
 
-  Future<String> noteOnTitle(WidgetTester tester) async {
+  Future<String> noteAt(WidgetTester tester, Offset point) async {
     controller.startPicking();
     await tester.pump();
-    await tester.tapAt(tester.getCenter(find.text('Title')));
+    await tester.tapAt(point);
     await tester.pump();
     await tester.pump();
     await tester.enterText(find.byKey(CommentForm.fieldKey), 'Bigger');
@@ -54,6 +55,9 @@ void main() {
     await tester.pump();
     return controller.notes.notes.last.id;
   }
+
+  Future<String> noteOnTitle(WidgetTester tester) async =>
+      noteAt(tester, tester.getCenter(find.text('Title')));
 
   Future<void> setStatus(
     WidgetTester tester,
@@ -75,6 +79,12 @@ void main() {
     expect(stage.sites.keys, [id]);
     final title = tester.getRect(find.text('Title'));
     expect(stage.sites[id], title);
+    // A Text has no boxes inside: the blueprint is the generic one.
+    expect(stage.boxes[id], isNotEmpty);
+    for (final b in stage.boxes[id]!) {
+      expect(b.left + b.width, lessThanOrEqualTo(title.width + 0.01));
+      expect(b.top + b.height, lessThanOrEqualTo(title.height + 0.01));
+    }
 
     // Settle, then check that nothing runs.
     await tester.pump(const Duration(seconds: 1));
@@ -83,9 +93,64 @@ void main() {
     // The agent's commands wait only while the app draws: no extra wait.
     expect(AgentCommands.appIsMoving, isFalse);
 
+    // Planning (2.5 s) and building have no frame: they are CSS delays.
+    await tester.pump(const Duration(seconds: 3));
+    expect(tester.hasRunningAnimations, isFalse);
+    expect(tester.binding.hasScheduledFrame, isFalse);
+
     await tester.pump(const Duration(seconds: 30));
+    expect(tester.hasRunningAnimations, isFalse);
     expect(tester.binding.hasScheduledFrame, isFalse);
     expect(AgentCommands.appIsMoving, isFalse);
+    // Read once: no second add or move for a widget that stays.
+    expect(stage.calls, ['add:$id']);
+  });
+
+  testWidgets('the blueprint is the boxes of the real widget, read once', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      host(
+        home: const Scaffold(
+          body: Align(
+            alignment: Alignment.topLeft,
+            child: Padding(
+              padding: EdgeInsets.all(20),
+              child: SizedBox(
+                width: 300,
+                height: 60,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    SizedBox(width: 40, height: 20),
+                    SizedBox(width: 40, height: 40),
+                    SizedBox(width: 40, height: 30),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    // The gap between the first two boxes.
+    final id = await noteAt(tester, const Offset(20 + 40 + 30, 20 + 30));
+    await setStatus(tester, id, NoteStatus.inProgress);
+    final rect = stage.sites[id]!;
+    final boxes = stage.boxes[id]!;
+    final sizes = {for (final b in boxes) (b.width, b.height)};
+    expect(sizes, containsAll([(40.0, 20.0), (40.0, 40.0), (40.0, 30.0)]));
+    for (final b in boxes) {
+      expect(b.left, greaterThanOrEqualTo(0));
+      expect(b.left + b.width, lessThanOrEqualTo(rect.width + 0.01));
+    }
+    // Relative to the widget: the first box is at its left edge.
+    final first = boxes.firstWhere((b) => b.width == 40 && b.height == 20);
+    expect(first.left, closeTo(0, 0.2));
+
+    await tester.pump(const Duration(seconds: 5));
+    expect(stage.calls, ['add:$id']);
+    expect(tester.binding.hasScheduledFrame, isFalse);
   });
 
   testWidgets('other statuses fade the site away', (tester) async {

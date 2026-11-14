@@ -14,13 +14,15 @@ void main() {
 
     test('under 24 px tall there are no workers: tape and hatching', () {
       final layout = ConstructionLayout.of(300, 23);
+      expect(layout.hasWorkers, isFalse);
+      expect(layout.planners, 0);
       expect(layout.hammer, isFalse);
       expect(layout.cones, isFalse);
       expect(layout.barrow, isFalse);
       expect(layout.painter, isFalse);
       expect(layout.classes, ['ppc-bare']);
       final tall = ConstructionLayout.of(300, 24);
-      expect(tall.hammer, isTrue);
+      expect(tall.hasWorkers, isTrue);
     });
 
     test('a worker is 56 px, or half the height on a big widget (at most '
@@ -44,7 +46,7 @@ void main() {
     test('the workers stay below the tape', () {
       for (final h in [24.0, 30.0, 40.0, 60.0, 120.0]) {
         final layout = ConstructionLayout.of(500, h);
-        if (!layout.hammer) continue;
+        if (!layout.hasWorkers) continue;
         expect(
           layout.height - layout.workerHeight - 2,
           greaterThanOrEqualTo(layout.tapeTop + layout.tapeHeight - 0.01),
@@ -53,27 +55,54 @@ void main() {
       }
     });
 
-    test('narrow: one hammer worker, in the middle', () {
-      final layout = ConstructionLayout.of(70, 80);
-      expect(layout.hammer, isTrue);
+    test('small: planners only, boxes still shown', () {
+      final layout = ConstructionLayout.of(140, 60);
+      expect(layout.hasWorkers, isTrue);
+      expect(layout.planners, 2);
+      expect(layout.hammer, isFalse);
+      expect(layout.cones, isFalse);
       expect(layout.barrow, isFalse);
       expect(layout.painter, isFalse);
-      final hammerWidth = 95 * layout.hammerScale;
+      expect(layout.classes, ['ppc-plan2']);
+    });
+
+    test('very small: one planner, the one that reads the blueprint', () {
+      final layout = ConstructionLayout.of(70, 80);
+      expect(layout.hasWorkers, isTrue);
+      expect(layout.planners, 1);
+      expect(layout.hammer, isFalse);
+      expect(layout.classes, isNot(contains('ppc-plan2')));
+      final plannerWidth = 74 * layout.hammerScale;
+      expect(plannerWidth, lessThanOrEqualTo(layout.width - 8));
+    });
+
+    test('a very narrow widget shrinks the workers to fit, or has none', () {
+      final fits = ConstructionLayout.of(40, 80);
+      if (fits.hasWorkers) {
+        expect(74 * fits.hammerScale, lessThanOrEqualTo(fits.width));
+      }
+      expect(ConstructionLayout.of(14, 80).hasWorkers, isFalse);
+    });
+
+    test('medium: planners and the builder, between cones', () {
+      final layout = ConstructionLayout.of(220, 70);
+      expect(layout.planners, 2);
+      expect(layout.hammer, isTrue);
+      expect(layout.cones, isTrue);
+      expect(layout.barrow, isFalse);
+      expect(layout.painter, isFalse);
+      // The builder stays left of the planners.
       expect(
-        layout.hammerLeft,
-        closeTo((layout.width - hammerWidth) / 2, 0.01),
+        layout.hammerLeft + 95 * layout.hammerScale,
+        lessThanOrEqualTo(layout.zoneEnd),
+      );
+      expect(
+        layout.zoneEnd,
+        lessThanOrEqualTo(layout.width - layout.plannersWidth),
       );
     });
 
-    test('a very narrow widget shrinks the worker to fit, or has none', () {
-      final fits = ConstructionLayout.of(40, 80);
-      if (fits.hammer) {
-        expect(95 * fits.hammerScale, lessThanOrEqualTo(fits.width));
-      }
-      expect(ConstructionLayout.of(14, 80).hammer, isFalse);
-    });
-
-    test('medium: hammer at the left, the wheelbarrow, a cone at each end', () {
+    test('wider: and the wheelbarrow, a cone at each end', () {
       final layout = ConstructionLayout.of(360, 70);
       expect(layout.hammer, isTrue);
       expect(layout.cones, isTrue);
@@ -82,23 +111,50 @@ void main() {
       expect(layout.hammerLeft, lessThan(layout.width / 4));
     });
 
-    test('wide: and a painter at the right when there is room', () {
+    test('wide: everything, with the painter for the finish', () {
       final layout = ConstructionLayout.of(900, 180);
       expect(layout.painter, isTrue);
-      expect(layout.classes, containsAll(['ppc-cones', 'ppc-barrow-on']));
-      expect(layout.classes, contains('ppc-painter-on'));
-      // The barrow never walks into the painter or the hammer worker.
+      expect(
+        layout.classes,
+        containsAll([
+          'ppc-plan2',
+          'ppc-hammer-on',
+          'ppc-cones',
+          'ppc-barrow-on',
+          'ppc-painter-on',
+        ]),
+      );
+      // The wheelbarrow never walks into the builder or the planners.
       final barrowWidth = 121 * layout.barrowScale;
-      final painterLeft =
-          layout.width - layout.painterRight - 114 * layout.painterScale;
       expect(
         layout.barrowLeft + layout.barrowRun + barrowWidth,
-        lessThanOrEqualTo(painterLeft),
+        lessThanOrEqualTo(layout.zoneEnd),
       );
       expect(
         layout.barrowLeft,
         greaterThanOrEqualTo(layout.hammerLeft + 95 * layout.hammerScale),
       );
+    });
+
+    test('the parts come in as the widget grows', () {
+      var steps = 0;
+      var last = (0, false, false, false);
+      for (var w = 40.0; w <= 1000; w += 20) {
+        final l = ConstructionLayout.of(w, 100);
+        final now = (l.planners, l.hammer, l.barrow, l.painter);
+        // Never fewer parts on a wider widget.
+        expect(now.$1, greaterThanOrEqualTo(last.$1), reason: 'width $w');
+        for (final (a, b) in [
+          (now.$2, last.$2),
+          (now.$3, last.$3),
+          (now.$4, last.$4),
+        ]) {
+          expect(!a && b, isFalse, reason: 'width $w');
+        }
+        if (now != last) steps++;
+        last = now;
+      }
+      expect(steps, greaterThanOrEqualTo(4));
     });
 
     test('the tape text shrinks with the width', () {
@@ -115,7 +171,22 @@ void main() {
       expect(vars, contains('--run:'));
       expect(vars, matches(RegExp(r'--bl:[\d.]+px')));
       expect(vars, contains('--wd:'));
+      for (final name in [
+        '--sw',
+        '--hin',
+        '--bin',
+        '--pout',
+        '--pa',
+        '--pb',
+        '--cl2',
+        '--ppw',
+        '--prun',
+        '--dl',
+      ]) {
+        expect(vars, contains('$name:'));
+      }
       expect(vars, isNot(contains('NaN')));
+      expect(vars, isNot(contains('Infinity')));
     });
   });
 
@@ -124,13 +195,23 @@ void main() {
       for (final name in ConstructionMarkup.assetNames) name: 'x/$name.webp',
     };
 
-    test('has the eight assets of the folder, each used', () {
-      expect(ConstructionMarkup.assetNames, hasLength(8));
+    test('uses every asset of the manifest, each in its place', () {
       final html = ConstructionMarkup.siteHtml(urls);
       for (final name in ConstructionMarkup.assetNames) {
         expect(html, contains('src="x/$name.webp"'));
       }
       expect(html, contains('UNDER PROGRESS'));
+      // Every two-frame character has both frames.
+      for (final pair in [
+        'planner_read',
+        'planner_point',
+        'builder',
+        'walk',
+        'painter',
+      ]) {
+        expect(html, contains('x/${pair}_a.webp'));
+        expect(html, contains('x/${pair}_b.webp'));
+      }
     });
 
     test('asset paths are inside the package', () {
@@ -148,6 +229,19 @@ void main() {
       expect(
         ConstructionMarkup.siteClass(layout, revealing: true),
         contains(ConstructionMarkup.revealClass),
+      );
+      expect(
+        ConstructionMarkup.siteClass(layout, revealing: true),
+        isNot(contains(ConstructionMarkup.earlyClass)),
+      );
+      expect(
+        ConstructionMarkup.siteClass(layout, revealing: true, early: true),
+        contains(ConstructionMarkup.earlyClass),
+      );
+      expect(
+        ConstructionMarkup.siteClass(layout, early: true),
+        isNot(contains(ConstructionMarkup.earlyClass)),
+        reason: 'only a finish can be early',
       );
     });
 
@@ -176,6 +270,18 @@ void main() {
         'ppc-fall-r',
         'ppc-peel',
         'ppc-bounce',
+        'ppc-break',
+        'ppc-fix',
+        'ppc-slip',
+        'ppc-snap',
+        'ppc-sweep',
+        'ppc-dimx',
+        'ppc-dimy',
+        'ppc-hin',
+        'ppc-bin',
+        'ppc-pleave',
+        'ppc-prun',
+        'ppc-paint',
       ]) {
         expect(css, contains('@keyframes $name'));
       }
@@ -183,6 +289,12 @@ void main() {
       expect(css, contains('.${ConstructionMarkup.reducedClass}'));
       expect(css, contains('mix-blend-mode:multiply'));
       expect(css, contains('repeating-linear-gradient'));
+    });
+
+    test('no Flutter-side motion: the CSS uses no JavaScript or timer', () {
+      expect(ConstructionMarkup.css, isNot(contains('javascript')));
+      expect(ConstructionMarkup.siteHtml(urls), isNot(contains('onload')));
+      expect(ConstructionMarkup.siteHtml(urls), isNot(contains('<script')));
     });
 
     test('the root does not take pointer events', () {

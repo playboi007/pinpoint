@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import '../../model/annotation.dart';
 import '../../theme/pinpoint_tokens.dart';
 import '../pin_tracker.dart';
+import 'construction_boxes.dart';
 import 'construction_layout.dart';
 import 'construction_markup.dart';
 import 'construction_stage.dart';
@@ -13,13 +14,25 @@ import 'construction_stage.dart';
 /// Takes one PNG of [rect] (global logical pixels), or null.
 typedef RegionCapture = Future<Uint8List?> Function(Rect rect);
 
+/// Reads the layout of the widget of note [id], whose visible rect is [rect]
+/// (global logical pixels): the boxes of its render tree, relative to
+/// [rect]'s top left. Empty when nothing can be read.
+typedef BlueprintReader = List<ConstructionBox> Function(String id, Rect rect);
+
 /// Puts a "construction site" over each widget the agent works on.
 ///
 /// While a note is `inProgress`, its widget is covered: hatching, tape that
-/// reads "UNDER PROGRESS", and small workers at work. When the note becomes
-/// `fixed` the workers finish, the cover comes off and the new widget pops
-/// in. For any other change (back to submitted, deleted, resolved, the
-/// widget gone) the site fades away.
+/// reads "UNDER PROGRESS", a blueprint of the widget's own boxes and small
+/// workers. The site has three phases, all by CSS delays that start when it
+/// goes up (this class only adds, moves and removes it): planning for 2.5 s,
+/// then building (the blueprint breaks and is repaired box by box, as long
+/// as the note is in progress), then, when the note becomes `fixed`, the
+/// finishing and reveal in one sequence: the boxes snap into place, the
+/// workers finish, the cover comes off and the new widget pops in. For any
+/// other change (back to submitted, deleted, resolved, the widget gone) the
+/// site fades away.
+///
+/// The blueprint is read once, when the site goes up, with [blueprint].
 ///
 /// It follows the pins' placements, which update on the app's own frames,
 /// and a status change. It draws nothing in Flutter and starts no animation,
@@ -31,6 +44,7 @@ class ConstructionSites {
   ConstructionSites({
     required this.stage,
     required this.capture,
+    this.blueprint,
     this.captureTimeout = const Duration(seconds: 5),
   });
 
@@ -39,6 +53,10 @@ class ConstructionSites {
 
   /// One picture of the widget, taken once the note is `fixed`.
   final RegionCapture capture;
+
+  /// Reads a widget's boxes when its site goes up. Without it, or when it
+  /// finds none, the site gets a few generic boxes from the widget's size.
+  final BlueprintReader? blueprint;
 
   /// The longest wait for [capture]; then the site goes without the bounce.
   final Duration captureTimeout;
@@ -142,8 +160,23 @@ class ConstructionSites {
       if (site != null) _drop(placement.id, fade: false);
       if (_sites.length >= ConstructionLayout.maxSites) continue;
       _sites[placement.id] = _Site(placement.rect);
-      stage.add(placement.id, placement.rect);
+      stage.add(placement.id, placement.rect, _boxesOf(placement));
     }
+  }
+
+  /// The blueprint of the widget: read once, or generic.
+  List<ConstructionBox> _boxesOf(PinPlacement placement) {
+    var boxes = const <ConstructionBox>[];
+    try {
+      boxes = blueprint?.call(placement.id, placement.rect) ?? boxes;
+    } catch (_) {
+      // A widget that cannot be read: generic boxes.
+    }
+    if (boxes.isNotEmpty) return boxes;
+    return ConstructionBoxes.generic(
+      placement.rect.width,
+      placement.rect.height,
+    );
   }
 
   /// The note became `fixed`: take one picture of the widget, then play the

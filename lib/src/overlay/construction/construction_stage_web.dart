@@ -7,6 +7,8 @@ import 'dart:ui' show Rect;
 import 'dart:ui_web' as ui_web;
 
 import '../../theme/pinpoint_tokens.dart';
+import 'construction_assets.dart';
+import 'construction_boxes.dart';
 import 'construction_layout.dart';
 import 'construction_markup.dart';
 import 'construction_stage.dart';
@@ -50,11 +52,16 @@ class _Site {
   _Site(this.element, this.layout);
 
   final _Node element;
+
+  /// Time since the site went up: a finish before the builders walked in
+  /// leaves them out.
+  final Stopwatch age = Stopwatch()..start();
   ConstructionLayout layout;
   Rect rect = Rect.zero;
   String klass = '';
   String style = '';
   bool revealing = false;
+  bool early = false;
 }
 
 class _WebStage implements ConstructionStage {
@@ -73,11 +80,12 @@ class _WebStage implements ConstructionStage {
   final Map<String, _Site> _sites = <String, _Site>{};
   final Set<Timer> _fades = <Timer>{};
   late final Map<String, String> _urls = {
-    for (final name in ConstructionMarkup.assetNames) name: _assetUrl(name),
+    for (final name in ConstructionMarkup.assetNames)
+      name: _assetUrl(ConstructionAssets.of(name).file),
   };
 
-  static String _assetUrl(String name) {
-    final path = ConstructionMarkup.assetPath(name);
+  static String _assetUrl(String file) {
+    final path = ConstructionMarkup.assetPath(file);
     try {
       return ui_web.assetManager.getAssetUrl(path);
     } catch (_) {
@@ -164,6 +172,7 @@ class _WebStage implements ConstructionStage {
     final klass = ConstructionMarkup.siteClass(
       layout,
       revealing: site.revealing,
+      early: site.early,
     );
     final style = ConstructionMarkup.siteStyle(
       layout,
@@ -181,12 +190,12 @@ class _WebStage implements ConstructionStage {
   }
 
   @override
-  void add(String id, Rect rect) {
+  void add(String id, Rect rect, List<ConstructionBox> boxes) {
     final root = _root;
     if (root == null) return;
     remove(id, fade: false);
     final element = _doc.createElement('div')
-      ..innerHTML = ConstructionMarkup.siteHtml(_urls);
+      ..innerHTML = ConstructionMarkup.siteHtml(_urls, id: id, boxes: boxes);
     final site = _Site(element, ConstructionLayout.of(rect.width, rect.height));
     _sites[id] = site;
     _place(site, rect);
@@ -209,6 +218,7 @@ class _WebStage implements ConstructionStage {
       return;
     }
     site.revealing = true;
+    site.early = site.age.elapsedMilliseconds < ConstructionMarkup.planMillis;
     _place(site, site.rect);
     if (png != null) {
       site.element.insertAdjacentHTML(

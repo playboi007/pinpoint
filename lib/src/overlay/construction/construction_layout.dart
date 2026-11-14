@@ -4,14 +4,21 @@ import 'dart:math' as math;
 /// of a given size.
 ///
 /// Plain numbers only (no `dart:ui`), so the markup that uses it can be
-/// built anywhere. The sizes come from the drawn size of each asset: the
-/// hammer worker is 123 px tall, so at height [workerHeight] its scale is
+/// built anywhere. Each character has a design box (see the constants
+/// below); at height [workerHeight] the builder's scale is
 /// `workerHeight / 123`.
+///
+/// The zones, read from the right: the planners stand at the right, the
+/// builder and the wheelbarrow work in the middle, and the painter and the
+/// "done" worker of the finish are at the left. A widget too small for all
+/// of them gets fewer: planners only, then the builder, then the wheelbarrow
+/// and the painter; under [minWorkersHeight] there are only tape and hatching.
 class ConstructionLayout {
   const ConstructionLayout._({
     required this.width,
     required this.height,
     required this.workerHeight,
+    required this.planners,
     required this.hammer,
     required this.cones,
     required this.barrow,
@@ -24,7 +31,8 @@ class ConstructionLayout {
     required this.hammerLeft,
     required this.barrowLeft,
     required this.barrowRun,
-    required this.painterRight,
+    required this.zoneEnd,
+    required this.plannersWidth,
     required this.tapeHeight,
     required this.tapeFont,
     required this.tapeTop,
@@ -56,14 +64,15 @@ class ConstructionLayout {
     final cap = (0.5 * widgetHeight).clamp(baseWorkerHeight, maxWorkerHeight);
     var wh = math.min(cap, 0.85 * widgetHeight);
     wh = math.min(wh, h - th - 2);
-    // The hammer worker must fit the width as well.
-    wh = math.min(wh, (w - 2 * pad) / _hammerWidth * _hammerHeight);
+    // One planner must fit the width as well.
+    wh = math.min(wh, (w - 2 * pad) / _plannerWidth * _plannerHeight);
     final workers = widgetHeight >= minWorkersHeight && wh >= minWorkerHeight;
     if (!workers) {
       return ConstructionLayout._(
         width: w,
         height: h,
         workerHeight: 0,
+        planners: 0,
         hammer: false,
         cones: false,
         barrow: false,
@@ -76,7 +85,8 @@ class ConstructionLayout {
         hammerLeft: 0,
         barrowLeft: 0,
         barrowRun: 0,
-        painterRight: 0,
+        zoneEnd: 0,
+        plannersWidth: 0,
         tapeHeight: th,
         tapeFont: tapeFont,
         tapeTop: tapeTop,
@@ -84,8 +94,9 @@ class ConstructionLayout {
       );
     }
 
+    // The builder and the planners are as tall as wh.
     final sh = wh / _hammerHeight;
-    // The wheelbarrow worker is a little smaller than the hammer worker.
+    // The wheelbarrow worker is a little smaller than the builder.
     final sb = sh * 0.8;
     // The painter, with the ladder, is a little taller.
     final sp = math.min(wh * 1.1, 0.9 * h) / _painterHeight;
@@ -93,27 +104,38 @@ class ConstructionLayout {
     final sd = math.min(wh * 1.1, 0.92 * h) / _doneHeight;
     final hw = _hammerWidth * sh;
     final bw = _barrowWidth * sb;
-    final pw = _painterWidth * sp;
     final cw = _coneWidth * sc;
+    final pw = _plannerWidth * sh;
 
-    // From the left: cone, gap, hammer worker, gap, the wheelbarrow's
-    // lane, gap, painter, gap, cone.
+    // At the right: two planners when they fit, else the one that reads
+    // the blueprint.
+    final two = w >= 2 * pw + 3 * pad;
+    final plannersWidth = two ? 2 * pw + pad : pw;
+    // The work zone ends where the planners start.
+    final zoneEnd = w - pad - plannersWidth - pad;
+
+    // In the zone, from the left: cone, gap, builder, gap, the wheelbarrow's
+    // lane, gap, cone. Without room for the cones and the builder there is
+    // no builder: the planners work alone.
     final edge = pad + cw + pad;
-    final coneFit = w >= hw + 2 * edge;
-    final lane = w - 2 * edge - hw - pad;
-    final barrowFit = lane >= bw + minRun;
-    final painterFit = barrowFit && lane - pw - pad >= bw + minRun;
+    final builderFit = zoneEnd >= hw + 2 * edge;
+    final lane = zoneEnd - 2 * edge - hw - pad;
+    final barrowFit = builderFit && lane >= bw + minRun;
+    // The painter needs a wide widget: room for the lane and itself.
+    final pw2 = _painterWidth * sp;
+    final painterFit = barrowFit && lane >= bw + minRun + pw2 + pad;
 
-    final hammerLeft = barrowFit ? edge : (w - hw) / 2;
+    final hammerLeft = barrowFit ? edge : math.max(pad, (zoneEnd - hw) / 2);
     final laneStart = hammerLeft + hw + pad;
-    final laneEnd = painterFit ? w - edge - pw - pad : w - edge;
+    final laneEnd = zoneEnd - edge;
     final run = math.max(0.0, laneEnd - laneStart - bw);
     return ConstructionLayout._(
       width: w,
       height: h,
       workerHeight: wh,
-      hammer: true,
-      cones: coneFit,
+      planners: two ? 2 : 1,
+      hammer: builderFit,
+      cones: builderFit,
       barrow: barrowFit,
       painter: painterFit,
       hammerScale: sh,
@@ -124,7 +146,8 @@ class ConstructionLayout {
       hammerLeft: hammerLeft,
       barrowLeft: laneStart,
       barrowRun: run,
-      painterRight: edge,
+      zoneEnd: zoneEnd,
+      plannersWidth: plannersWidth,
       tapeHeight: th,
       tapeFont: tapeFont,
       tapeTop: tapeTop,
@@ -158,11 +181,14 @@ class ConstructionLayout {
   /// At most this many sites at once.
   static const int maxSites = 3;
 
-  // The drawn sizes of the assets (assets/construction/*.webp). The hammer
-  // box includes the swing: at the strike the hammer reaches about 92 px
-  // from the body's left edge.
+  // The design boxes of the characters, in CSS pixels at scale 1. They are
+  // the sizes in `ConstructionAssets`: a new picture of a character has the
+  // same aspect ratio. The builder's box has room for the hammer's swing:
+  // at the strike the hammer reaches about 92 px from the body's left edge.
   static const double _hammerWidth = 95;
   static const double _hammerHeight = 123;
+  static const double _plannerWidth = 74;
+  static const double _plannerHeight = 123;
   static const double _barrowWidth = 121;
   static const double _painterWidth = 114;
   static const double _painterHeight = 189;
@@ -174,8 +200,11 @@ class ConstructionLayout {
   final double width;
   final double height;
 
-  /// The height of the hammer worker; 0 without workers.
+  /// The height of the builder and the planners; 0 without workers.
   final double workerHeight;
+
+  /// How many planners show: 0 (bare), 1 or 2.
+  final int planners;
 
   /// Which parts show.
   final bool hammer;
@@ -190,15 +219,18 @@ class ConstructionLayout {
   final double doneScale;
   final double coneScale;
 
-  /// Left edge of the hammer worker.
+  /// Left edge of the builder.
   final double hammerLeft;
 
   /// Left edge of the wheelbarrow's lane, and how far it walks.
   final double barrowLeft;
   final double barrowRun;
 
-  /// Distance of the painter from the right edge.
-  final double painterRight;
+  /// Where the work zone ends: the planners stand to the right of it.
+  final double zoneEnd;
+
+  /// The width of the planners together.
+  final double plannersWidth;
 
   /// The tape's height, font size and distance from the top.
   final double tapeHeight;
@@ -209,11 +241,13 @@ class ConstructionLayout {
   final double walkSeconds;
 
   /// Whether any worker shows.
-  bool get hasWorkers => hammer;
+  bool get hasWorkers => planners > 0;
 
   /// The classes of the site's element: which parts show.
   List<String> get classes => [
-    if (!hammer) 'ppc-bare',
+    if (!hasWorkers) 'ppc-bare',
+    if (planners == 2) 'ppc-plan2',
+    if (hammer) 'ppc-hammer-on',
     if (cones) 'ppc-cones',
     if (barrow) 'ppc-barrow-on',
     if (painter) 'ppc-painter-on',
@@ -226,15 +260,33 @@ class ConstructionLayout {
         : s;
   }
 
+  double get _plannerBoxWidth => _plannerWidth * hammerScale;
+
   /// The inline `style` text of the site's element, without its position.
+  ///
+  /// `--sh` scales the builder and the planners, `--sw` is the site's width
+  /// (the measure line sweeps that far), `--hin` and `--bin` how far the
+  /// builder and the wheelbarrow walk in, `--pout` how far the planners
+  /// walk out, `--pa` and `--pb` where the two planners stand (from the
+  /// right edge), `--cl2` the left edge of the far cone, `--ppw` and
+  /// `--prun` the painter's width and how far it rolls, `--dl` the left
+  /// edge of the "done" worker.
   String get variables =>
       '--sh:${_n(hammerScale)};--sb:${_n(barrowScale)};'
       '--sp:${_n(painterScale)};--sd:${_n(doneScale)};'
       '--sc:${_n(coneScale)};--hl:${_n(hammerLeft)}px;'
       '--bl:${_n(barrowLeft)}px;--run:${_n(barrowRun)}px;'
-      '--pr:${_n(painterRight)}px;--th:${_n(tapeHeight)}px;'
+      '--th:${_n(tapeHeight)}px;'
       '--tf:${_n(tapeFont)}px;--tt:${_n(tapeTop)}px;--wd:${_n(walkSeconds)}s;'
-      '--fa:${_n(fallDegrees)}deg';
+      '--fa:${_n(fallDegrees)}deg;--sw:${_n(width)}px;'
+      '--hin:${_n(hammerLeft + _hammerWidth * hammerScale)}px;'
+      '--bin:${_n(barrowLeft + _barrowWidth * barrowScale)}px;'
+      '--pout:${_n(plannersWidth + 2 * pad)}px;'
+      '--pa:${_n(2 * pad + _plannerBoxWidth)}px;--pb:${_n(pad)}px;'
+      '--cl2:${_n(zoneEnd - pad - _coneWidth * coneScale)}px;'
+      '--ppw:${_n(_painterWidth * painterScale)}px;'
+      '--prun:${_n(width - pad - _painterWidth * painterScale)}px;'
+      '--dl:${_n(pad)}px';
 
   /// How far each half of the snapped tape swings down from its outer end:
   /// its free end drops about 70% of the height, so it stays over the

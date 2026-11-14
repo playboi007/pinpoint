@@ -7,6 +7,8 @@ import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pinpoint/src/overlay/construction/construction_assets.dart';
+import 'package:pinpoint/src/overlay/construction/construction_boxes.dart';
 import 'package:pinpoint/src/overlay/construction/construction_layout.dart';
 import 'package:pinpoint/src/overlay/construction/construction_markup.dart';
 import 'package:pinpoint/src/overlay/construction/construction_stage.dart';
@@ -20,6 +22,13 @@ import 'package:pinpoint/src/theme/pinpoint_tokens.dart';
 /// look and the keyframes are checked by eye in the preview page.
 void main() {
   late ConstructionStage stage;
+
+  /// A blueprint: a header, a button and a line, relative to the widget.
+  const sample = <ConstructionBox>[
+    ConstructionBox(8, 6, 120, 20),
+    ConstructionBox(8, 34, 60, 24),
+    ConstructionBox(80, 38, 100, 8),
+  ];
 
   JSObject document() => globalContext['document']! as JSObject;
 
@@ -128,7 +137,7 @@ void main() {
     });
 
     test('dispose takes the root and the style away', () {
-      stage.add('a', const Rect.fromLTWH(10, 10, 100, 50));
+      stage.add('a', const Rect.fromLTWH(10, 10, 100, 50), sample);
       stage.dispose();
       expect(byId(ConstructionMarkup.rootId), isNull);
       expect(byId(ConstructionMarkup.styleId), isNull);
@@ -154,7 +163,7 @@ void main() {
     const rect = Rect.fromLTWH(40, 60, 360, 70);
 
     test('is put over the widget\'s rect, plus 1 px on each side', () {
-      stage.add('a', rect);
+      stage.add('a', rect, sample);
       final site = sitesNow().single;
       final o = origin();
       expect(px(site, 'left'), closeTo(o.dx + 39, 0.01));
@@ -169,7 +178,7 @@ void main() {
     });
 
     test('has the tape, the cover and the parts, with the asset URLs', () {
-      stage.add('a', rect);
+      stage.add('a', rect, sample);
       final site = sitesNow().single;
       expect(all('.ppc-cover', site), hasLength(1));
       expect(all('.ppc-label', site), hasLength(2), reason: 'two halves');
@@ -179,7 +188,8 @@ void main() {
       );
       final sources = {for (final img in all('img', site)) text(img, 'src')};
       for (final name in ConstructionMarkup.assetNames) {
-        final path = ConstructionMarkup.assetPath(name);
+        final file = ConstructionAssets.of(name).file;
+        final path = ConstructionMarkup.assetPath(file);
         expect(
           sources.any((src) => src.contains(path)),
           isTrue,
@@ -191,21 +201,26 @@ void main() {
         expect(
           sources,
           contains(
-            endsWith('assets/packages/pinpoint/assets/construction/$name.webp'),
+            endsWith(
+              'assets/packages/pinpoint/assets/construction/'
+              '${ConstructionAssets.of(name).file}.webp',
+            ),
           ),
         );
       }
     });
 
     test('has the classes for its size', () {
-      stage.add('wide', const Rect.fromLTWH(0, 0, 900, 180));
-      stage.add('tiny', const Rect.fromLTWH(0, 300, 220, 18));
+      stage.add('wide', const Rect.fromLTWH(0, 0, 900, 180), sample);
+      stage.add('tiny', const Rect.fromLTWH(0, 300, 220, 18), sample);
       final byIdAttr = {
         for (final site in sitesNow()) text(site, 'className'): site,
       };
       expect(
         byIdAttr.keys.any(
           (c) =>
+              c.contains('ppc-plan2') &&
+              c.contains('ppc-hammer-on') &&
               c.contains('ppc-cones') &&
               c.contains('ppc-barrow-on') &&
               c.contains('ppc-painter-on'),
@@ -217,7 +232,7 @@ void main() {
     });
 
     test('moves, and changes layout when its size changes', () {
-      stage.add('a', rect);
+      stage.add('a', rect, sample);
       stage.move('a', const Rect.fromLTWH(40, 10, 360, 70));
       var site = sitesNow().single;
       expect(px(site, 'top'), closeTo(origin().dy + 9, 0.01));
@@ -229,13 +244,13 @@ void main() {
     });
 
     test('keeps the tape in front of the widget, both halves', () {
-      stage.add('a', rect);
+      stage.add('a', rect, sample);
       final halves = all('.ppc-half', sitesNow().single);
       expect(halves, hasLength(2));
     });
 
     test('is not clickable: no pointer events on any part', () {
-      stage.add('a', rect);
+      stage.add('a', rect, sample);
       final site = sitesNow().single;
       final computed = globalContext.callMethod<JSObject>(
         'getComputedStyle'.toJS,
@@ -253,8 +268,8 @@ void main() {
     });
 
     test('is removed with a fade, or at once', () async {
-      stage.add('a', rect);
-      stage.add('b', const Rect.fromLTWH(0, 200, 100, 40));
+      stage.add('a', rect, sample);
+      stage.add('b', const Rect.fromLTWH(0, 200, 100, 40), sample);
       stage.remove('a');
       // Fading: still there, with the class.
       expect(
@@ -268,8 +283,8 @@ void main() {
     });
 
     test('adding an id again replaces the site', () {
-      stage.add('a', rect);
-      stage.add('a', const Rect.fromLTWH(0, 0, 100, 40));
+      stage.add('a', rect, sample);
+      stage.add('a', const Rect.fromLTWH(0, 0, 100, 40), sample);
       expect(sitesNow(), hasLength(1));
       expect(px(sitesNow().single, 'width'), 102);
     });
@@ -280,7 +295,7 @@ void main() {
     final png = Uint8List.fromList([0x89, 0x50, 0x4E, 0x47, 1, 2, 3]);
 
     test('marks the site and adds the picture of the widget', () {
-      stage.add('a', rect);
+      stage.add('a', rect, sample);
       stage.reveal('a', png);
       final site = sitesNow().single;
       expect(text(site, 'className'), contains('ppc-reveal'));
@@ -292,7 +307,7 @@ void main() {
     });
 
     test('without a picture there is no bounce', () {
-      stage.add('a', rect);
+      stage.add('a', rect, sample);
       stage.reveal('a', null);
       final site = sitesNow().single;
       expect(text(site, 'className'), contains('ppc-reveal'));
@@ -300,7 +315,7 @@ void main() {
     });
 
     test('the finish plays CSS animations: they are computed on the parts', () {
-      stage.add('a', rect);
+      stage.add('a', rect, sample);
       stage.reveal('a', png);
       final site = sitesNow().single;
       String animation(String selector) => globalContext
@@ -313,20 +328,275 @@ void main() {
       expect(animation('.ppc-shotbox'), 'ppc-bounce');
       expect(animation('.ppc-done'), 'ppc-pop');
       expect(animation('.ppc-w-hammer'), 'ppc-hop');
+      // The finishing part: the boxes snap, the painter rolls across.
+      expect(animation('.ppc-box'), 'ppc-snap');
+      expect(animation('.ppc-fix'), 'none');
+      expect(animation('.ppc-painter'), 'ppc-prun');
+      expect(animation('.ppc-paint'), 'ppc-paint');
     });
 
+    test(
+      'the finish comes in this order: boxes, painter, tape, peel, bounce',
+      () {
+        stage.add('a', rect, sample);
+        stage.reveal('a', png);
+        final site = sitesNow().single;
+        double delay(String selector) {
+          final value = globalContext
+              .callMethod<JSObject>(
+                'getComputedStyle'.toJS,
+                first(selector, site)!,
+              )
+              .callMethod<JSString>(
+                'getPropertyValue'.toJS,
+                'animation-delay'.toJS,
+              )
+              .toDart;
+          return double.parse(value.split(',').first.replaceAll('s', ''));
+        }
+
+        expect(delay('.ppc-box'), 0);
+        expect(delay('.ppc-painter'), 0);
+        expect(delay('.ppc-done'), closeTo(0.7, 0.001));
+        expect(delay('.ppc-half-l'), closeTo(0.8, 0.001));
+        expect(delay('.ppc-cover'), closeTo(1.2, 0.001));
+        expect(delay('.ppc-shotbox'), closeTo(1.5, 0.001));
+      },
+    );
+
     test('while at work, the parts animate in CSS', () {
-      stage.add('a', const Rect.fromLTWH(40, 60, 900, 180));
+      stage.add('a', const Rect.fromLTWH(40, 60, 900, 180), sample);
       final site = sitesNow().single;
       String animation(String selector) => globalContext
           .callMethod<JSObject>('getComputedStyle'.toJS, first(selector, site)!)
           .callMethod<JSString>('getPropertyValue'.toJS, 'animation-name'.toJS)
           .toDart;
       expect(animation('.ppc-arm'), 'ppc-swing');
-      expect(animation('.ppc-barrow'), 'ppc-walk');
+      expect(animation('.ppc-hin'), 'ppc-hin');
+      expect(animation('.ppc-bwalk'), 'ppc-walk');
+      expect(animation('.ppc-barrow'), 'ppc-bin');
       expect(animation('.ppc-roller'), 'ppc-roll');
       expect(animation('.ppc-dust'), 'ppc-dust');
+      expect(animation('.ppc-box'), 'ppc-break');
+      expect(animation('.ppc-fix'), 'ppc-fix');
+      expect(animation('.ppc-measure'), 'ppc-sweep');
+      expect(animation('.ppc-pl-b'), 'ppc-pleave');
     });
+
+    test('the phases are CSS delays: 2.5 s, then 3.6 s, then 4.1 s', () {
+      stage.add('a', const Rect.fromLTWH(40, 60, 900, 180), sample);
+      final site = sitesNow().single;
+      String delay(String selector) => globalContext
+          .callMethod<JSObject>('getComputedStyle'.toJS, first(selector, site)!)
+          .callMethod<JSString>('getPropertyValue'.toJS, 'animation-delay'.toJS)
+          .toDart;
+      // Building starts after planning: the planners leave, the builder
+      // walks in, the boxes break.
+      expect(delay('.ppc-pl-b'), '2.5s');
+      expect(delay('.ppc-hin'), '2.5s');
+      expect(delay('.ppc-barrow'), '2.5s');
+      expect(delay('.ppc-box'), '2.5s');
+      // The hammer starts when the builder is in; the wheelbarrow walks
+      // its lane when it is in.
+      expect(delay('.ppc-arm'), '3.6s');
+      expect(delay('.ppc-bwalk'), '4.1s');
+      // Planning draws the outlines at once, then ticks and the measure.
+      expect(delay('.ppc-measure'), '0.25s');
+      String animationCount(String selector) => globalContext
+          .callMethod<JSObject>('getComputedStyle'.toJS, first(selector, site)!)
+          .callMethod<JSString>(
+            'getPropertyValue'.toJS,
+            'animation-iteration-count'.toJS,
+          )
+          .toDart;
+      // The loops never end.
+      expect(animationCount('.ppc-arm'), 'infinite');
+      expect(animationCount('.ppc-bwalk'), 'infinite');
+      expect(animationCount('.ppc-measure'), '1');
+    });
+  });
+
+  group('the blueprint', () {
+    const rect = Rect.fromLTWH(40, 60, 360, 70);
+
+    test('has one outlined box for each, in its real place', () {
+      stage.add('note-1', rect, sample);
+      final site = sitesNow().single;
+      final boxes = all('.ppc-box', site);
+      expect(boxes, hasLength(sample.length));
+      final o = origin();
+      for (final (i, box) in boxes.indexed) {
+        final r = box.callMethod<JSObject>('getBoundingClientRect'.toJS);
+        double v(String k) => (r[k]! as JSNumber).toDartDouble;
+        final want = sample[i];
+        // Before building starts, a box is not moved.
+        expect(v('left'), closeTo(o.dx + rect.left + want.left, 0.6));
+        expect(v('top'), closeTo(o.dy + rect.top + want.top, 0.6));
+        expect(v('width'), closeTo(want.width, 0.6));
+        expect(v('height'), closeTo(want.height, 0.6));
+      }
+      // Thin ink outlines: 1 px.
+      final line = globalContext.callMethod<JSObject>(
+        'getComputedStyle'.toJS,
+        first('.ppc-slip', site)!,
+      );
+      expect(
+        line
+            .callMethod<JSString>(
+              'getPropertyValue'.toJS,
+              'border-top-width'.toJS,
+            )
+            .toDart,
+        '1px',
+      );
+    });
+
+    test('is broken from the note id: the CSS variables match the plan', () {
+      stage.add('note-1', rect, sample);
+      final plans = ConstructionBoxes.plan(
+        ConstructionBoxes.seedOf('note-1'),
+        sample,
+      );
+      for (final (i, box) in all('.ppc-box', sitesNow().single).indexed) {
+        expect(styleOf(box, '--dx'), '${plans[i].dx}px');
+        expect(styleOf(box, '--dy'), '${plans[i].dy}px');
+        expect(styleOf(box, '--dr'), '${plans[i].degrees}deg');
+        expect(styleOf(box, '--bd'), '${plans[i].breakDelay}s');
+      }
+      // Another note breaks it another way.
+      stage.add('note-2', const Rect.fromLTWH(40, 200, 360, 70), sample);
+      final other = all('.ppc-box', sitesNow().last);
+      expect(
+        [for (final b in other) styleOf(b, '--dx')],
+        isNot([
+          for (final b in all('.ppc-box', sitesNow().first)) styleOf(b, '--dx'),
+        ]),
+      );
+    });
+
+    test('numbers are the same in the browser as in the VM', () {
+      expect(ConstructionBoxes.seedOf('a'), 1014);
+      expect(ConstructionBoxes.seedOf('note-1'), 802338714);
+      final plans = ConstructionBoxes.plan(
+        ConstructionBoxes.seedOf('note-1'),
+        const [
+          ConstructionBox(0, 0, 200, 100),
+          ConstructionBox(10, 10, 40, 20),
+          ConstructionBox(60, 10, 80, 30),
+        ],
+      );
+      expect(
+        [for (final p in plans) (p.dx, p.dy, p.degrees)],
+        [(-23.87, -8.46, -3.66), (-3.99, -3.0, -3.46), (-3.72, -3.39, -3.06)],
+      );
+      expect([for (final p in plans) p.repairDelay], [4.62, 5.82, 7.02]);
+    });
+
+    test('has dimension ticks on the big boxes and a measure line', () {
+      stage.add('a', rect, sample);
+      final site = sitesNow().single;
+      expect(all('.ppc-dx', site), hasLength(3));
+      expect(all('.ppc-dy', site), isEmpty, reason: 'no box is 36 px tall');
+      expect(all('.ppc-measure', site), hasLength(1));
+      final measure = globalContext.callMethod<JSObject>(
+        'getComputedStyle'.toJS,
+        first('.ppc-measure', site)!,
+      );
+      expect(
+        measure
+            .callMethod<JSString>(
+              'getPropertyValue'.toJS,
+              'border-left-style'.toJS,
+            )
+            .toDart,
+        'dashed',
+      );
+    });
+
+    test('has the phase classes for its size, and the planners leave only '
+        'for a builder', () {
+      stage.add('wide', const Rect.fromLTWH(0, 0, 900, 180), sample);
+      stage.add('small', const Rect.fromLTWH(0, 300, 120, 60), sample);
+      final classes = [for (final s in sitesNow()) text(s, 'className')];
+      expect(
+        classes[0],
+        allOf(contains('ppc-plan2'), contains('ppc-hammer-on')),
+      );
+      expect(classes[1], contains('ppc-plan2'));
+      expect(classes[1], isNot(contains('ppc-hammer-on')));
+      final small = sitesNow()[1];
+      final name = globalContext
+          .callMethod<JSObject>(
+            'getComputedStyle'.toJS,
+            first('.ppc-pl-b', small)!,
+          )
+          .callMethod<JSString>('getPropertyValue'.toJS, 'animation-name'.toJS)
+          .toDart;
+      expect(name, 'none', reason: 'planners alone stay');
+    });
+
+    test('shows only the planners at first: the builder is off the left', () {
+      stage.add('a', const Rect.fromLTWH(40, 60, 900, 180), sample);
+      final site = sitesNow().single;
+      // The builder starts left of the site (walks in at 2.5 s), clipped
+      // by its group.
+      final siteBox = site.callMethod<JSObject>('getBoundingClientRect'.toJS);
+      final hin = first(
+        '.ppc-hin',
+        site,
+      )!.callMethod<JSObject>('getBoundingClientRect'.toJS);
+      expect(
+        (hin['right']! as JSNumber).toDartDouble,
+        lessThanOrEqualTo((siteBox['left']! as JSNumber).toDartDouble + 1),
+        reason: 'off the left edge before it walks in',
+      );
+    });
+
+    test('line art is multiplied, the picture of the widget is not', () {
+      stage.add('a', rect, sample);
+      stage.reveal('a', Uint8List.fromList([0x89, 0x50]));
+      final site = sitesNow().single;
+      String blend(String selector) => globalContext
+          .callMethod<JSObject>('getComputedStyle'.toJS, first(selector, site)!)
+          .callMethod<JSString>('getPropertyValue'.toJS, 'mix-blend-mode'.toJS)
+          .toDart;
+      expect(blend('.ppc-body'), 'multiply');
+      expect(blend('.ppc-cone'), 'multiply');
+      expect(blend('.ppc-shotbox img'), 'normal');
+    });
+
+    test(
+      'a finish before 2.5 s leaves the builders out; later it does not',
+      () async {
+        stage.add('early', const Rect.fromLTWH(40, 60, 900, 180), sample);
+        stage.reveal('early', null);
+        expect(
+          text(sitesNow().single, 'className'),
+          contains(ConstructionMarkup.earlyClass),
+        );
+        final display = globalContext
+            .callMethod<JSObject>(
+              'getComputedStyle'.toJS,
+              first('.ppc-w-hammer', sitesNow().single)!,
+            )
+            .callMethod<JSString>('getPropertyValue'.toJS, 'display'.toJS)
+            .toDart;
+        expect(display, 'none');
+
+        stage.add('late', const Rect.fromLTWH(40, 300, 900, 180), sample);
+        await wait(ConstructionMarkup.planMillis + 150);
+        stage.reveal('late', null);
+        final late = sitesNow().last;
+        expect(
+          text(late, 'className'),
+          contains(ConstructionMarkup.revealClass),
+        );
+        expect(
+          text(late, 'className'),
+          isNot(contains(ConstructionMarkup.earlyClass)),
+        );
+      },
+    );
   });
 
   group('reduced motion', () {
@@ -335,13 +605,21 @@ void main() {
     test('puts a class on the root, and no part animates', () {
       stage.setReducedMotion(true);
       expect(text(root(), 'className'), ConstructionMarkup.reducedClass);
-      stage.add('a', rect);
+      stage.add('a', rect, sample);
       final site = sitesNow().single;
       for (final selector in [
         '.ppc-arm',
         '.ppc-barrow',
+        '.ppc-bwalk',
+        '.ppc-hin',
         '.ppc-roller',
         '.ppc-dust',
+        '.ppc-box',
+        '.ppc-fix',
+        '.ppc-slip',
+        '.ppc-measure',
+        '.ppc-pl-b',
+        '.ppc-dx',
       ]) {
         final name = globalContext
             .callMethod<JSObject>(
@@ -361,14 +639,14 @@ void main() {
 
     test('a reveal just removes the site', () {
       stage.setReducedMotion(true);
-      stage.add('a', rect);
+      stage.add('a', rect, sample);
       stage.reveal('a', Uint8List.fromList([1]));
       expect(sitesNow(), isEmpty);
     });
 
     test('a removal is at once', () {
       stage.setReducedMotion(true);
-      stage.add('a', rect);
+      stage.add('a', rect, sample);
       stage.remove('a');
       expect(sitesNow(), isEmpty);
     });
@@ -376,7 +654,7 @@ void main() {
 
   test('the layout in the page matches the layout in Dart', () {
     // The same class text and variables as the Dart side builds.
-    stage.add('a', const Rect.fromLTWH(10, 10, 360, 70));
+    stage.add('a', const Rect.fromLTWH(10, 10, 360, 70), sample);
     final layout = ConstructionLayout.of(360, 70);
     final site = sitesNow().single;
     expect(styleOf(site, '--sh'), isNotEmpty);

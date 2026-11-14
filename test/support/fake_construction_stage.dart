@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 import 'dart:ui' show Rect;
 
+import 'package:pinpoint/src/overlay/construction/construction_boxes.dart';
 import 'package:pinpoint/src/overlay/construction/construction_stage.dart';
 
 /// A stage that only writes down what it was asked to do.
@@ -15,6 +16,10 @@ class FakeConstructionStage implements ConstructionStage {
 
   /// The rects of the sites now up, by id.
   final Map<String, Rect> sites = <String, Rect>{};
+
+  /// The blueprint each site was put up with.
+  final Map<String, List<ConstructionBox>> boxes =
+      <String, List<ConstructionBox>>{};
 
   /// What each reveal was given.
   final Map<String, Uint8List?> reveals = <String, Uint8List?>{};
@@ -35,9 +40,10 @@ class FakeConstructionStage implements ConstructionStage {
   void setReducedMotion(bool value) => reduced = value;
 
   @override
-  void add(String id, Rect rect) {
+  void add(String id, Rect rect, List<ConstructionBox> blueprint) {
     calls.add('add:$id');
     sites[id] = rect;
+    boxes[id] = blueprint;
   }
 
   @override

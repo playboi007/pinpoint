@@ -4,6 +4,7 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pinpoint/src/model/annotation.dart';
+import 'package:pinpoint/src/overlay/construction/construction_boxes.dart';
 import 'package:pinpoint/src/overlay/construction/construction_sites.dart';
 import 'package:pinpoint/src/overlay/construction/construction_stage.dart';
 import 'package:pinpoint/src/overlay/pin_tracker.dart';
@@ -222,6 +223,95 @@ void main() {
       await tester.pump(ConstructionSites.revealDuration * 2);
       expect(stage.count('remove'), 1);
       expect(stage.sites.keys, ['a']);
+    });
+  });
+
+  group('the blueprint', () {
+    const read = [
+      ConstructionBox(4, 4, 40, 20),
+      ConstructionBox(50, 4, 60, 30),
+    ];
+
+    ConstructionSites withReader(
+      BlueprintReader reader, {
+      ConstructionStage? on,
+    }) {
+      sites.dispose();
+      stage = on is FakeConstructionStage ? on : FakeConstructionStage();
+      return sites = ConstructionSites(
+        stage: stage,
+        capture: (rect) => capture(rect),
+        blueprint: reader,
+      )..follow(placements: placements, palette: palette);
+    }
+
+    test('is read once, with the id and rect, and given to the stage', () {
+      final asked = <(String, Rect)>[];
+      withReader((id, rect) {
+        asked.add((id, rect));
+        return read;
+      });
+      show([pin('a', NoteStatus.inProgress)]);
+      expect(asked, [('a', rectA)]);
+      expect(stage.boxes['a'], read);
+      // Not again when the widget moves, or when other pins change.
+      show([
+        pin(
+          'a',
+          NoteStatus.inProgress,
+          rect: const Rect.fromLTWH(0, 0, 200, 60),
+        ),
+      ]);
+      show([
+        pin(
+          'a',
+          NoteStatus.inProgress,
+          rect: const Rect.fromLTWH(0, 0, 200, 60),
+        ),
+        pin('b', NoteStatus.submitted, number: 2),
+      ]);
+      expect(asked, hasLength(1));
+    });
+
+    test('is read for each site, as it goes up', () {
+      final asked = <String>[];
+      withReader((id, rect) {
+        asked.add(id);
+        return read;
+      });
+      show([
+        pin('a', NoteStatus.inProgress),
+        pin('b', NoteStatus.inProgress, number: 2),
+      ]);
+      expect(asked, ['a', 'b']);
+    });
+
+    test('is generic, from the widget\'s size, when none can be read', () {
+      withReader((id, rect) => const []);
+      show([pin('a', NoteStatus.inProgress)]);
+      expect(stage.boxes['a'], ConstructionBoxes.generic(200, 60));
+      expect(stage.boxes['a'], isNotEmpty);
+    });
+
+    test('is generic without a reader, or when the reader throws', () {
+      show([pin('a', NoteStatus.inProgress)]);
+      expect(stage.boxes['a'], ConstructionBoxes.generic(200, 60));
+      withReader((id, rect) => throw StateError('no render object'));
+      show(const []);
+      show([pin('b', NoteStatus.inProgress)]);
+      expect(stage.boxes['b'], ConstructionBoxes.generic(200, 60));
+    });
+
+    test('a widget that comes back is read again', () {
+      var reads = 0;
+      withReader((id, rect) {
+        reads++;
+        return read;
+      });
+      show([pin('a', NoteStatus.inProgress)]);
+      show(const []);
+      show([pin('a', NoteStatus.inProgress)]);
+      expect(reads, 2);
     });
   });
 
