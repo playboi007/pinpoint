@@ -48,6 +48,7 @@ import 'info_panel.dart';
 import 'motion/flight_layer.dart';
 import 'motion/flights.dart';
 import 'motion/ink_wipe.dart';
+import 'motion/scan_sweep.dart';
 import 'note_view.dart';
 import 'pick_tracker.dart';
 import 'pin_marker.dart';
@@ -1351,6 +1352,12 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
                                   origin: () => _originOf(paintContext),
                                   tokens: PinPointTokens.of(paintContext),
                                 ),
+                              ),
+                              // "Scan this screen": a line sweeps the app
+                              // once and each finding pops in as it passes.
+                              ScanSweep(
+                                findings: widget.controller.findings,
+                                origin: () => _originOf(paintContext),
                               ),
                             ],
                           ),
