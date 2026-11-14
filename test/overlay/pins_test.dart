@@ -737,6 +737,14 @@ void main() {
       await tester.pump();
       await tester.pump();
       expect(controller.notes.byId(id)!.status, NoteStatus.verified);
+      // The pin folds away, as a picture only, then it is gone.
+      expect(
+        find.byKey(PinLayer.foldKey(id)),
+        findsOneWidget,
+        reason: 'the pin folds away after Accept',
+      );
+      expect(find.byKey(ValueKey<String>('pinpoint.pin.$id')), findsNothing);
+      await tester.pumpAndSettle();
       expect(pins(), findsNothing);
     });
   });

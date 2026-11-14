@@ -19,6 +19,7 @@ class PinPlacement {
     required this.status,
     required this.rect,
     this.checksPassed,
+    this.accepted = false,
   });
 
   final String id;
@@ -34,6 +35,20 @@ class PinPlacement {
   /// The outcome of the note's last `verify_note`; null when none ran.
   final bool? checksPassed;
 
+  /// The user accepted the note: it shows no pin any more. This placement
+  /// is the pin's last one, listed once so the layer can fold it away.
+  final bool accepted;
+
+  /// This placement as the last one of an accepted note.
+  PinPlacement asAccepted() => PinPlacement(
+    id: id,
+    number: number,
+    status: status,
+    rect: rect,
+    checksPassed: checksPassed,
+    accepted: true,
+  );
+
   @override
   bool operator ==(Object other) =>
       other is PinPlacement &&
@@ -41,10 +56,12 @@ class PinPlacement {
       other.number == number &&
       other.status == status &&
       other.rect == rect &&
-      other.checksPassed == checksPassed;
+      other.checksPassed == checksPassed &&
+      other.accepted == accepted;
 
   @override
-  int get hashCode => Object.hash(id, number, status, rect, checksPassed);
+  int get hashCode =>
+      Object.hash(id, number, status, rect, checksPassed, accepted);
 }
 
 /// Keeps each pin on its widget.
@@ -262,6 +279,14 @@ class PinTracker {
           checksPassed: note.checksPassed,
         ),
       );
+    }
+    // A pin of a note the user just accepted: placed once more, as accepted,
+    // so the layer can fold it away. The next lookup drops it.
+    for (final old in _placements.value) {
+      if (old.accepted || next.any((p) => p.id == old.id)) continue;
+      if (notes.byId(old.id)?.status == NoteStatus.verified) {
+        next.add(old.asAccepted());
+      }
     }
     _set(next);
   }

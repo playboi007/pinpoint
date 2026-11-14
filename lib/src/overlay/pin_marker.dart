@@ -6,11 +6,16 @@ import '../theme/controls.dart';
 import '../theme/marks.dart';
 import '../theme/pinpoint_motion.dart';
 import '../theme/pinpoint_tokens.dart';
+import 'motion/pin_motion.dart';
 import 'pin_tracker.dart';
 
 /// Covers the screen and draws a [PinMarker] at the top-right of each
 /// pinned widget. Only the markers take pointer events.
-class PinLayer extends StatelessWidget {
+///
+/// A note the user accepted leaves the placements at once. Its pin folds
+/// away for a moment first, as a picture only: it takes no taps and has no
+/// semantics, and nothing waits for it.
+class PinLayer extends StatefulWidget {
   const PinLayer({
     super.key,
     required this.placements,
@@ -29,49 +34,110 @@ class PinLayer extends StatelessWidget {
   /// outline. Null for none, so no pin shows as selected.
   final ValueListenable<String?>? openNote;
 
+  /// The pin of the note [id] while it folds away after Accept.
+  static Key foldKey(String id) => ValueKey<String>('pinpoint.pin.fold.$id');
+
   @override
-  Widget build(BuildContext context) {
-    return ValueListenableBuilder<List<PinPlacement>>(
-      key: layerKey,
-      valueListenable: placements,
-      builder: (context, pins, _) => LayoutBuilder(
-        builder: (context, constraints) => ValueListenableBuilder<String?>(
-          valueListenable: openNote ?? _noNote,
-          builder: (context, open, _) => Stack(
-            children: [
-              for (final pin in pins)
-                Positioned(
-                  key: ValueKey<String>('pinpoint.pin.${pin.id}'),
-                  // The layer sits at the wrapper's origin, so a global rect
-                  // is a rect here too (engineering rule 7). Centered on the
-                  // widget's top-right corner, kept inside the screen.
-                  left: _clamp(
-                    pin.rect.right - PinMarker.size / 2,
-                    constraints.maxWidth - PinMarker.size,
-                  ),
-                  top: _clamp(
-                    pin.rect.top - PinMarker.size / 2,
-                    constraints.maxHeight - PinMarker.size,
-                  ),
-                  child: PinMarker(
-                    number: pin.number,
-                    status: pin.status,
-                    checksPassed: pin.checksPassed,
-                    selected: pin.id == open,
-                    onTap: () => onOpen(pin.id),
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+  State<PinLayer> createState() => _PinLayerState();
 
   static const ValueListenable<String?> _noNote = _NoNote();
 
   static double _clamp(double value, double max) =>
       max <= 0 ? 0 : value.clamp(0, max).toDouble();
+}
+
+class _PinLayerState extends State<PinLayer> {
+  /// The pins folding away, by note id. Kept here, since the placements
+  /// drop them in the next frame.
+  final Map<String, PinPlacement> _folding = <String, PinPlacement>{};
+
+  /// The accepted placements that already folded, while the placements
+  /// still list them: each folds once.
+  final Set<String> _played = <String>{};
+
+  Widget _place(
+    PinPlacement pin,
+    BoxConstraints constraints, {
+    required Key key,
+    required Widget child,
+  }) => Positioned(
+    key: key,
+    // The layer sits at the wrapper's origin, so a global rect is a rect
+    // here too (engineering rule 7). Centered on the widget's top-right
+    // corner, kept inside the screen.
+    left: PinLayer._clamp(
+      pin.rect.right - PinMarker.size / 2,
+      constraints.maxWidth - PinMarker.size,
+    ),
+    top: PinLayer._clamp(
+      pin.rect.top - PinMarker.size / 2,
+      constraints.maxHeight - PinMarker.size,
+    ),
+    child: child,
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final reduced = PinPointMotion.of(context).reduced;
+    return ValueListenableBuilder<List<PinPlacement>>(
+      key: PinLayer.layerKey,
+      valueListenable: widget.placements,
+      builder: (context, pins, _) => LayoutBuilder(
+        builder: (context, constraints) => ValueListenableBuilder<String?>(
+          valueListenable: widget.openNote ?? PinLayer._noNote,
+          builder: (context, open, _) {
+            if (!reduced) {
+              for (final pin in pins) {
+                if (pin.accepted && _played.add(pin.id)) _folding[pin.id] = pin;
+              }
+            }
+            _played.removeWhere((id) => !pins.any((pin) => pin.id == id));
+            return Stack(
+              children: [
+                for (final pin in pins)
+                  if (!pin.accepted)
+                    _place(
+                      pin,
+                      constraints,
+                      key: ValueKey<String>('pinpoint.pin.${pin.id}'),
+                      child: PinMarker(
+                        number: pin.number,
+                        status: pin.status,
+                        checksPassed: pin.checksPassed,
+                        selected: pin.id == open,
+                        onTap: () => widget.onOpen(pin.id),
+                      ),
+                    ),
+                for (final pin in _folding.values)
+                  _place(
+                    pin,
+                    constraints,
+                    key: PinLayer.foldKey(pin.id),
+                    child: ExcludeSemantics(
+                      child: IgnorePointer(
+                        child: PinFold(
+                          onDone: () {
+                            if (_folding.remove(pin.id) != null) {
+                              setState(() {});
+                            }
+                          },
+                          child: PinMarker(
+                            number: pin.number,
+                            status: pin.status,
+                            checksPassed: pin.checksPassed,
+                            onTap: () {},
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
 }
 
 /// A listenable that never has a value, for a [PinLayer] without an open note.
@@ -92,7 +158,7 @@ class _NoNote implements ValueListenable<String?> {
 /// the border (dotted, solid or dashed), the fill, the shadow and a badge,
 /// never in colour alone. A note the agent is done with fades, but stays
 /// until the user accepts it.
-class PinMarker extends StatelessWidget {
+class PinMarker extends StatefulWidget {
   const PinMarker({
     super.key,
     required this.number,
@@ -187,9 +253,61 @@ class PinMarker extends StatelessWidget {
   };
 
   @override
+  State<PinMarker> createState() => _PinMarkerState();
+}
+
+class _PinMarkerState extends State<PinMarker> with TickerProviderStateMixin {
+  /// The agent fixed the note: the pin hops and the tick draws itself. At
+  /// rest (value 1) nothing moves.
+  late final AnimationController _fixed = AnimationController(
+    vsync: this,
+    value: 1,
+  );
+
+  /// A verify result arrived: the badge lands like a rubber stamp. At rest
+  /// (value 1) nothing moves.
+  late final AnimationController _stamp = AnimationController(
+    vsync: this,
+    value: 1,
+  );
+
+  void _time(PinPointMotion motion) {
+    _fixed.duration = motion.expressive;
+    _stamp.duration = motion.expressive;
+  }
+
+  @override
+  void didUpdateWidget(PinMarker old) {
+    super.didUpdateWidget(old);
+    final motion = PinPointMotion.of(context);
+    _time(motion);
+    // Only a change while the pin is on screen plays. A pin built with its
+    // state already, for example after a page load, stays at rest.
+    final fixed =
+        widget.status == NoteStatus.fixed && old.status != NoteStatus.fixed;
+    if (widget.status != NoteStatus.fixed) _fixed.value = 1;
+    if (fixed && !motion.reduced) _fixed.forward(from: 0);
+    final result = widget.checksPassed;
+    if (result == null) _stamp.value = 1;
+    if (result != null && result != old.checksPassed && !motion.reduced) {
+      _stamp.forward(from: 0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _fixed.dispose();
+    _stamp.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final tokens = PinPointTokens.of(context);
-    final checked = checksPassed;
+    _time(PinPointMotion.of(context));
+    final number = widget.number;
+    final status = widget.status;
+    final checked = widget.checksPassed;
     final inked =
         status == NoteStatus.fixed ||
         status == NoteStatus.verified ||
@@ -220,69 +338,71 @@ class PinMarker extends StatelessWidget {
     final Widget border = switch (status) {
       NoteStatus.draft => DashedBox(
         color: borderColor,
-        strokeWidth: borderWidth,
-        dash: dotted,
-        radius: radius,
+        strokeWidth: PinMarker.borderWidth,
+        dash: PinMarker.dotted,
+        radius: PinMarker.radius,
         child: Center(child: numberText),
       ),
       NoteStatus.inProgress => DashedBox(
         color: borderColor,
-        strokeWidth: borderWidth,
-        dash: dashed,
-        radius: radius,
+        strokeWidth: PinMarker.borderWidth,
+        dash: PinMarker.dashed,
+        radius: PinMarker.radius,
         child: Center(child: numberText),
       ),
       _ => DecoratedBox(
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(radius),
-          border: Border.all(color: borderColor, width: borderWidth),
+          borderRadius: BorderRadius.circular(PinMarker.radius),
+          border: Border.all(color: borderColor, width: PinMarker.borderWidth),
         ),
         child: Center(child: numberText),
       ),
     };
 
-    final icon = badgeIcon(status);
+    final icon = PinMarker.badgeIcon(status);
     final message =
-        'Note $number (${label(status)})'
+        'Note $number (${PinMarker.label(status)})'
         '${checked == null
             ? ''
             : checked
             ? ', checks passed'
             : ', checks failed'}';
-    return Tooltip(
+    final pin = Tooltip(
       message: message,
       child: AnimatedOpacity(
-        opacity: isFaded(status) ? fadedOpacity : 1,
-        duration: PinPointMotion.of(context).scaled(fadeDuration),
+        opacity: PinMarker.isFaded(status) ? PinMarker.fadedOpacity : 1,
+        duration: PinPointMotion.of(context).scaled(PinMarker.fadeDuration),
         child: Semantics(
           button: true,
           child: MouseRegion(
             cursor: SystemMouseCursors.click,
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
-              onTap: onTap,
+              onTap: widget.onTap,
               child: CustomPaint(
                 foregroundPainter: _SelectedPinPainter(
-                  selected: selected,
+                  selected: widget.selected,
                   tokens: tokens,
                 ),
                 child: SizedBox.square(
-                  dimension: size,
+                  dimension: PinMarker.size,
                   child: Stack(
                     clipBehavior: Clip.none,
                     children: [
                       Positioned.fill(
                         child: DecoratedBox(
-                          key: bodyKey,
+                          key: PinMarker.bodyKey,
                           decoration: BoxDecoration(
                             color: fill,
-                            borderRadius: BorderRadius.circular(radius),
+                            borderRadius: BorderRadius.circular(
+                              PinMarker.radius,
+                            ),
                             // The paper halo, then the hard shadow.
                             boxShadow: [
                               BoxShadow(spreadRadius: 1, color: tokens.paper),
                               if (shadowed)
                                 BoxShadow(
-                                  offset: shadowOffset,
+                                  offset: PinMarker.shadowOffset,
                                   color: tokens.shadow,
                                 ),
                             ],
@@ -301,72 +421,134 @@ class PinMarker extends StatelessWidget {
         ),
       ),
     );
+    // The hop moves what is drawn, not the tap target.
+    return AnimatedBuilder(
+      animation: _fixed,
+      child: pin,
+      builder: (context, child) => Transform.translate(
+        offset: Offset(0, PinMoments.hop(_fixed.value)),
+        transformHitTests: false,
+        child: child,
+      ),
+    );
   }
 
   /// A 13 px square badge on a corner: top-right (accent, white glyph) while
   /// the agent works, bottom-right (paper) for the rest.
   Widget _statusBadge(PinPointTokens tokens, IconData icon) {
+    final status = widget.status;
     final working = status == NoteStatus.inProgress;
     // CSS puts the badge 8 px past the padding edge: 6.5 px past the box.
     const out = -6.5;
+    final glyph = Icon(
+      icon,
+      size: 11,
+      color: working
+          ? tokens.onAccent
+          : status == NoteStatus.fixed
+          ? tokens.ok
+          : tokens.ink,
+    );
     return Positioned(
       right: out,
       top: working ? out : null,
       bottom: working ? null : out,
-      width: badgeSize,
-      height: badgeSize,
+      width: PinMarker.badgeSize,
+      height: PinMarker.badgeSize,
       child: DecoratedBox(
-        key: badgeKey,
+        key: PinMarker.badgeKey,
         decoration: BoxDecoration(
           color: working ? tokens.accent : tokens.paper,
           border: Border.all(color: tokens.ink),
         ),
         child: Center(
-          child: Icon(
-            icon,
-            size: 11,
-            color: working
-                ? tokens.onAccent
-                : status == NoteStatus.fixed
-                ? tokens.ok
-                : tokens.ink,
-          ),
+          child: status == NoteStatus.fixed
+              // While the agent's fix lands, the tick draws itself; at rest
+              // it is the plain glyph.
+              ? AnimatedBuilder(
+                  animation: _fixed,
+                  child: glyph,
+                  builder: (context, child) => _fixed.value >= 1
+                      ? child!
+                      : CustomPaint(
+                          size: const Size.square(11),
+                          painter: TickPainter(
+                            progress: PinMoments.tick(_fixed.value),
+                            color: tokens.ok,
+                          ),
+                        ),
+                )
+              : glyph,
         ),
       ),
     );
   }
 
   /// A 15 px badge at the top-right: round and green for a pass, square and
-  /// red with "!" for a fail.
+  /// red with "!" for a fail. It lands like a rubber stamp when it appears.
   Widget _checksBadge(PinPointTokens tokens, bool passed) {
     const out = -7.5;
+    final badge = DecoratedBox(
+      key: PinMarker.checksKey,
+      decoration: BoxDecoration(
+        shape: passed ? BoxShape.circle : BoxShape.rectangle,
+        color: passed ? tokens.ok : tokens.err,
+        border: Border.all(color: tokens.paper),
+      ),
+      child: Center(
+        child: passed
+            ? Icon(PinPointIcons.check, size: 11, color: tokens.onAccent)
+            : Text(
+                '!',
+                style: TextStyle(
+                  fontFamily: 'Roboto',
+                  fontSize: 11,
+                  height: 1,
+                  fontWeight: FontWeight.w700,
+                  color: tokens.onAccent,
+                  decoration: TextDecoration.none,
+                ),
+              ),
+      ),
+    );
     return Positioned(
       right: out,
       top: out,
-      width: checksSize,
-      height: checksSize,
-      child: DecoratedBox(
-        key: checksKey,
-        decoration: BoxDecoration(
-          shape: passed ? BoxShape.circle : BoxShape.rectangle,
-          color: passed ? tokens.ok : tokens.err,
-          border: Border.all(color: tokens.paper),
-        ),
-        child: Center(
-          child: passed
-              ? Icon(PinPointIcons.check, size: 11, color: tokens.onAccent)
-              : Text(
-                  '!',
-                  style: TextStyle(
-                    fontFamily: 'Roboto',
-                    fontSize: 11,
-                    height: 1,
-                    fontWeight: FontWeight.w700,
-                    color: tokens.onAccent,
-                    decoration: TextDecoration.none,
-                  ),
+      width: PinMarker.checksSize,
+      height: PinMarker.checksSize,
+      child: AnimatedBuilder(
+        animation: _stamp,
+        child: badge,
+        builder: (context, child) {
+          final t = _stamp.value;
+          if (t >= 1) return child!;
+          final stamped = Transform(
+            alignment: Alignment.center,
+            transform: Matrix4.identity()
+              ..rotateZ(PinMoments.stampAngle(t))
+              ..scaleByDouble(
+                PinMoments.stampSize(t),
+                PinMoments.stampSize(t),
+                1,
+                1,
+              ),
+            child: child,
+          );
+          return Stack(
+            fit: StackFit.expand,
+            clipBehavior: Clip.none,
+            children: [
+              CustomPaint(
+                painter: DustRingPainter(
+                  progress: PinMoments.dust(t),
+                  round: passed,
+                  color: tokens.muted,
                 ),
-        ),
+              ),
+              Opacity(opacity: PinMoments.stampOpacity(t), child: stamped),
+            ],
+          );
+        },
       ),
     );
   }
