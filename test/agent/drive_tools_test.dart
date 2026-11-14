@@ -25,12 +25,7 @@ void main() {
     WidgetTester tester,
     Widget home, {
     Map<String, WidgetBuilder> routes = const {},
-    bool controlFirst = false,
   }) async {
-    // Turned on after the start, the agent edge draws itself for 500 ms,
-    // and those frames count as the app moving. [controlFirst] mounts the
-    // app with control on, so the edge is simply there.
-    if (controlFirst) controller.agent.enabled = true;
     await tester.pumpWidget(
       agentApp(controller: controller, home: home, routes: routes),
     );
@@ -490,7 +485,7 @@ void main() {
     testWidgets('an idle app is not waited on, unless wait_ms asks', (
       tester,
     ) async {
-      await pumpApp(tester, _Later(log: log), controlFirst: true);
+      await pumpApp(tester, _Later(log: log));
       // Nothing draws: the widget cannot come by itself, so no wait.
       final now = await run(tester, 'tap', {
         'target': {'text': 'Later'},
