@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../model/annotation.dart';
 import '../theme/controls.dart';
 import '../theme/marks.dart';
+import '../theme/pinpoint_motion.dart';
 import '../theme/pinpoint_tokens.dart';
 import 'pin_tracker.dart';
 
@@ -252,7 +253,7 @@ class PinMarker extends StatelessWidget {
       message: message,
       child: AnimatedOpacity(
         opacity: isFaded(status) ? fadedOpacity : 1,
-        duration: fadeDuration,
+        duration: PinPointMotion.of(context).scaled(fadeDuration),
         child: Semantics(
           button: true,
           child: MouseRegion(

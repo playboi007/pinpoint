@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../agent/agent_control.dart';
 import '../search/render_search.dart';
 import '../theme/marks.dart';
+import '../theme/pinpoint_motion.dart';
 import '../theme/pinpoint_tokens.dart';
 
 /// What the agent is doing, drawn above the app: a chip while control is
@@ -72,6 +73,9 @@ class _AgentLayerState extends State<AgentLayer>
   @override
   Widget build(BuildContext context) {
     final tokens = PinPointTokens.of(context);
+    // It shows where the agent acted: it fades with reduced motion too.
+    _fade.duration = PinPointMotion.of(context)
+        .informative(AgentLayer.flashFade);
     return IgnorePointer(
       child: Stack(
         fit: StackFit.expand,

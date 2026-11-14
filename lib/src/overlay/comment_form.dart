@@ -6,6 +6,7 @@ import '../agent/commands.dart' show AgentCommands;
 import '../core/pinpoint_controller.dart';
 import '../model/annotation.dart';
 import '../theme/controls.dart';
+import '../theme/pinpoint_motion.dart';
 import '../theme/pinpoint_tokens.dart';
 import '../trace/trace_session.dart';
 import 'tape_range_picker.dart';
@@ -172,11 +173,11 @@ class CommentForm extends StatelessWidget {
             // Which part of the run goes with the note.
             if (TraceSession.current?.tapes case final tapes?)
               AnimatedSize(
-                duration: const Duration(milliseconds: 260),
-                curve: Curves.easeOutCubic,
+                duration: PinPointMotion.of(context).moderate,
+                curve: PinPointMotion.enter,
                 alignment: Alignment.topCenter,
                 child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 200),
+                  duration: PinPointMotion.of(context).quick,
                   child: draft.attachTape && tapeLabel() != null
                       ? Padding(
                           key: const ValueKey<String>('range'),

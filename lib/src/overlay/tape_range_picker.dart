@@ -9,6 +9,7 @@ import '../core/pinpoint_controller.dart';
 import '../model/trace_event.dart';
 import '../tape/tape_recorder.dart';
 import '../theme/controls.dart';
+import '../theme/pinpoint_motion.dart';
 import '../theme/pinpoint_tokens.dart';
 
 /// Which part of the run the attached tape holds: a range slider over what
@@ -83,29 +84,30 @@ enum _End { from, to }
 class _TapeRangePickerState extends State<TapeRangePicker>
     with TickerProviderStateMixin {
   /// Presets glide the handles.
-  late final AnimationController _glide = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 420),
-  );
+  late final AnimationController _glide = AnimationController(vsync: this);
 
   /// The held handle grows and its time label rises.
-  late final AnimationController _grab = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 180),
-    reverseDuration: const Duration(milliseconds: 260),
-  );
+  late final AnimationController _grab = AnimationController(vsync: this);
 
   /// The band's hatching moves while a handle is held.
-  late final AnimationController _hatch = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 700),
-  );
+  late final AnimationController _hatch = AnimationController(vsync: this);
 
   /// A square ring opens from a handle that snapped.
-  late final AnimationController _pulse = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 360),
-  );
+  late final AnimationController _pulse = AnimationController(vsync: this);
+
+  /// The motion of the last build: durations follow reduced motion and
+  /// the What-if slow motion.
+  PinPointMotion _motion = const PinPointMotion();
+
+  void _timeControllers(PinPointMotion motion) {
+    _motion = motion;
+    _glide.duration = motion.expressive;
+    _grab
+      ..duration = motion.scaled(const Duration(milliseconds: 180))
+      ..reverseDuration = motion.scaled(const Duration(milliseconds: 260));
+    _hatch.duration = motion.informative(const Duration(milliseconds: 700));
+    _pulse.duration = motion.scaled(const Duration(milliseconds: 360));
+  }
 
   final FocusNode _focus = FocusNode(debugLabel: 'pinpoint tape range');
 
@@ -248,7 +250,8 @@ class _TapeRangePickerState extends State<TapeRangePicker>
     _snappedTo = null;
     _glide.stop();
     _grab.forward();
-    _hatch.repeat();
+    // With reduced motion the band stays still.
+    if (!_motion.reduced) _hatch.repeat();
     _move(_held!, _snap(x, width));
   }
 
@@ -323,6 +326,7 @@ class _TapeRangePickerState extends State<TapeRangePicker>
   @override
   Widget build(BuildContext context) {
     final tokens = PinPointTokens.of(context);
+    _timeControllers(PinPointMotion.of(context));
     final tapes = widget.tapes;
     final now = widget.clock();
     final from = _from;
@@ -420,7 +424,7 @@ class _TapeRangePickerState extends State<TapeRangePicker>
                         _pulse,
                       ]),
                       builder: (context, _) {
-                        final glide = Curves.easeOutCubic.transform(
+                        final glide = PinPointMotion.enter.transform(
                           _glide.isAnimating ? _glide.value : 1,
                         );
                         _shownFrom =
@@ -443,7 +447,7 @@ class _TapeRangePickerState extends State<TapeRangePicker>
                             marks: tapes.marks.where((e) => e.t >= _lo),
                             routes: tapes.routes.where((e) => e.t >= _lo),
                             held: heldEnd,
-                            grab: Curves.easeOutBack.transform(_grab.value),
+                            grab: PinPointMotion.spring.transform(_grab.value),
                             hatch: _hatch.value,
                             pulse: _pulse.isAnimating ? _pulse.value : null,
                             snapped: _snappedTo == null
@@ -564,9 +568,9 @@ class _Length extends StatelessWidget {
             for (final (i, char) in text.split('').indexed)
               AnimatedSwitcher(
                 key: ValueKey<String>('${text.length}-$i'),
-                duration: const Duration(milliseconds: 220),
-                switchInCurve: Curves.easeOutCubic,
-                switchOutCurve: Curves.easeInCubic,
+                duration: PinPointMotion.of(context).quick,
+                switchInCurve: PinPointMotion.enter,
+                switchOutCurve: PinPointMotion.exit,
                 transitionBuilder: (child, animation) {
                   final coming = child.key == ValueKey<String>('$i$char');
                   return SlideTransition(
@@ -656,7 +660,7 @@ class _KindBadge extends StatelessWidget {
       style: tokens.caps.copyWith(color: full ? tokens.paper : tokens.ink),
     );
     return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 200),
+      duration: PinPointMotion.of(context).quick,
       child: full
           ? Container(
               key: const ValueKey<String>('full'),
