@@ -1,7 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart'
-    show ValueListenable, kDebugMode, listEquals;
+import 'package:flutter/foundation.dart' show kDebugMode, listEquals;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -35,7 +34,6 @@ import '../sink/markdown_formatter.dart';
 import '../sink/pinpoint_sink.dart';
 import '../tape/tape_boot.dart';
 import '../tape/tape_recorder.dart' show SinceTime, TapeSince;
-import '../theme/pinpoint_theme.dart';
 import '../theme/pinpoint_tokens.dart';
 import '../trace/note_trace.dart';
 import '../trace/trace_format.dart' show parseTraceSource;
@@ -47,6 +45,9 @@ import 'environment_panel.dart';
 import 'findings_panel.dart';
 import 'highlight_painter.dart';
 import 'info_panel.dart';
+import 'motion/flight_layer.dart';
+import 'motion/flights.dart';
+import 'motion/ink_wipe.dart';
 import 'note_view.dart';
 import 'pick_tracker.dart';
 import 'pin_marker.dart';
@@ -123,6 +124,11 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
   final ContextCollector _collector = ContextCollector();
 
   final ToastController _toasts = ToastController();
+
+  /// The one-shot moments: the plane of a send, the card of a saved draft,
+  /// the flip of a copy and the ink of a palette switch. They play beside
+  /// the action and never hold it back.
+  final PinPointFlights _flights = PinPointFlights();
 
   /// The HTTP sinks that did not answer their health check, for the badge.
   final ValueNotifier<List<HttpSink>> _offline = ValueNotifier<List<HttpSink>>(
@@ -422,6 +428,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     _commentFocus.dispose();
     _tab.dispose();
     _toasts.dispose();
+    _flights.dispose();
     _offline.dispose();
     _environmentPanel.dispose();
     _findingsPanel.dispose();
@@ -642,9 +649,12 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     if (controller.selection.value == null || !draft.hasText) return;
     final selection = controller.selection.value!;
     if (!controller.submit()) return;
+    // The plane takes off with the send, not after it.
+    _flights.sendStarted();
     var note = _collect()?.withStatus(NoteStatus.submitted);
     if (note == null) {
       controller.sendFailed();
+      _flights.sendSettled(ok: false);
       return;
     }
     // Before the capture: with no sink, nothing would take the image.
@@ -655,6 +665,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
         error: true,
       );
       controller.sendFailed();
+      _flights.sendSettled(ok: false);
       return;
     }
     if (draft.includeScreenshot) {
@@ -682,8 +693,10 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
       draft.text.clear();
       draft.clearChecks();
       controller.sendSucceeded();
+      _flights.sendSettled(ok: true);
     } else {
       controller.sendFailed();
+      _flights.sendSettled(ok: false);
       // The bridge may have stopped since picking started.
       unawaited(_checkBridges());
     }
@@ -714,6 +727,9 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     _pin(note, selection);
     draft.text.clear();
     draft.clearChecks();
+    // Before the panel goes: the card flies from it to the new pin.
+    final corner = selection.globalRect.topRight;
+    if (corner.isFinite) _flights.draftSaved(corner);
     controller.draftSaved();
     _toasts.show(
       'Saved as draft ${controller.notes.numberOf(note.id) ?? ''}. '
@@ -1226,7 +1242,10 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     if (note == null) return;
     try {
       await Clipboard.setData(ClipboardData(text: markdownFor(note)));
-      if (mounted) _toasts.show('Copied as Markdown');
+      if (mounted) {
+        _toasts.show('Copied as Markdown');
+        _flights.copied();
+      }
     } catch (error) {
       if (mounted) _toasts.show('Copy failed: ${_short(error)}', error: true);
     }
@@ -1257,162 +1276,173 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
         true;
     // `MaterialApp.builder` sits above the Navigator, so there is no Overlay
     // ancestor here. Text fields and tooltips in Pinpoint's UI need one.
-    return _PaletteTheme(
+    return PaletteInk(
       palette: widget.controller.palette,
+      flights: _flights,
       // Fixed like the theme: the panel's header has a fixed height and
       // overflows at a large system text scale. The page context the
       // collector reads sits above this, so notes keep the real scale.
-      child: MediaQuery.withNoTextScaling(
-        child: Overlay.wrap(
-          child: Material(
-            // Transparency does not absorb hits, so in idle mode every pointer
-            // event outside Pinpoint's own controls falls through to the app.
-            type: MaterialType.transparency,
-            child: Focus(
-              focusNode: _holder,
-              // Every key that reaches the holder stops here while a mode is
-              // active, so it never bubbles up to the app's Shortcuts. Pinpoint's
-              // own keys arrive through the HardwareKeyboard handler instead.
-              // Milestone 5: the comment form needs its own traversal shortcuts,
-              // because Tab stops here too.
-              onKeyEvent: (node, event) => widget.controller.isActive
-                  ? KeyEventResult.handled
-                  : KeyEventResult.ignored,
-              child: ListenableBuilder(
-                listenable: widget.controller,
-                builder: (context, _) => Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    // The trap stays while commenting and sending, so a stray
-                    // click never reaches the app behind the panel. Not
-                    // while reviewing a pin's note opened with Pinpoint
-                    // off: the user tries the agent's change in the app.
-                    if (widget.controller.isActive &&
-                        !widget.controller.reviewing)
-                      _PointerTrap(tracker: _tracker),
-                    IgnorePointer(
-                      child: Builder(
-                        builder: (paintContext) => Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            CustomPaint(
-                              key: InspectorOverlay.rulerKey,
-                              painter: RulerPainter(
-                                selected: widget.controller.selection,
-                                hovered: widget.controller.hovered,
-                                measuring: widget.controller.measuring,
-                                origin: () => _originOf(paintContext),
-                                tokens: PinPointTokens.of(paintContext),
+      child: FlightScope(
+        flights: _flights,
+        child: MediaQuery.withNoTextScaling(
+          child: Overlay.wrap(
+            child: Material(
+              // Transparency does not absorb hits, so in idle mode every pointer
+              // event outside Pinpoint's own controls falls through to the app.
+              type: MaterialType.transparency,
+              child: Focus(
+                focusNode: _holder,
+                // Every key that reaches the holder stops here while a mode is
+                // active, so it never bubbles up to the app's Shortcuts. Pinpoint's
+                // own keys arrive through the HardwareKeyboard handler instead.
+                // Milestone 5: the comment form needs its own traversal shortcuts,
+                // because Tab stops here too.
+                onKeyEvent: (node, event) => widget.controller.isActive
+                    ? KeyEventResult.handled
+                    : KeyEventResult.ignored,
+                child: ListenableBuilder(
+                  listenable: widget.controller,
+                  builder: (context, _) => Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      // The trap stays while commenting and sending, so a stray
+                      // click never reaches the app behind the panel. Not
+                      // while reviewing a pin's note opened with Pinpoint
+                      // off: the user tries the agent's change in the app.
+                      if (widget.controller.isActive &&
+                          !widget.controller.reviewing)
+                        _PointerTrap(tracker: _tracker),
+                      IgnorePointer(
+                        child: Builder(
+                          builder: (paintContext) => Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              CustomPaint(
+                                key: InspectorOverlay.rulerKey,
+                                painter: RulerPainter(
+                                  selected: widget.controller.selection,
+                                  hovered: widget.controller.hovered,
+                                  measuring: widget.controller.measuring,
+                                  origin: () => _originOf(paintContext),
+                                  tokens: PinPointTokens.of(paintContext),
+                                ),
                               ),
-                            ),
-                            CustomPaint(
-                              key: InspectorOverlay.highlightKey,
-                              painter: HighlightPainter(
-                                hovered: widget.controller.hovered,
-                                selected: widget.controller.selection,
-                                origin: () => _originOf(paintContext),
-                                tokens: PinPointTokens.of(paintContext),
+                              CustomPaint(
+                                key: InspectorOverlay.highlightKey,
+                                painter: HighlightPainter(
+                                  hovered: widget.controller.hovered,
+                                  selected: widget.controller.selection,
+                                  origin: () => _originOf(paintContext),
+                                  tokens: PinPointTokens.of(paintContext),
+                                ),
                               ),
-                            ),
-                            CustomPaint(
-                              key: InspectorOverlay.tweakOutlineKey,
-                              painter: TweakOutlinePainter(
-                                outlines: widget.controller.tweaks.outlines,
-                                origin: () => _originOf(paintContext),
-                                tokens: PinPointTokens.of(paintContext),
+                              CustomPaint(
+                                key: InspectorOverlay.tweakOutlineKey,
+                                painter: TweakOutlinePainter(
+                                  outlines: widget.controller.tweaks.outlines,
+                                  origin: () => _originOf(paintContext),
+                                  tokens: PinPointTokens.of(paintContext),
+                                ),
                               ),
-                            ),
-                            CustomPaint(
-                              key: InspectorOverlay.findingKey,
-                              painter: FindingPainter(
-                                findings: widget.controller.findings,
-                                origin: () => _originOf(paintContext),
-                                tokens: PinPointTokens.of(paintContext),
+                              CustomPaint(
+                                key: InspectorOverlay.findingKey,
+                                painter: FindingPainter(
+                                  findings: widget.controller.findings,
+                                  origin: () => _originOf(paintContext),
+                                  tokens: PinPointTokens.of(paintContext),
+                                ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
-                    ),
-                    // Above the trap, so a click on a pin opens its note
-                    // instead of picking. In every mode, idle included.
-                    PinLayer(
-                      placements: _pins.placements,
-                      onOpen: _openPin,
-                      openNote: widget.controller.openNote,
-                    ),
-                    // Above the trap, so clicks on the panel never pick.
-                    InfoPanelLayer(
-                      controller: widget.controller,
-                      tab: _tab,
-                      commentFocus: _commentFocus,
-                      onSend: _send,
-                      onSaveDraft: _saveDraft,
-                      onCopy: _copy,
-                      noteActions: _noteActions,
-                      onTweak: _applyTweak,
-                      // Keeps the panel clear of the rail, which is drawn
-                      // above it so the launcher can always stop picking.
-                      rightInset: RailPlacement.inset + RailPlacement.width,
-                    ),
-                    // Above the trap, so clicks on it never pick.
-                    EnvironmentPanelLayer(
-                      controller: widget.controller,
-                      panelOpen: _environmentPanel,
-                      placement: _rail,
-                      themeVariants: widget.config.themeVariants.keys.toList(),
-                      material3: material3,
-                    ),
-                    // Above the trap, so clicks on it never pick.
-                    FindingsPanelLayer(
-                      controller: widget.controller,
-                      panelOpen: _findingsPanel,
-                      placement: _rail,
-                      onScan: _scanFindings,
-                      onAudit: () => unawaited(_auditAccessibility()),
-                      onMakeNote: (finding) =>
-                          unawaited(_noteFromFinding(finding)),
-                      onSendDraft: (id) => unawaited(_sendNotes([id])),
-                      onCopy: (finding) => unawaited(_copyFinding(finding)),
-                    ),
-                    // Above the trap, so clicks on it never pick.
-                    TimelinePanelLayer(
-                      controller: widget.controller,
-                      placement: _rail,
-                      others: [_environmentPanel, _findingsPanel],
-                      onFlash: _flashEvent,
-                    ),
-                    // In idle too while any tweak is active.
-                    TweakChip(session: widget.controller.tweaks),
-                    // In idle too while an override is active.
-                    EnvironmentBar(controller: widget.controller),
-                    // The frozen and bridge-offline badges, top-right.
-                    SystemBadgeLayer(
-                      controller: widget.controller,
-                      offline: _offline,
-                    ),
-                    // Takes no pointer events, so a synthetic tap reaches
-                    // the app beneath it.
-                    Builder(
-                      builder: (layerContext) => AgentLayer(
-                        agent: widget.controller.agent,
-                        origin: () => _originOf(layerContext),
+                      // Above the trap, so a click on a pin opens its note
+                      // instead of picking. In every mode, idle included.
+                      PinLayer(
+                        placements: _pins.placements,
+                        onOpen: _openPin,
+                        openNote: widget.controller.openNote,
                       ),
-                    ),
-                    ToastLayer(toasts: _toasts, controller: widget.controller),
-                    // Above the trap, so the launcher at its foot can always
-                    // stop picking. Always offered by default: some shortcuts
-                    // never reach Flutter.
-                    RailLayer(
-                      controller: widget.controller,
-                      placement: _rail,
-                      environmentPanel: _environmentPanel,
-                      findingsPanel: _findingsPanel,
-                      shortcutLabel: widget.config.shortcut.label,
-                      showLauncher: widget.config.showLauncher,
-                      allowAgentControl: widget.config.allowAgentControl,
-                    ),
-                  ],
+                      // Above the trap, so clicks on the panel never pick.
+                      InfoPanelLayer(
+                        controller: widget.controller,
+                        tab: _tab,
+                        commentFocus: _commentFocus,
+                        onSend: _send,
+                        onSaveDraft: _saveDraft,
+                        onCopy: _copy,
+                        noteActions: _noteActions,
+                        onTweak: _applyTweak,
+                        // Keeps the panel clear of the rail, which is drawn
+                        // above it so the launcher can always stop picking.
+                        rightInset: RailPlacement.inset + RailPlacement.width,
+                      ),
+                      // Above the trap, so clicks on it never pick.
+                      EnvironmentPanelLayer(
+                        controller: widget.controller,
+                        panelOpen: _environmentPanel,
+                        placement: _rail,
+                        themeVariants: widget.config.themeVariants.keys
+                            .toList(),
+                        material3: material3,
+                      ),
+                      // Above the trap, so clicks on it never pick.
+                      FindingsPanelLayer(
+                        controller: widget.controller,
+                        panelOpen: _findingsPanel,
+                        placement: _rail,
+                        onScan: _scanFindings,
+                        onAudit: () => unawaited(_auditAccessibility()),
+                        onMakeNote: (finding) =>
+                            unawaited(_noteFromFinding(finding)),
+                        onSendDraft: (id) => unawaited(_sendNotes([id])),
+                        onCopy: (finding) => unawaited(_copyFinding(finding)),
+                      ),
+                      // Above the trap, so clicks on it never pick.
+                      TimelinePanelLayer(
+                        controller: widget.controller,
+                        placement: _rail,
+                        others: [_environmentPanel, _findingsPanel],
+                        onFlash: _flashEvent,
+                      ),
+                      // In idle too while any tweak is active.
+                      TweakChip(session: widget.controller.tweaks),
+                      // In idle too while an override is active.
+                      EnvironmentBar(controller: widget.controller),
+                      // The frozen and bridge-offline badges, top-right.
+                      SystemBadgeLayer(
+                        controller: widget.controller,
+                        offline: _offline,
+                      ),
+                      // Takes no pointer events, so a synthetic tap reaches
+                      // the app beneath it.
+                      Builder(
+                        builder: (layerContext) => AgentLayer(
+                          agent: widget.controller.agent,
+                          origin: () => _originOf(layerContext),
+                        ),
+                      ),
+                      // The plane, the "Sent" stamp and the card that flies into
+                      // its pin: they outlive the panel, so they live here.
+                      FlightLayer(flights: _flights),
+                      ToastLayer(
+                        toasts: _toasts,
+                        controller: widget.controller,
+                      ),
+                      // Above the trap, so the launcher at its foot can always
+                      // stop picking. Always offered by default: some shortcuts
+                      // never reach Flutter.
+                      RailLayer(
+                        controller: widget.controller,
+                        placement: _rail,
+                        environmentPanel: _environmentPanel,
+                        findingsPanel: _findingsPanel,
+                        shortcutLabel: widget.config.shortcut.label,
+                        showLauncher: widget.config.showLauncher,
+                        allowAgentControl: widget.config.allowAgentControl,
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -1462,27 +1492,6 @@ class _PointerTrap extends StatelessWidget {
         onExit: (_) => tracker.hoverAt(null),
         child: const SizedBox.expand(),
       ),
-    );
-  }
-}
-
-/// Pinpoint's own [Theme], in the palette the user picked. A switch rebuilds
-/// only what reads the theme under here, never the host app, and the
-/// overlay's own tree is passed in as [child], so it is not rebuilt as a
-/// whole either.
-class _PaletteTheme extends StatelessWidget {
-  const _PaletteTheme({required this.palette, required this.child});
-
-  final ValueListenable<PinPointPalette> palette;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return ValueListenableBuilder<PinPointPalette>(
-      valueListenable: palette,
-      builder: (context, palette, child) =>
-          Theme(data: pinPointThemeData(palette), child: child!),
-      child: child,
     );
   }
 }
