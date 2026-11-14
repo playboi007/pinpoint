@@ -133,6 +133,30 @@ void main() {
       await bridge.shutdown(tester);
     });
 
+    testWidgets('the rail strip hears every run, and is gone at the end', (
+      tester,
+    ) async {
+      await pumpApp(tester, const _Zoo());
+      final seen = <String>[];
+      void listen() {
+        final status = StressProgress.running.value;
+        seen.add(status == null ? 'none' : '${status.done}/${status.total}');
+      }
+
+      StressProgress.running.addListener(listen);
+      addTearDown(() => StressProgress.running.removeListener(listen));
+      await ok(tester, 'stress_matrix', {
+        'kinds': ['overflow'],
+        'thumbnails': false,
+      });
+      takeOverflowReports(tester);
+      expect(seen.first, '0/9');
+      expect(seen, contains('9/9'));
+      expect(seen.last, 'none');
+      expect(StressProgress.running.value, isNull);
+      await bridge.shutdown(tester);
+    });
+
     testWidgets('run twice, it reports the same findings and files no '
         'second draft: no state leaks between runs', (tester) async {
       await pumpApp(tester, const _Zoo());

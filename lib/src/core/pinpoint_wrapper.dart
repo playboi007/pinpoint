@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart' show Theme;
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
@@ -17,6 +18,8 @@ import '../search/source_resolver.dart';
 import '../sink/bridge_client.dart';
 import '../tape/browser_page.dart';
 import '../tape/tape_player.dart';
+import '../theme/pinpoint_theme.dart';
+import '../theme/pinpoint_tokens.dart';
 import '../trace/redact.dart';
 import '../trace/sources/error_source.dart';
 import '../trace/sources/finding_source.dart';
@@ -486,7 +489,13 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
         ),
         // Over the app, under Pinpoint's UI: takes real pointer input while
         // a replay runs (PLAN-v2 Milestone 15, step 17). Always present.
-        const ReplayBlocker(),
+        // In the user's palette: it sits outside the overlay's own Theme.
+        ValueListenableBuilder<PinPointPalette>(
+          valueListenable: _controller.palette,
+          builder: (context, palette, child) =>
+              Theme(data: pinPointThemeData(palette), child: child!),
+          child: const ReplayBlocker(),
+        ),
         // Beside the app's TickerMode, not inside it: the comment field's
         // caret and the panel's animations keep running while the app is
         // frozen.

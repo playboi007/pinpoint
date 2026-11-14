@@ -1516,6 +1516,8 @@ class AgentCommands {
     final distinct = <String, Map<String, Object?>>{};
     final drafts = <String>[];
     final existing = <String>[];
+    // The rail's progress strip: one tick per run, gone at the end.
+    StressProgress.start(runs.length);
     try {
       for (final (i, run) in runs.indexed) {
         cancel.check();
@@ -1545,8 +1547,10 @@ class AgentCommands {
           'findings': found.length,
           'png': ?png,
         });
+        StressProgress.advance(i + 1);
       }
     } finally {
+      StressProgress.finish();
       controller.environment.value = base;
       await _frame();
       restoreScroll(scroll);
