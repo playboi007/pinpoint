@@ -22,10 +22,17 @@ abstract final class ConstructionBlueprint {
   ///
   /// Skipped: boxes under [ConstructionBoxes.minSide] px, boxes with the
   /// same rect as their parent (wrappers like `Padding` around nothing)
-  /// or as the widget, boxes of render objects that are not boxes. With more
-  /// than [ConstructionBoxes.maxBoxes], leaves go before containers, then
-  /// bigger before smaller. The result is in paint order, so the same tree
-  /// gives the same boxes.
+  /// or as the widget, boxes of render objects that are not boxes.
+  ///
+  /// Then a readable outline, not every box: a box over
+  /// [ConstructionBoxes.maxShare] of the widget only frames everything and
+  /// is left out; the rest are taken biggest first, and a near copy of a box
+  /// already taken (over [ConstructionBoxes.maxOverlap] of it inside that
+  /// box, and at least half its size) is skipped, so nested wrappers drop
+  /// out; at most [ConstructionBoxes.maxBoxes], so small thin parts give way
+  /// to the main ones. A busy card (seen live: a "Run details"
+  /// card gave 40 boxes that, broken, filled it) becomes its main parts.
+  /// The result is in paint order, so the same tree gives the same boxes.
   static List<ConstructionBox> read(RenderObject root, Rect widget) {
     final found = <_Found>[];
     final byNode = <RenderObject, Rect>{};
@@ -58,31 +65,30 @@ abstract final class ConstructionBlueprint {
       // A custom render object that throws: use what was read.
     }
 
-    // A box is a container when another found box is inside it.
-    final nodes = {for (final f in found) f.node: f};
-    for (final f in found) {
-      for (RenderObject? up = f.node.parent; up != null; up = up.parent) {
-        final above = nodes[up];
-        if (above != null) {
-          above.container = true;
-          break;
-        }
-      }
-    }
-
-    var picked = found;
-    if (found.length > ConstructionBoxes.maxBoxes) {
-      picked = [...found]
-        ..sort((a, b) {
-          if (a.container != b.container) return a.container ? 1 : -1;
-          final byArea = (b.rect.width * b.rect.height).compareTo(
-            a.rect.width * a.rect.height,
-          );
+    final whole = widget.width * widget.height;
+    double area(Rect r) => r.width * r.height;
+    final candidates =
+        [
+          for (final f in found)
+            if (area(f.rect) <= ConstructionBoxes.maxShare * whole) f,
+        ]..sort((a, b) {
+          final byArea = area(b.rect).compareTo(area(a.rect));
           return byArea != 0 ? byArea : a.order.compareTo(b.order);
         });
-      picked = picked.take(ConstructionBoxes.maxBoxes).toList()
-        ..sort((a, b) => a.order.compareTo(b.order));
+    final picked = <_Found>[];
+    for (final f in candidates) {
+      if (picked.length == ConstructionBoxes.maxBoxes) break;
+      final covered = picked.any((p) {
+        final overlap = p.rect.intersect(f.rect);
+        // A near copy: mostly inside a box taken, and at least half its
+        // size. A button inside a row is much smaller: it stays.
+        return !overlap.isEmpty &&
+            area(overlap) > ConstructionBoxes.maxOverlap * area(f.rect) &&
+            area(f.rect) > 0.5 * area(p.rect);
+      });
+      if (!covered) picked.add(f);
     }
+    picked.sort((a, b) => a.order.compareTo(b.order));
 
     double r1(double v) => (v * 10).roundToDouble() / 10;
     return [
@@ -109,5 +115,4 @@ class _Found {
   final RenderObject node;
   final Rect rect;
   final int order;
-  bool container = false;
 }

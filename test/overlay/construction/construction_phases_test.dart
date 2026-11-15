@@ -430,10 +430,10 @@ void main() {
       expect(ConstructionBoxes.generic(5, 5), isEmpty);
     });
 
-    test('at most 40 boxes are drawn', () {
-      expect(ConstructionBoxes.maxBoxes, 40);
-      final html = ConstructionMarkup.boxesHtml(1, boxes(40));
-      expect(RegExp('class="ppc-box"').allMatches(html), hasLength(40));
+    test('every box given is drawn; the reader keeps at most 14', () {
+      expect(ConstructionBoxes.maxBoxes, 14);
+      final html = ConstructionMarkup.boxesHtml(1, boxes(14));
+      expect(RegExp('class="ppc-box"').allMatches(html), hasLength(14));
     });
   });
 

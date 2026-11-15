@@ -154,9 +154,8 @@ void main() {
     expect(read(tester), isEmpty);
   });
 
-  testWidgets('with more than 40, leaves go first and it is capped', (
-    tester,
-  ) async {
+  testWidgets('a box that frames nearly everything is left out, and the '
+      'count is capped, biggest first', (tester) async {
     await pump(
       tester,
       SizedBox(
@@ -173,7 +172,7 @@ void main() {
     );
     final boxes = read(tester);
     expect(boxes, hasLength(ConstructionBoxes.maxBoxes));
-    // The Wrap (a container) went, the leaves stayed.
+    // The Wrap (it frames the whole widget) went, the parts stayed.
     expect(boxes.every((b) => b.width <= 12 && b.height == 10), isTrue);
     // The biggest leaves came first: no 10 px box when a 12 px one waited.
     final twelve = boxes.where((b) => b.width == 12).length;
@@ -184,6 +183,54 @@ void main() {
       final b = boxes[i];
       expect(b.top > a.top || b.left > a.left, isTrue);
     }
+  });
+
+  testWidgets('a busy card becomes its main parts: near copies and small '
+      'thin lines give way (seen live: 40 boxes filled a card)', (
+    tester,
+  ) async {
+    await pump(
+      tester,
+      SizedBox(
+        key: rootKey,
+        width: 600,
+        height: 300,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // A panel wrapped twice: three nested near copies.
+            Padding(
+              padding: const EdgeInsets.all(2),
+              child: SizedBox(
+                width: 300,
+                height: 100,
+                child: Padding(
+                  padding: const EdgeInsets.all(3),
+                  child: Container(color: const Color(0xFF000000)),
+                ),
+              ),
+            ),
+            // Many thin rows of text-like boxes.
+            for (var i = 0; i < 16; i++)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Row(
+                  children: [
+                    const SizedBox(width: 90, height: 6),
+                    const SizedBox(width: 12),
+                    SizedBox(width: 200.0 + i, height: 6),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+    final boxes = read(tester);
+    expect(boxes.length, lessThanOrEqualTo(ConstructionBoxes.maxBoxes));
+    // The panel is there once, not as three nested copies.
+    final panels = boxes.where((b) => b.width >= 290 && b.height >= 90);
+    expect(panels, hasLength(1), reason: '$boxes');
   });
 
   testWidgets('the same tree gives the same boxes', (tester) async {

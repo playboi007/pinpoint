@@ -125,7 +125,15 @@ abstract final class ConstructionBoxes {
   static const double minSide = 4;
 
   /// The most boxes a blueprint has.
-  static const int maxBoxes = 40;
+  static const int maxBoxes = 14;
+
+  /// A box over this share of the widget's area only frames everything: the
+  /// blueprint leaves it out.
+  static const double maxShare = 0.7;
+
+  /// A box with more than this share of its area inside a box already taken
+  /// is left out of the blueprint.
+  static const double maxOverlap = 0.6;
 
   /// Dimension ticks go on the biggest boxes only.
   static const int maxDims = 10;
