@@ -54,11 +54,11 @@ class RunStore {
     await dir.create(recursive: true);
     if (_status(id).existsSync() || _events(id).existsSync()) return;
     await _status(id).writeAsString(jsonEncode({'run': id, 'state': 'new'}));
-    await _prune();
+    await _prune(id);
   }
 
   /// Keeps the newest [keep] runs.
-  Future<void> _prune() async {
+  Future<void> _prune(String newestId) async {
     final runs = <String, DateTime>{};
     await for (final entry in dir.list()) {
       if (entry is! File) continue;
@@ -69,8 +69,12 @@ class RunStore {
       if (known == null || at.isAfter(known)) runs[id] = at;
     }
     if (runs.length <= keep) return;
-    final oldest = runs.keys.toList()
-      ..sort((a, b) => runs[a]!.compareTo(runs[b]!));
+    // A coarse filesystem timestamp can tie the new run with older ones.
+    final oldest = runs.keys.where((id) => id != newestId).toList()
+      ..sort((a, b) {
+        final byTime = runs[a]!.compareTo(runs[b]!);
+        return byTime == 0 ? a.compareTo(b) : byTime;
+      });
     for (final id in oldest.take(runs.length - keep)) {
       for (final file in [_events(id), _status(id)]) {
         if (file.existsSync()) await file.delete();
