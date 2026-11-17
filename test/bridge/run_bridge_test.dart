@@ -158,11 +158,11 @@ void main() {
   test('the newest 20 runs are kept', () async {
     final store = RunStore(Directory('${root.path}/.pinpoint'));
     for (var i = 0; i < 23; i++) {
-      await store.setStatus('run_keep_${i.toString().padLeft(4, '0')}', {
-        'state': 'done',
-      });
-      // File times have a coarse grain on some systems.
-      await Future<void>.delayed(const Duration(milliseconds: 15));
+      final id = 'run_keep_${i.toString().padLeft(4, '0')}';
+      await store.setStatus(id, {'state': 'done'});
+      await File(
+        '${store.dir.path}/$id.json',
+      ).setLastModified(DateTime.utc(2020, 1, 1).add(Duration(minutes: i)));
     }
     final runs = await store.list();
     expect(runs.length, 20);

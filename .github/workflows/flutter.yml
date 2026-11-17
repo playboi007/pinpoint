@@ -53,6 +53,6 @@ jobs:
       - run: flutter test --no-pub --concurrency=1
         working-directory: example
       - name: Run browser tests
-        run: flutter test --no-pub --platform chrome --concurrency=1 test/overlay/construction/web test/tape/web test/theme/palette_store_web_test.dart test/trace/web
+        run: flutter test --no-pub --platform chrome test/overlay/construction/web test/tape/web test/theme/palette_store_web_test.dart test/trace/web
       - run: flutter build web --release --no-pub
         working-directory: example
