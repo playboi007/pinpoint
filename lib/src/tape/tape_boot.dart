@@ -126,8 +126,9 @@ abstract final class TapeBoot {
     final flag = TapeBoot.flag;
     if (flag == null) return null;
     try {
-      final loaded = await BridgeClient(Uri.parse(flag.bridge))
-          .loadTape(flag.tape);
+      final loaded = await BridgeClient(
+        Uri.parse(flag.bridge),
+      ).loadTape(flag.tape);
       if (loaded == null) {
         error = 'the bridge has no tape ${flag.tape}';
         return null;

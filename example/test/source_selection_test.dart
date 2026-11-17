@@ -18,9 +18,9 @@ void main() {
 
   /// The 1-based line of the first line in [file] containing [code].
   int lineOf(String file, String code) {
-    final index = File(file)
-        .readAsLinesSync()
-        .indexWhere((l) => l.contains(code));
+    final index = File(
+      file,
+    ).readAsLinesSync().indexWhere((l) => l.contains(code));
     expect(index, greaterThanOrEqualTo(0), reason: '$code not in $file');
     return index + 1;
   }

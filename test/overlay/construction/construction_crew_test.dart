@@ -567,9 +567,9 @@ void main() {
     });
 
     test('the block shows only while it flies, the poses take turns', () {
-      final thr = RegExp('@keyframes ppc-k3-thr\\{([^@]*)\\}\\n')
-          .firstMatch(css)!
-          .group(1)!;
+      final thr = RegExp(
+        '@keyframes ppc-k3-thr\\{([^@]*)\\}\\n',
+      ).firstMatch(css)!.group(1)!;
       expect(thr, contains('opacity:1'));
       expect(thr, contains('step-end'));
       final first = crew.trips.first;

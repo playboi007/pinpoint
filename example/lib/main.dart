@@ -138,8 +138,7 @@ class _WavyFade extends StatelessWidget {
   final Widget child;
 
   @override
-  Widget build(BuildContext context) =>
-      enabled ? _Wave(child: child) : child;
+  Widget build(BuildContext context) => enabled ? _Wave(child: child) : child;
 }
 
 /// Rolls the opacity of its child across it in a wave: a gradient of white

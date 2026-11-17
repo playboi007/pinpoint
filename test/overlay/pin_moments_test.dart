@@ -46,8 +46,9 @@ void main() {
       expect(PinMoments.stampAngle(1), moreOrLessEquals(0));
       // A small bounce: it goes below its size before it settles.
       expect(
-        [for (var t = 0.0; t <= 1; t += 0.05) PinMoments.stampSize(t)]
-            .any((size) => size < 1),
+        [
+          for (var t = 0.0; t <= 1; t += 0.05) PinMoments.stampSize(t),
+        ].any((size) => size < 1),
         isTrue,
       );
     });

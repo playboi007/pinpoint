@@ -5,11 +5,12 @@ import 'package:flutter/rendering.dart';
 
 /// Runs one agent command: [tool] with [args]. Checks [cancel] after each
 /// wait, so Esc stops it.
-typedef AgentRunner = Future<Map<String, Object?>> Function(
-  String tool,
-  Map<String, Object?> args,
-  AgentCancel cancel,
-);
+typedef AgentRunner =
+    Future<Map<String, Object?>> Function(
+      String tool,
+      Map<String, Object?> args,
+      AgentCancel cancel,
+    );
 
 /// Thrown inside a command when the user stopped it.
 class AgentAborted implements Exception {

@@ -55,7 +55,7 @@ class TraceSession {
     TapeRecorder? tapes,
     Object? owner,
     List<StateAdapter> Function()? adapters,
-    TapeStart Function({required int t, required int seq})? pageStart,
+    this.pageStart,
   }) : recorder =
            recorder ??
            TraceRecorder(
@@ -75,7 +75,6 @@ class TraceSession {
           bodiesRead: config.bodies,
           appStart: pageStart?.call(t: 0, seq: 1),
         );
-    this.pageStart = pageStart;
     this.tapes.start();
     rebuildSource = RebuildSource(
       hook: rebuildHook,

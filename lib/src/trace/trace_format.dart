@@ -179,8 +179,9 @@ String traceFoldKey(TraceEvent event) => switch (event.kind) {
 
 String _pairs(Object? values) {
   if (values is! Map<String, Object?>) return '';
-  return [for (final MapEntry(:key, :value) in values.entries) '$key=$value']
-      .join(' ');
+  return [
+    for (final MapEntry(:key, :value) in values.entries) '$key=$value',
+  ].join(' ');
 }
 
 /// One compact line: `412  +3.21s  f233  c37  build  Counter

@@ -35,7 +35,10 @@ void main() {
 
   Future<void> pumpApp(WidgetTester tester) async {
     await tester.pumpWidget(
-      agentApp(controller: controller, home: _Home(app: app)),
+      agentApp(
+        controller: controller,
+        home: _Home(app: app),
+      ),
     );
     await tester.pump();
   }
@@ -106,8 +109,7 @@ void main() {
       tester,
       Future.doWhile(() async {
         await Future<void>.delayed(const Duration(milliseconds: 20));
-        return bridge.notes.runStatus['run_restart_0001']?['state'] !=
-            'done';
+        return bridge.notes.runStatus['run_restart_0001']?['state'] != 'done';
       }),
     );
     final status = bridge.notes.runStatus['run_restart_0001']!;
@@ -123,8 +125,9 @@ void main() {
     await bridge.shutdown(tester);
   });
 
-  testWidgets('a tape that does not load is reported, and input comes back',
-      (tester) async {
+  testWidgets('a tape that does not load is reported, and input comes back', (
+    tester,
+  ) async {
     TapeBoot.debugReset(page: FakePage());
     TapeBoot.arm(
       BootFlag(

@@ -10,10 +10,11 @@ import '../trace/cause_zone.dart';
 
 /// Runs one command and gives its answer: `{ok: true, result: …}` or
 /// `{ok: false, error: …}`.
-typedef CommandHandler = Future<Map<String, Object?>> Function(
-  String tool,
-  Map<String, Object?> args,
-);
+typedef CommandHandler =
+    Future<Map<String, Object?>> Function(
+      String tool,
+      Map<String, Object?> args,
+    );
 
 /// How agent commands reach the app.
 ///

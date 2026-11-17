@@ -72,9 +72,9 @@ void main() {
   });
 
   test('the screenshot comes after the collected parts, before errors', () {
-    final json = note(screenshot: shot())
-        .withError('screenshot.hasPlatformViews')
-        .toJson();
+    final json = note(
+      screenshot: shot(),
+    ).withError('screenshot.hasPlatformViews').toJson();
     final keys = json.keys.toList();
     expect(keys.indexOf('screenshot'), keys.indexOf('inherited') + 1);
     expect(keys.last, 'errors');

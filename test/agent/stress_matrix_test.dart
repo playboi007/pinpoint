@@ -172,9 +172,9 @@ void main() {
       takeOverflowReports(tester);
       final second = await ok(tester, 'stress_matrix', args);
       takeOverflowReports(tester);
-      String shape(Map<String, Object?> r) =>
-          [for (final f in list(r['findings'])) '${f['key']} ${f['runs']}']
-              .join('\n');
+      String shape(Map<String, Object?> r) => [
+        for (final f in list(r['findings'])) '${f['key']} ${f['runs']}',
+      ].join('\n');
       expect(shape(second), shape(first));
       expect(second['drafts'], isEmpty);
       expect(second['existing'], first['drafts']);

@@ -32,13 +32,14 @@ NetworkHooks createNetworkHooks() => platform.createPlatformNetworkHooks();
 /// would get without it, with the same timing.
 class NetworkSource extends TraceSource {
   NetworkSource({
-    required this._hooks,
+    required HookRegistry hooks,
     this.bodies = true,
     this.redact = const TraceRedact(),
     this.ignoreOrigins = const <String>{},
     this.tap,
     NetworkHooks? platformHooks,
-  }) : _platform = platformHooks ?? createNetworkHooks();
+  }) : _hooks = hooks,
+       _platform = platformHooks ?? createNetworkHooks();
 
   final HookRegistry _hooks;
   final NetworkHooks _platform;

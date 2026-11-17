@@ -71,8 +71,9 @@ void main() {
     await tester.tap(find.text('+'));
     // The anchor's ordinal is filled after the event, from a timer.
     await tester.pump(Duration.zero);
-    final down = events(TraceKind.pointer)
-        .firstWhere((e) => e.data['phase'] == 'down');
+    final down = events(
+      TraceKind.pointer,
+    ).firstWhere((e) => e.data['phase'] == 'down');
     final line = markerLine(_file, 'plus');
     expect(down.widget, 'Text');
     expect(down.source, contains('$_file:$line:'));
@@ -211,8 +212,9 @@ void main() {
     await toolResult(tester, controller, 'tap', {
       'target': {'text': '+'},
     });
-    final down = events(TraceKind.pointer)
-        .firstWhere((e) => e.data['phase'] == 'down');
+    final down = events(
+      TraceKind.pointer,
+    ).firstWhere((e) => e.data['phase'] == 'down');
     expect(down.data['by'], 'agent');
     controller.agent.enabled = false;
     await tester.pump(const Duration(seconds: 1));

@@ -218,10 +218,11 @@ void main() {
     test('reads back from JSON', () {
       final back = Annotation.fromJson(
         jsonDecode(
-          jsonEncode(
-            note(environment: const {'textDirection': 'rtl'}).toJson(),
-          ),
-        ) as Map<String, Object?>,
+              jsonEncode(
+                note(environment: const {'textDirection': 'rtl'}).toJson(),
+              ),
+            )
+            as Map<String, Object?>,
       )!;
       expect(back.environment, {'textDirection': 'rtl'});
     });
@@ -386,9 +387,9 @@ void main() {
       'lib/src/model/annotation.dart',
       'lib/src/model/source_location.dart',
     ]) {
-      final imports = File(file)
-          .readAsLinesSync()
-          .where((l) => l.startsWith('import '));
+      final imports = File(
+        file,
+      ).readAsLinesSync().where((l) => l.startsWith('import '));
       for (final line in imports) {
         expect(line, isNot(contains('dart:ui')), reason: file);
         expect(line, isNot(contains('package:flutter')), reason: file);

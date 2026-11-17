@@ -118,11 +118,7 @@ class _HtmlViewScreenState extends State<HtmlViewScreen> {
     setState(() {
       final index = _elements.indexWhere((e) => e.id == id);
       if (index != -1) {
-        updated = _elements[index].copyWith(
-          x: x,
-          y: y,
-          zIndex: _nextZIndex++,
-        );
+        updated = _elements[index].copyWith(x: x, y: y, zIndex: _nextZIndex++);
         _elements[index] = updated!;
       }
       _selectedId = id;
@@ -251,7 +247,9 @@ class _HtmlViewScreenState extends State<HtmlViewScreen> {
     final sorted = List<PlacedHtmlElement>.from(_elements)
       ..sort((a, b) => a.zIndex.compareTo(b.zIndex));
     if (sorted.isEmpty) return '<div class="canvas"></div>';
-    final buffer = StringBuffer('<div class="canvas" style="position:relative;">\n');
+    final buffer = StringBuffer(
+      '<div class="canvas" style="position:relative;">\n',
+    );
     for (final item in sorted) {
       buffer.writeln('  ${item.toHtmlSnippet()}');
     }

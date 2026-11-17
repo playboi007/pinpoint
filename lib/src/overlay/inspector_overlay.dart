@@ -629,8 +629,9 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     }
     final element = anchor == null || !anchor.resolvable
         ? null
-        : SourceIndex(resolver: _tracker.resolver)
-              .resolve(anchor, root: content);
+        : SourceIndex(
+            resolver: _tracker.resolver,
+          ).resolve(anchor, root: content);
     final renderObject = element == null
         ? null
         : AgentCommands.renderObjectOf(element);

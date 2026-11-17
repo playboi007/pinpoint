@@ -177,16 +177,17 @@ void main() {
 
     /// The delay (the second time) of an animation shorthand.
     double delayOf(String selector) {
-      final times = RegExp(r'(?<![\w.-])(\.?\d+(?:\.\d+)?)s(?![\w-])')
-          .allMatches(animationOf(selector))
-          .map((m) => seconds('${m.group(1)}s'));
+      final times = RegExp(
+        r'(?<![\w.-])(\.?\d+(?:\.\d+)?)s(?![\w-])',
+      ).allMatches(animationOf(selector)).map((m) => seconds('${m.group(1)}s'));
       final list = times.map((t) => t).toList();
       return list.length > 1 ? list[1] : 0;
     }
 
     double durationOf(String selector) {
-      final m = RegExp(r'(?<![\w.-])(\.?\d+(?:\.\d+)?)s')
-          .firstMatch(animationOf(selector));
+      final m = RegExp(
+        r'(?<![\w.-])(\.?\d+(?:\.\d+)?)s',
+      ).firstMatch(animationOf(selector));
       return double.parse(
         m!.group(1)!.startsWith('.') ? '0${m.group(1)}' : m.group(1)!,
       );
@@ -274,14 +275,12 @@ void main() {
     });
 
     test('known numbers: the same in the VM and in the browser', () {
-      final plans = ConstructionBoxes.plan(
-        ConstructionBoxes.seedOf('note-1'),
-        const [
-          ConstructionBox(0, 0, 200, 100),
-          ConstructionBox(10, 10, 40, 20),
-          ConstructionBox(60, 10, 80, 30),
-        ],
-      );
+      final plans =
+          ConstructionBoxes.plan(ConstructionBoxes.seedOf('note-1'), const [
+            ConstructionBox(0, 0, 200, 100),
+            ConstructionBox(10, 10, 40, 20),
+            ConstructionBox(60, 10, 80, 30),
+          ]);
       expect(
         [for (final p in plans) (p.dx, p.dy, p.degrees)],
         [(-23.87, -8.46, -3.66), (-3.99, -3.0, -3.46), (-3.72, -3.39, -3.06)],
@@ -522,8 +521,9 @@ void main() {
       // webp: the VP8X chunk has the canvas size minus one; VP8L and VP8
       // headers differ, so read the size with the file's own header.
       for (final a in ConstructionAssets.base) {
-        final bytes = File('assets/construction/${a.file}.webp')
-            .readAsBytesSync();
+        final bytes = File(
+          'assets/construction/${a.file}.webp',
+        ).readAsBytesSync();
         final (w, h) = _webpSize(bytes);
         expect(w / 2, a.width, reason: '${a.name} width');
         expect(h / 2, a.height, reason: '${a.name} height');

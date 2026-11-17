@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -112,8 +114,10 @@ void main() {
       );
       final textRect = tester.getRect(find.text('beneath'));
 
-      navigator.currentState!.push(
-        MaterialPageRoute<void>(builder: (_) => const Scaffold()),
+      unawaited(
+        navigator.currentState!.push(
+          MaterialPageRoute<void>(builder: (_) => const Scaffold()),
+        ),
       );
       await tester.pumpAndSettle();
       expect(find.text('beneath'), findsNothing, reason: 'now offstage');
