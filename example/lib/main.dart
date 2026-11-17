@@ -98,7 +98,10 @@ class HomeScreen extends StatelessWidget {
         children: [
           for (final screen in screens)
             ListTile(
-              title: Text(screen.title),
+              title: _WavyFade(
+                enabled: screen.route == '/custom-paint',
+                child: Text(screen.title),
+              ),
               trailing: const Icon(Icons.chevron_right),
               onTap: () => Navigator.of(context).pushNamed(screen.route),
             ),
@@ -124,4 +127,81 @@ class HomeScreen extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Gives [child] a wavy fade when [enabled], else returns it untouched. The
+/// caller builds the child, so a note's anchor still points at the caller.
+class _WavyFade extends StatelessWidget {
+  const _WavyFade({required this.enabled, required this.child});
+
+  final bool enabled;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) =>
+      enabled ? _Wave(child: child) : child;
+}
+
+/// Rolls the opacity of its child across it in a wave: a gradient of white
+/// and faint white, tiled and slid one period per cycle, multiplied into the
+/// child. It plays [_cycles] times when the screen opens, then rests, so a
+/// test can still `pumpAndSettle` on the home screen.
+class _Wave extends StatefulWidget {
+  const _Wave({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_Wave> createState() => _WaveState();
+}
+
+class _WaveState extends State<_Wave> with SingleTickerProviderStateMixin {
+  static const int _cycles = 3;
+  static const double _period = 0.4; // of the text width, so ~2.5 waves
+
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 2400),
+  )..repeat(count: _cycles);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      child: widget.child,
+      builder: (context, child) => ShaderMask(
+        blendMode: BlendMode.modulate,
+        shaderCallback: (bounds) => LinearGradient(
+          begin: Alignment.centerLeft,
+          end: const Alignment(-1 + 2 * _period, 0),
+          tileMode: TileMode.repeated,
+          colors: [
+            Colors.white,
+            Colors.white.withValues(alpha: 0.15),
+            Colors.white,
+          ],
+          stops: const [0, 0.5, 1],
+          transform: _Slide(_controller.value * _period * bounds.width),
+        ).createShader(bounds),
+        child: child,
+      ),
+    );
+  }
+}
+
+/// Moves a gradient sideways; one full period makes a seamless loop.
+class _Slide extends GradientTransform {
+  const _Slide(this.dx);
+
+  final double dx;
+
+  @override
+  Matrix4? transform(Rect bounds, {TextDirection? textDirection}) =>
+      Matrix4.translationValues(dx, 0, 0);
 }
