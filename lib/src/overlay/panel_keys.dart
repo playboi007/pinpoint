@@ -46,7 +46,7 @@ class PanelKeyScope extends StatelessWidget {
                 // EditableText passes Esc on when no text menu is open; in
                 // the app a route takes it. Here the HardwareKeyboard
                 // handler already acts on Esc, so nothing else must.
-                DismissIntent: DoNothingAction(consumesKey: false),
+                DismissIntent: _PanelDismissAction(),
                 ...actions,
               },
               // Text selection handles and the context menu render in the
@@ -58,4 +58,12 @@ class PanelKeyScope extends StatelessWidget {
       ),
     );
   }
+}
+
+class _PanelDismissAction extends Action<DismissIntent> {
+  @override
+  Object? invoke(DismissIntent intent) => null;
+
+  @override
+  bool consumesKey(DismissIntent intent) => false;
 }

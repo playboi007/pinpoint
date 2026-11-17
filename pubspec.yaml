@@ -4,7 +4,7 @@ version: 0.0.1
 repository: https://github.com/playboi007/pinpoint
 
 environment:
-  sdk: ^3.10.0
+  sdk: ^3.10.0-290.4.beta
   flutter: ">=3.38.0"
 
 dependencies:

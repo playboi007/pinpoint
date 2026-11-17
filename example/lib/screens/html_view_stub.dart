@@ -250,9 +250,14 @@ class _StubPlacedItemState extends State<_StubPlacedItem> {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  InkWell(
-                    onTap: widget.onRemoved,
-                    child: const Icon(Icons.close, size: 14),
+                  IconButton(
+                    tooltip: 'Remove ${template.tag}',
+                    onPressed: widget.onRemoved,
+                    constraints: const BoxConstraints.tightFor(
+                      width: 48,
+                      height: 48,
+                    ),
+                    icon: const Icon(Icons.close, size: 14),
                   ),
                 ],
               ),
