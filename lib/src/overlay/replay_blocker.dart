@@ -126,10 +126,10 @@ class _ReplayBanner extends StatefulWidget {
 class _ReplayBannerState extends State<_ReplayBanner>
     with TickerProviderStateMixin {
   /// 0 off screen, 1 in place.
-  late final AnimationController _slide = AnimationController(vsync: this);
+  late final AnimationController _slide;
 
   /// One shake: 0 to 1 once, when a replay diverges.
-  late final AnimationController _shake = AnimationController(vsync: this);
+  late final AnimationController _shake;
 
   late final Listenable _gate = Listenable.merge([
     ReplayGate.banner,
@@ -143,6 +143,8 @@ class _ReplayBannerState extends State<_ReplayBanner>
   @override
   void initState() {
     super.initState();
+    _slide = AnimationController(vsync: this);
+    _shake = AnimationController(vsync: this);
     _gate.addListener(_changed);
     // A replay that began before the banner was built: it is simply there.
     final text = ReplayGate.banner.value;
