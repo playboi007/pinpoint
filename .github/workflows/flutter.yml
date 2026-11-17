@@ -56,3 +56,18 @@ jobs:
         run: flutter test --no-pub --platform chrome test/overlay/construction/web test/tape/web test/theme/palette_store_web_test.dart test/trace/web
       - run: flutter build web --release --no-pub
         working-directory: example
+
+  browser-feedback:
+    name: Browser feedback loop (debug)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.38.0
+          cache: true
+      - run: flutter pub get
+        working-directory: example
+      - run: python3 tool/web_feedback_e2e.py
