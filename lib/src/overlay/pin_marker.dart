@@ -373,6 +373,11 @@ class _PinMarkerState extends State<PinMarker> with TickerProviderStateMixin {
         opacity: PinMarker.isFaded(status) ? PinMarker.fadedOpacity : 1,
         duration: PinPointMotion.of(context).scaled(PinMarker.fadeDuration),
         child: Semantics(
+          // Its own node, the size of the pin. Without `container`, the tap
+          // merges up into the overlay's screen-sized node. On web, an app
+          // that keeps semantics on then gets a tappable DOM element over
+          // the whole app, and every click opens this note.
+          container: true,
           button: true,
           child: MouseRegion(
             cursor: SystemMouseCursors.click,
