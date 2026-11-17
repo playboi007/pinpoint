@@ -27,8 +27,9 @@ class CommandQueue {
   CommandQueue({
     this.pollGrace = const Duration(seconds: 35),
     DateTime Function()? clock,
-    this._log,
-  }) : _clock = clock ?? DateTime.now;
+    void Function(String line)? log,
+  }) : _log = log,
+       _clock = clock ?? DateTime.now;
 
   /// How long after its last poll an app still counts as connected. Longer
   /// than the app's wait, so an app between two polls is not missed.

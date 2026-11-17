@@ -41,9 +41,10 @@ void main() {
     // Recorded for docs/api-notes.md: the raw shape of `file` on this platform.
     debugPrint('creationLocation: $location');
 
-    final expectedLine = File(_thisFile)
-        .readAsLinesSync()
-        .indexWhere((l) => l.contains('// $_marker')) +
+    final expectedLine =
+        File(
+          _thisFile,
+        ).readAsLinesSync().indexWhere((l) => l.contains('// $_marker')) +
         1;
     expect(expectedLine, greaterThan(0), reason: 'marker not found');
 

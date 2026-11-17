@@ -16,8 +16,9 @@ void main() {
 
   setUp(() async {
     root = await Directory.systemTemp.createTemp('pinpoint_probes_');
-    await File('${root.path}/lib/screens/existing.dart')
-        .create(recursive: true);
+    await File(
+      '${root.path}/lib/screens/existing.dart',
+    ).create(recursive: true);
     await File('${root.path}/lib/screens/existing.dart').writeAsString(
       [
         'void ensureLoaded(String type) {',
@@ -54,12 +55,14 @@ void main() {
   }
 
   Future<String> tool(String name, Map<String, Object?> args) async {
-    final answer = await send('POST', '/mcp', {
-      'jsonrpc': '2.0',
-      'id': ++nextId,
-      'method': 'tools/call',
-      'params': {'name': name, 'arguments': args},
-    }) as Map<String, Object?>;
+    final answer =
+        await send('POST', '/mcp', {
+              'jsonrpc': '2.0',
+              'id': ++nextId,
+              'method': 'tools/call',
+              'params': {'name': name, 'arguments': args},
+            })
+            as Map<String, Object?>;
     final result = answer['result']! as Map<String, Object?>;
     return [
       for (final c in result['content']! as List<Object?>)
@@ -96,8 +99,9 @@ void main() {
     });
     expect(clean, isNot(contains('Warning')));
     // In progress: no warning, probes are expected then.
-    await File('${root.path}/lib/a.dart')
-        .writeAsString("PinPoint.probe('a');\n");
+    await File(
+      '${root.path}/lib/a.dart',
+    ).writeAsString("PinPoint.probe('a');\n");
     final working = await tool('update_note', {
       'id': 'pp_a',
       'status': 'inProgress',

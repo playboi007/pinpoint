@@ -203,21 +203,26 @@ void main() {
 
     test('latency: recorded, instant, or a set time', () {
       final t = tape([ex(0, 'A', ms: 300)]);
-      Duration delay(ReplayLatency latency) => (NetReplay(
-        t,
-        matcher: _KeyIsUrl(),
-        latency: latency,
-      ).answer(method: 'GET', url: 'A') as ServeAnswer).delay;
+      Duration delay(ReplayLatency latency) =>
+          (NetReplay(
+                    t,
+                    matcher: _KeyIsUrl(),
+                    latency: latency,
+                  ).answer(method: 'GET', url: 'A')
+                  as ServeAnswer)
+              .delay;
       expect(delay(const ReplayLatency.recorded()), 300.ms);
       expect(delay(const ReplayLatency.instant()), Duration.zero);
       expect(delay(const ReplayLatency.fixed(50)), 50.ms);
       // speed 4 makes recorded latency a quarter.
       expect(
         (NetReplay(
-          t,
-          matcher: _KeyIsUrl(),
-          speed: 4,
-        ).answer(method: 'GET', url: 'A') as ServeAnswer).delay,
+                  t,
+                  matcher: _KeyIsUrl(),
+                  speed: 4,
+                ).answer(method: 'GET', url: 'A')
+                as ServeAnswer)
+            .delay,
         75.ms,
       );
     });

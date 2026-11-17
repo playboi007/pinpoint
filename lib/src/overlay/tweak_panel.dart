@@ -12,11 +12,8 @@ import '../tweak/tweak_session.dart';
 import 'panel_parts.dart';
 
 /// Sets [property] of [target] to [value]; returns whether it took.
-typedef TweakApply = bool Function(
-  TweakTarget target,
-  String property,
-  Object? value,
-);
+typedef TweakApply =
+    bool Function(TweakTarget target, String property, Object? value);
 
 /// The Tweak tab of the info panel: every editable value of the selected
 /// widget's render objects, with an editor each.

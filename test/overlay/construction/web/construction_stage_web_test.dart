@@ -706,14 +706,12 @@ void main() {
     test('numbers are the same in the browser as in the VM', () {
       expect(ConstructionBoxes.seedOf('a'), 1014);
       expect(ConstructionBoxes.seedOf('note-1'), 802338714);
-      final plans = ConstructionBoxes.plan(
-        ConstructionBoxes.seedOf('note-1'),
-        const [
-          ConstructionBox(0, 0, 200, 100),
-          ConstructionBox(10, 10, 40, 20),
-          ConstructionBox(60, 10, 80, 30),
-        ],
-      );
+      final plans =
+          ConstructionBoxes.plan(ConstructionBoxes.seedOf('note-1'), const [
+            ConstructionBox(0, 0, 200, 100),
+            ConstructionBox(10, 10, 40, 20),
+            ConstructionBox(60, 10, 80, 30),
+          ]);
       expect(
         [for (final p in plans) (p.dx, p.dy, p.degrees)],
         [(-23.87, -8.46, -3.66), (-3.99, -3.0, -3.46), (-3.72, -3.39, -3.06)],

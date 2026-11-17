@@ -398,8 +398,9 @@ void main() {
             );
             return reduce
                 ? MediaQuery(
-                    data: MediaQuery.of(context)
-                        .copyWith(disableAnimations: true),
+                    data: MediaQuery.of(
+                      context,
+                    ).copyWith(disableAnimations: true),
                     child: wrapper,
                   )
                 : wrapper;

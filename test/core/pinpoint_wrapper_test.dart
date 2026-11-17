@@ -547,12 +547,15 @@ void main() {
       await tester.pump();
 
       expect(
-        TickerMode.valuesOf(tester.element(find.byType(_Spinner))).enabled,
+        // Flutter 3.38 exposes ticker state through of().
+        // ignore: deprecated_member_use
+        TickerMode.of(tester.element(find.byType(_Spinner))),
         isFalse,
       );
       expect(
-        TickerMode.valuesOf(tester.element(find.byType(PinPointLauncher)))
-            .enabled,
+        // Flutter 3.38 exposes ticker state through of().
+        // ignore: deprecated_member_use
+        TickerMode.of(tester.element(find.byType(PinPointLauncher))),
         isTrue,
       );
     });

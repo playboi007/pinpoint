@@ -140,8 +140,9 @@ void main() {
     await bridge.shutdown(tester);
   });
 
-  testWidgets('until step:N holds after step N; stop_replay ends it',
-      (tester) async {
+  testWidgets('until step:N holds after step N; stop_replay ends it', (
+    tester,
+  ) async {
     await pumpApp(tester);
     final tape = await record(tester);
     final held = await replay(tester, tape, {'until': 'step:1'});

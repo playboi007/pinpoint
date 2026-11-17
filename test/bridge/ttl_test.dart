@@ -22,9 +22,9 @@ void main() {
   String dir(String folder) => '${root.path}/.pinpoint/$folder';
 
   Map<String, Object?> note(String id, String status) {
-    final json = jsonDecode(
-      File('test/fixtures/note.json').readAsStringSync(),
-    ) as Map<String, Object?>;
+    final json =
+        jsonDecode(File('test/fixtures/note.json').readAsStringSync())
+            as Map<String, Object?>;
     return {...json, 'id': id, 'status': status};
   }
 

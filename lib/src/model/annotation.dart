@@ -538,7 +538,7 @@ class Annotation {
     'comment': comment,
     'app': app.toJson(),
     'page': page.toJson(),
-    if (environment case final env? when env.isNotEmpty) 'environment': env,
+    if (environment?.isNotEmpty ?? false) 'environment': environment,
     'finding': ?finding,
     if (checks.isNotEmpty) 'checks': checks,
     if (tweaks.isNotEmpty) 'tweaks': tweaks,

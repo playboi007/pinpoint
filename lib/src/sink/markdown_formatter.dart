@@ -162,10 +162,7 @@ String markdownFromJson(Map<String, Object?> json) {
     replies.forEach(out.writeln);
   }
 
-  final happened = [
-    ?tapeLine(json['tape']),
-    ...whatHappenedLines(json),
-  ];
+  final happened = [?tapeLine(json['tape']), ...whatHappenedLines(json)];
   if (happened.isNotEmpty) {
     out.writeln();
     happened.forEach(out.writeln);

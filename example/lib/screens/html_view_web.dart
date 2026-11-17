@@ -63,7 +63,11 @@ Widget buildHtmlView({
   required void Function(String id) onElementSelected,
   required void Function(String id) onElementDoubleTapped,
   required void Function(String id) onElementRemoved,
-  required void Function(String id, PlacedHtmlElement Function(PlacedHtmlElement) update, String feedback)
+  required void Function(
+    String id,
+    PlacedHtmlElement Function(PlacedHtmlElement) update,
+    String feedback,
+  )
   onElementInteracted,
   required VoidCallback onBackgroundTap,
 }) {
@@ -446,8 +450,7 @@ class _WebHtmlViewCanvasState extends State<_WebHtmlViewCanvas> {
         return span;
 
       case HtmlElementKind.link:
-        final anchor =
-            web.document.createElement('a') as web.HTMLAnchorElement;
+        final anchor = web.document.createElement('a') as web.HTMLAnchorElement;
         anchor.href = '#${item.id}';
         anchor.draggable = false;
         anchor.style
@@ -480,8 +483,7 @@ class _WebHtmlViewCanvasState extends State<_WebHtmlViewCanvas> {
           ..gap = '8px'
           ..cursor = 'pointer'
           ..whiteSpace = 'nowrap';
-        final box =
-            web.document.createElement('input') as web.HTMLInputElement;
+        final box = web.document.createElement('input') as web.HTMLInputElement;
         box.type = 'checkbox';
         box.style.cursor = 'pointer';
         box.addEventListener(

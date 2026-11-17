@@ -91,9 +91,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('0 elements'), findsOneWidget);
     expect(
-      find.text(
-        'Click Add to choose HTML components or drag & drop them here',
-      ),
+      find.text('Click Add to choose HTML components or drag & drop them here'),
       findsOneWidget,
     );
   });

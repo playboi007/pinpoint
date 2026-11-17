@@ -236,8 +236,9 @@ class PointerSource extends TraceSource {
       data['fx'] = _fraction((position.dx - rect.left) / rect.width);
       data['fy'] = _fraction((position.dy - rect.top) / rect.height);
     }
-    final anchor = SourceIndex(resolver: resolver)
-        .anchorFor(entry.element, root: content);
+    final anchor = SourceIndex(
+      resolver: resolver,
+    ).anchorFor(entry.element, root: content);
     if (anchor != null) data['anchor'] = anchor.toJson();
   }
 

@@ -37,9 +37,7 @@ class AgentBridge {
     requests.add('${request.method} $path');
     if (request.method == 'GET' && path == '/commands') {
       final wait = int.tryParse(request.url.queryParameters['wait'] ?? '');
-      final command = await queue.next(
-        wait: Duration(seconds: wait ?? 25),
-      );
+      final command = await queue.next(wait: Duration(seconds: wait ?? 25));
       return _json({'command': command});
     }
     if (request.method == 'POST' && path == '/commands/control') {

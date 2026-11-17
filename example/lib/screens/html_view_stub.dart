@@ -162,7 +162,8 @@ class _StubPlacedItemState extends State<_StubPlacedItem> {
   @override
   void didUpdateWidget(covariant _StubPlacedItem oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.item.x != widget.item.x || oldWidget.item.y != widget.item.y) {
+    if (oldWidget.item.x != widget.item.x ||
+        oldWidget.item.y != widget.item.y) {
       _dragX = null;
       _dragY = null;
     }
@@ -278,7 +279,9 @@ class _StubPlacedItemState extends State<_StubPlacedItem> {
             );
           },
           child: Text(
-            item.clickCount > 0 ? '${item.text} (${item.clickCount})' : item.text,
+            item.clickCount > 0
+                ? '${item.text} (${item.clickCount})'
+                : item.text,
             style: TextStyle(fontSize: item.fontSize),
           ),
         );

@@ -48,9 +48,9 @@ void main() {
     test('schema 5 and up; tweaks only when there are some; round trip', () {
       expect(annotationSchema, greaterThanOrEqualTo(5));
       expect(note().toJson().containsKey('tweaks'), isFalse);
-      final json = jsonDecode(
-        jsonEncode(note(tweaks: [tweak]).toJson()),
-      ) as Map<String, Object?>;
+      final json =
+          jsonDecode(jsonEncode(note(tweaks: [tweak]).toJson()))
+              as Map<String, Object?>;
       expect(json['tweaks'], [tweak]);
       final back = Annotation.fromJson(json)!;
       expect(back.tweaks, [tweak]);

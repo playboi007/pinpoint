@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pinpoint/pinpoint.dart';
@@ -127,8 +129,10 @@ void main() {
     expect(tester.takeException(), isFlutterError);
     expect(scan(tester), hasLength(1));
 
-    navigator.currentState!.push(
-      MaterialPageRoute<void>(builder: (_) => const Scaffold()),
+    unawaited(
+      navigator.currentState!.push(
+        MaterialPageRoute<void>(builder: (_) => const Scaffold()),
+      ),
     );
     await tester.pumpAndSettle();
     expect(scan(tester), isEmpty);

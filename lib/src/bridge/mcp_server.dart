@@ -47,11 +47,13 @@ class McpServer {
     this.store, {
     this.commands,
     this.reloader,
-    this._tapes,
-    this._runs,
+    TapeStore? tapes,
+    RunStore? runs,
     this.version = '0.0.1',
-    this._log = _noLog,
-  });
+    void Function(String line) log = _noLog,
+  }) : _tapes = tapes,
+       _runs = runs,
+       _log = log;
 
   final TapeStore? _tapes;
   final RunStore? _runs;

@@ -65,8 +65,9 @@ void main() {
     final result =
         (answer! as Map<String, Object?>)['result']! as Map<String, Object?>;
     final content = result['content']! as List<Object?>;
-    return [for (final c in content) (c! as Map<String, Object?>)['text']]
-        .join('\n');
+    return [
+      for (final c in content) (c! as Map<String, Object?>)['text'],
+    ].join('\n');
   }
 
   Tape tape({String id = 'tp_20261113_100000_ab12'}) => Tape(
