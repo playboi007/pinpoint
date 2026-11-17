@@ -117,24 +117,47 @@ void main() {
   });
 
   testWidgets('watch out for: DevTools takes the slot over', (tester) async {
-    void devTools(Element element, bool builtOnce) {}
+    final key = GlobalKey<_TickState>();
+    await tester.pumpWidget(
+      Directionality(
+        textDirection: TextDirection.ltr,
+        child: _Tick(key: key),
+      ),
+    );
+    var devToolsCalls = 0;
+    void devTools(Element element, bool builtOnce) => devToolsCalls++;
+    void other(Element element, bool builtOnce) {}
 
-    // DevTools first: its tracking holds the slot, and Pinpoint must not
-    // write it (DevTools asserts the slot is null when it turns on).
+    // DevTools first: Pinpoint shares the slot and calls DevTools' callback
+    // first, so DevTools' counts go on. Letting go gives it back.
     debugOnRebuildDirtyWidget = devTools;
-    expect(tracker.install(), isFalse);
-    expect(debugOnRebuildDirtyWidget, same(devTools));
-    debugOnRebuildDirtyWidget = null;
-
-    // Pinpoint first, then DevTools turns its tracking off, which clears
-    // the slot: Pinpoint notices and does not put itself back.
     expect(tracker.install(), isTrue);
-    expect(tracker.takenOver, isFalse);
-    debugOnRebuildDirtyWidget = null;
-    expect(tracker.takenOver, isTrue);
-    debugOnRebuildDirtyWidget = devTools;
+    expect(debugOnRebuildDirtyWidget, isNot(same(devTools)));
+    await rebuild(tester, key);
+    expect(devToolsCalls, greaterThan(0));
     tracker.uninstall();
     expect(debugOnRebuildDirtyWidget, same(devTools));
+
+    // DevTools turns its tracking off, which clears the slot: Pinpoint
+    // takes the empty slot back, without DevTools' callback.
+    expect(tracker.install(), isTrue);
+    debugOnRebuildDirtyWidget = null;
+    expect(tracker.takenOver, isTrue);
+    expect(tracker.reclaim(), isTrue);
+    expect(tracker.takenOver, isFalse);
+    devToolsCalls = 0;
+    await rebuild(tester, key);
+    expect(devToolsCalls, 0);
+    tracker.uninstall();
+    expect(debugOnRebuildDirtyWidget, isNull);
+
+    // Another tool writes over the hook: it is left alone.
+    expect(tracker.install(), isTrue);
+    debugOnRebuildDirtyWidget = other;
+    expect(tracker.takenOver, isTrue);
+    expect(tracker.reclaim(), isFalse);
+    tracker.uninstall();
+    expect(debugOnRebuildDirtyWidget, same(other));
     debugOnRebuildDirtyWidget = null;
     registry.dispose();
   });
@@ -187,8 +210,9 @@ void main() {
       expect(debugOnRebuildDirtyWidget, isNull);
     });
 
-    testWidgets('a slot DevTools holds turns the switch back off and says '
-        'so', (tester) async {
+    testWidgets('a slot DevTools holds is shared: the switch stays on', (
+      tester,
+    ) async {
       void devTools(Element element, bool builtOnce) {}
       await tester.pumpWidget(
         MaterialApp(
@@ -199,8 +223,10 @@ void main() {
       );
       debugOnRebuildDirtyWidget = devTools;
       controller.findings.trackRebuilds = true;
-      expect(controller.findings.trackRebuilds, isFalse);
-      expect(controller.findings.rebuildsTakenOver, isTrue);
+      expect(controller.findings.trackRebuilds, isTrue);
+      expect(controller.findings.rebuildsTakenOver, isFalse);
+      expect(debugOnRebuildDirtyWidget, isNot(same(devTools)));
+      controller.findings.trackRebuilds = false;
       expect(debugOnRebuildDirtyWidget, same(devTools));
       debugOnRebuildDirtyWidget = null;
     });

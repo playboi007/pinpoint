@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 
 import 'marks.dart';
+import 'pinpoint_motion.dart';
 import 'pinpoint_tokens.dart';
 
 // The shared controls of the Drafting design. Each one reads the colours from
@@ -1159,10 +1160,25 @@ class DraftSpinner extends StatefulWidget {
 
 class _DraftSpinnerState extends State<DraftSpinner>
     with SingleTickerProviderStateMixin {
+  /// One turn. It tells that something loads, so it turns with reduced
+  /// motion too; only the slow motion is corrected.
+  static const Duration turn = Duration(milliseconds: 800);
+
   late final AnimationController _turn = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 800),
+    duration: turn,
   )..repeat();
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final period = PinPointMotion.of(context).informative(turn);
+    if (_turn.duration != period) {
+      _turn
+        ..duration = period
+        ..repeat();
+    }
+  }
 
   @override
   void dispose() {

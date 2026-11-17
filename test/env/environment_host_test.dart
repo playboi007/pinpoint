@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pinpoint/pinpoint.dart';
@@ -61,9 +63,11 @@ void main() {
       // A pushed route too.
       Navigator.of(tester.element(dialog)).pop();
       await tester.pumpAndSettle();
-      Navigator.of(tester.element(page)).push(
-        MaterialPageRoute<void>(
-          builder: (_) => const Scaffold(body: Text('second route')),
+      unawaited(
+        Navigator.of(tester.element(page)).push(
+          MaterialPageRoute<void>(
+            builder: (_) => const Scaffold(body: Text('second route')),
+          ),
         ),
       );
       await tester.pumpAndSettle();

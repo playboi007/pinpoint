@@ -9,6 +9,7 @@ import 'package:pinpoint/src/detect/detector.dart';
 import 'package:pinpoint/src/overlay/environment_panel.dart';
 import 'package:pinpoint/src/overlay/findings_panel.dart';
 import 'package:pinpoint/src/overlay/inspector_overlay.dart';
+import 'package:pinpoint/src/overlay/motion/scan_sweep.dart';
 import 'package:pinpoint/src/theme/controls.dart';
 import 'package:pinpoint/src/theme/pinpoint_tokens.dart';
 
@@ -139,6 +140,20 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Row overflows by 72 px on the right'), findsOneWidget);
+  });
+
+  testWidgets('in the overlay, Scan this screen plays the sweep once and '
+      'it ends', (tester) async {
+    await pumpHost(tester);
+    await narrow(tester);
+    await openPanel(tester);
+    expect(find.byType(ScanSweep), findsOneWidget);
+    await scan(tester);
+    expect(controller.findings.sweeps.value, 1);
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(tester.hasRunningAnimations, isTrue);
+    await tester.pumpAndSettle();
+    expect(tester.hasRunningAnimations, isFalse);
   });
 
   testWidgets('scanning again does not pile up copies', (tester) async {

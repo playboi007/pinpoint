@@ -228,14 +228,16 @@ void main() {
         window(tester, window_);
         await tester.pumpWidget(host(const _BoxPage()));
         await setViewport(tester, const Size(360, 800));
-        final boundary = tester.renderObject(
-          find
-              .descendant(
-                of: find.byType(ViewportFrame),
-                matching: find.byType(RepaintBoundary),
-              )
-              .first,
-        ) as RenderRepaintBoundary;
+        final boundary =
+            tester.renderObject(
+                  find
+                      .descendant(
+                        of: find.byType(ViewportFrame),
+                        matching: find.byType(RepaintBoundary),
+                      )
+                      .first,
+                )
+                as RenderRepaintBoundary;
         final target = tester.getRect(find.byKey(_BoxPage.boxKey));
         final shot = (await tester.runAsync(
           () => captureScreenshot(boundary, target, pixelRatio: 1),

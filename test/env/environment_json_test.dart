@@ -42,7 +42,9 @@ void main() {
       {'textScale': 'big'},
       {'textScale': 0},
       {'viewport': 360},
-      {'viewport': {'width': 360}},
+      {
+        'viewport': {'width': 360},
+      },
       {'textDirection': 'up'},
       {'platform': 'amiga'},
       {'seedColor': 'blue'},

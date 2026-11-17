@@ -195,7 +195,12 @@ class FindingsPanel extends StatelessWidget {
       children: [
         DraftButton.primary(
           key: scanKey,
-          onPressed: onScan,
+          // The scan comes first: the sweep draws its findings. It never
+          // delays the scan.
+          onPressed: () {
+            onScan();
+            findings.sweep();
+          },
           icon: Icons.search,
           label: 'Scan this screen',
         ),

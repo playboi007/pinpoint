@@ -70,13 +70,15 @@ class ContextCollector {
   ///
   /// [context] is Pinpoint's own: the page is described from there, so the
   /// app's elements are not touched for it. [environment] is the active
-  /// what-if overrides (`EnvironmentController.toJson`).
+  /// what-if overrides (`EnvironmentController.toJson`). [trace] is what
+  /// happened before the pick (`traceForNote`).
   Annotation collect(
     PickResult selection,
     String comment,
     AnnotationIntent intent, {
     required BuildContext context,
     Map<String, Object?>? environment,
+    Map<String, Object?>? trace,
   }) {
     final watch = Stopwatch()..start();
     final fields = _Fields();
@@ -120,6 +122,7 @@ class ContextCollector {
         ),
       ),
       inherited: field('inherited', () => _inherited(selection.element)),
+      trace: trace,
       errors: fields.errors,
     ).fitToBudget();
     lastElapsed = watch.elapsed;

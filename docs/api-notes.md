@@ -250,6 +250,7 @@ Behavior that matters for Milestone 10:
   - If Pinpoint's hook is installed first, the DevTools toggle fails with an **assertion error**.
   - If DevTools tracking is turned off later, it **clears Pinpoint's hook silently**.
   - Mitigation: install the hook only while the heat feature is on. Each frame, check `identical(debugOnRebuildDirtyWidget, ours)`. If not, show "tracking taken over" and do not restore over it.
+  - **Sharing (after Milestone 13):** when DevTools is on first, Pinpoint writes its hook over DevTools' callback and calls that callback first on each rebuild, so DevTools' counts go on. Letting go puts DevTools' callback back. When DevTools turns tracking off while Pinpoint holds the slot (the slot becomes `null`), Pinpoint takes the empty slot back after the next frame and marks that frame as a rebuild gap. A non-null callback written over Pinpoint's hook is still left alone, because sharing it could call back into Pinpoint without end. The order "Pinpoint first, then DevTools on" still fails: `_onRebuildWidget` is private, and nothing public runs before DevTools' assert.
 - **`debugOnPaintImage` is called once per distinct size, not once per frame.** `paintImage` (`painting/decoration_image.dart:683`) skips the call when the same `ImageSizeInfo` was reported in the last frame. A steady oversized image is not re-reported. Pinpoint must keep its own record. It runs when `!kReleaseMode`, so profile mode too.
   - `displaySize` is in **physical** pixels: `outputSize * maxDevicePixelRatio`. Compare it with `imageSize` directly.
   - `source` is `debugImageLabel ?? '<Unknown Image(W×H)>'`.
@@ -532,6 +533,81 @@ All **[source]**, none run. `PLAN-v2.md` "Verify by running" lists what Session 
 - `BindingBase.debugZoneErrorsAreFatal` and `debugCheckZone` (`foundation/binding.dart:438`): the binding and `runApp` must be in the same zone, or Flutter prints "Zone mismatch".
 - On web, `package:http` 1.6.0 calls `fetch` (`lib/src/browser_client.dart:36`); `dio_web_adapter` 2.2.0 uses `XMLHttpRequest` (`lib/src/adapter_impl.dart:36`).
 - Flutter Tools pins `dwds` 27.1.2. Its `lib/src/services/chrome/chrome_proxy_service.dart` has `addBreakpoint` (410), `addBreakpointWithScriptUri` (439), `evaluateInFrame` (698) and `getStack` (825). `getRetainingPath` and `getInstances` are only in the base `proxy_service.dart`; treat them as not supported on web.
+
+## 31. Facts found in Session 16 (PLAN-v2 Milestone 13, flight recorder)
+
+Session 16 of PLAN-v2 (spikes and cost table) was not run first: the user started Milestone 13 directly. The facts below come from building it. The "Verify by running" list in PLAN-v2 is still open, except where noted.
+
+- **[source]** There is no public frame number and no start-of-frame hook that is not a global slot (`handleBeginFrame` is reached through `PlatformDispatcher.onBeginFrame`). `RendererBinding.initInstances` registers the framework's own persistent callback first, so a persistent callback Pinpoint adds runs after build, layout and paint. `FrameClock` counts the frames it sees end there; an event made during a frame (transient callbacks, mid-frame microtasks, persistent callbacks before Pinpoint's) gets the number of the frame being drawn. **[run-vm]** An event added from `build` gets that frame's number.
+- **[source]** `GestureBinding.handleEvent` (`gestures/binding.dart:537`) calls `pointerRouter.route` for every event it handles, and `route` (`gestures/pointer_router.dart:124`) calls the global routes after the per-pointer ones. A global route therefore sees taps on Pinpoint's own trap, panels and rail too. The pointer source runs one hit test at each down and scroll signal and keeps the event only when the top of the hit path is under the app's `RepaintBoundary` (rule 14).
+- **[run-vm]** A route pushed by a tap is still moving when the tap's next frame ends: the route of what is at the app's center is still the old one. The route source reads once more from a one-shot timer 500 ms after its last read, which forces no frame.
+- **[run-vm]** A `debugOnRebuildDirtyWidget` that DevTools clears while level 3 runs is seen after the next frame (`identical` check, item 8). The rebuild source puts the hook back and marks the seqs from the previous frame event to this one as a rebuild gap. A different callback written over the hook stops the rebuild source, which ends rebuild coverage and records `detail.off` with "rebuild slot taken". The watches go on reading every watched `State` after each frame.
+- **[source]** `State.debugFillProperties` (`widgets/framework.dart:1489`) adds `lifecycle state`, `_widget` and `_element`. A watch leaves these three out.
+- **[run-vm]** A `Scaffold` made in project code counts as local (Pinpoint's rule is the creation location), so a watch with the default three `State`s follows `ScaffoldState` too when it is within reach.
+- **[source]** In `testWidgets`, `tester.pump(d)` draws a frame only when one is scheduled (`flutter_test/lib/src/binding.dart:2257`, `if (hasScheduledFrame)`). A pointer move over widgets that do not react draws no frame, so a limit of one move per frame alone would keep one move of a whole drag: the pointer source also allows one move per 16 ms of the events' time stamps. `tester.binding.delayed(d)` (`:2461`) moves the fake clock and fires timers without drawing frames either.
+- **[run-vm]** A zero-duration `Timer` left pending when a test ends fails the test ("A Timer is still pending even after the widget tree was disposed"). Every source cancels its timers in `stop()`.
+
+**Source levels and measured cost (rule 18).** Measured in the VM (`flutter test`, `test/trace/trace_cost_test.dart`) on a copy of the example's long list, 120 scroll frames per run. **[unverified]** The Chrome CPU profile against the plan's 3 % budget.
+
+| Source | Level | Work per event | Measured |
+| --- | --- | --- | --- |
+| frame | 1 | One event per frame from the post-frame tick | Whole level 1 tick about 40 us per frame |
+| pointer | 1 | One hit test per down or scroll signal in the dispatch. The pick search and the anchor walk run in a zero timer after the event | Pick p50 0.27 ms VM, 5.4 ms web (Session 2 numbers) |
+| key | 1 | One event per key, one focus lookup | Not measured alone |
+| text | 1 | After each frame: one focus compare; one chain walk per new focus | Inside the tick |
+| route | 1 | One hit search at the app's center after a frame that follows a pointer up, at most every 500 ms otherwise, and once from a timer | Inside the tick |
+| error, finding | 1 | One event per error or new finding | Not measured alone |
+| rebuild | 3 | One map increment per rebuild; locations resolved once per frame | Not measured (level 3) |
+| watch | 3 | The `State`'s diagnostics after a rebuild, post-frame; every watched `State` per frame when the rebuild slot is taken | Not measured (level 3) |
+
+- The recorder's own time, as the frame events report it: median 6 to 7 us, p95 20 to 25 us per frame.
+- VM wall time for 120 frames, on against off: from 0.95 to 1.6 times between runs with nothing changed. Too noisy for a 3 % budget; the test does not check it.
+- `get_screen` median: 8.9 ms on, 9.8 ms off (not slower).
+
+## 32. Facts found in Session 17 (PLAN-v2 Milestone 14, causes and network)
+
+**Chrome tests work here.** `flutter test --platform chrome <file>` runs a `@TestOn('browser')` file in headless Chrome, and `--wasm` runs it under dart2wasm. The VM run skips such a file. Blob URLs stand in for a local test server: same origin, real headers, a real body stream.
+
+- **[run-web]** A `fetch` replaced from Dart (`globalContext['fetch'] = f.toJS`) is the one `package:http` 1.6 `BrowserClient` calls, in DDC and in wasm (`test/trace/web/network_web_test.dart`). `Zone.current` inside the replaced function is the caller's zone. Answers two "Verify by running" boxes for the test runner; a real app is still a manual check.
+- **[run-web]** A `then` attached to the browser's promise before the app gets it runs first. `response.clone()` there leaves `bodyUsed` false for the app, and the app's bytes, headers, status and stream are the same with the source on and off.
+- **[run-web]** `XMLHttpRequest.prototype.open(m, u, undefined)` is a synchronous request: the spec turns an `undefined` async into `false`. A wrapper must call the original with the caller's arity; `toJSCaptureThis` with optional parameters gives `null` for a left-out argument.
+- **[run-web]** `window.postMessage` from script reaches the app's own listener with the page's origin, the origin the message source records.
+- **[run-web]** In wasm, a JS value read twice can be two Dart objects, so `identical` cannot tell whether a JS global still holds ours. `HookRegistry.slot` takes `same:`; the network slots use `strictEquals`. The "stop gives fetch back" test passes in DDC and wasm.
+- **[run-vm]** Inside a cause, `Zone.current` is the cause's child zone, never the binding zone. So the engine's shortcut (`hooks.dart:452`: call directly when the target zone is current) fires only for code that runs in the binding zone itself, and a nested dispatch reaches the zone handler. **Plan wording differs:** Pinpoint gives a nested entry the running cause, which is what the plan wants.
+- **[source]** `debugCheckZone` compares `Zone.current != _debugBindingZone` (`foundation/binding.dart:500`). In `main() async { ensureInitialized(); await x; runApp(...); }` the continuation would be an entry, fork a cause, and print "Zone mismatch". The zone makes no cause until `WidgetsBinding.instance.rootElement` exists. **[run-vm]** `test/trace/cause_zone_test.dart`.
+- **[source]** `onDrawFrame` is called while the phase is still `midFrameMicrotasks`; the draw call joins the begin-frame cause. On web, key data comes through `invoke(() => callback(...))` (`run`, no argument), so a key entry is named by its first input event.
+- **[source]** Child zones get no error handler of their own: a future that fails in one error zone does not deliver its error to a listener in another, so a handler per cause would change what the app sees. A future made before `PinPoint.run` and awaited inside it crosses an error zone, as with `runZonedGuarded`.
+- **[run-vm]** On the VM, an uncaught error that the zone passes to the root also reaches `PlatformDispatcher.onError`. The error source records it once.
+- **Decided: frame-to-frame links are "near"** (PLAN-v2 Milestone 14, step 9). The Session 16 spike did not run. The exact way costs one stack capture per `setState` (slow on web) and takes the `debugPrint` slot, and whether its label finds the element again is unverified. A frame cause lists up to 8 causes that ran since the frame before; `why` picks the one whose last events set state, answered a request or took input.
+
+**Source levels and cost (rule 18).** **[unverified]** Not measured in Chrome yet; needs the CPU profile of the long list.
+
+| Part | Level | Work per event |
+| --- | --- | --- |
+| cause zone | none (whole run) | One zone fork per engine entry; one zone lookup and one `identical` per callback in a cause; one counter per timer |
+| network | 1 | Per request: one zone lookup, URL masking (`Uri.parse`), header masking. Per answer: one event |
+| network bodies | 2 | One `clone()` per text or JSON answer up to 256 KB, read in chunks into an FNV-1a hash; a copy kept, bounded by count and bytes |
+| message | 1 | `JSON.stringify`, `jsonDecode`, masking, a hash, per message |
+
+## 33. Facts found in Session 18 (PLAN-v2 Milestone 15, tapes)
+
+- **[run-web]** A `Response` made in script (`new Response(bytes, {status, headers})`) and returned as a resolved promise from the patched `fetch` is what `package:http` 1.6 `BrowserClient` hands the app: status, headers and body as given, in DDC and wasm (`test/tape/web/net_replay_web_test.dart`). Its `url` is empty. A body is not allowed with status 101, 103, 204, 205 or 304.
+- **[run-web]** An XHR can be served without a server: at `send`, call the browser's own `open` again on a blob URL of the body, then `send`. A blob always answers 200, so `status`, `statusText`, `responseURL`, `getAllResponseHeaders` and `getResponseHeader` are set on that one object with `Object.defineProperty`; an own property shadows the prototype's getter. Dio reads only these.
+- **[run-web]** An XHR opened on an unknown scheme (`pinpoint-replay:no-answer`) fires `error`, as with the server off.
+- **[run-web]** A listener the source adds at `send` runs after the app's own `loadend` listener (added before `send`). "Delivered" for a replay's `after` is therefore marked just after the app saw the answer.
+- **[run-vm]** In a widget test, `tester.pump()` with no duration does not fire a zero-duration `Timer`; `pump(Duration.zero)` does. The pointer source fills a down's anchor from such a timer, so a test must pump with a duration before it reads the anchor. In the app the timer runs at once.
+- **[run-vm]** A `Stopwatch` does not follow a test's fake clock. The player's deadlines are `Timer`s, which follow it in tests and keep real time in the app.
+- **[source]** `SourceIndex.resolve` falls back to the nearest line of the same widget type in the file (made for pins after an edit). When the tapped widget is gone, that is another widget: a replay accepts the resolved element only on the same line, or on the same column within 50 lines (`AgentCommands.sameSpot`).
+- **[unverified]** Whether `location.reload()` after a hot reload loads the new code. The full replay after a fix depends on it (PLAN-v2 "Verify by running").
+
+**Source levels and cost (rule 18).** **[unverified]** Not measured in Chrome.
+
+| Part | Level | Work per event |
+| --- | --- | --- |
+| tape recorder, inputs and marks | 1 | One kind check per recorded event (a recorder listener); inputs, marks and routes kept in their own bounded lists |
+| tape recorder, exchanges | 1 | Per request: one request key (`Uri` split, a JSON decode and re-encode for a JSON body, an FNV-1a hash) |
+| tape recorder, bodies | 2 | The bodies the network source read; held once, by the tape recorder (20 MB), not in `NetBodies` as well |
+| replay | none | Only while a replay runs: one tape lookup per request, one anchor resolve per pointer down |
 
 ---
 

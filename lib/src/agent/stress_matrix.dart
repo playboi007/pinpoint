@@ -1,11 +1,59 @@
 import 'dart:ui' show Brightness;
 
+import 'package:flutter/foundation.dart' show ValueListenable, ValueNotifier;
 import 'package:flutter/painting.dart';
 
 import '../env/environment_controller.dart';
 
 /// The most runs one `stress_matrix` call makes.
 const int stressMaxRuns = 48;
+
+/// How far a running stress matrix is: [done] of [total] runs ended.
+///
+/// While run `done + 1` is in progress, [done] is still `done`.
+class StressStatus {
+  const StressStatus(this.done, this.total);
+
+  final int done;
+  final int total;
+
+  @override
+  bool operator ==(Object other) =>
+      other is StressStatus && other.done == done && other.total == total;
+
+  @override
+  int get hashCode => Object.hash(done, total);
+
+  @override
+  String toString() => 'StressStatus($done of $total)';
+}
+
+/// The progress of the stress matrix that runs now, for the rail's progress
+/// strip. Statics, not fields of a widget's `State` (api-notes item 29): the
+/// command sets them from anywhere.
+///
+/// The value is null while no matrix runs. It changes once when a matrix
+/// starts, once for each run that ends, and once when it ends, so it costs
+/// nothing in between.
+abstract final class StressProgress {
+  static final ValueNotifier<StressStatus?> _status =
+      ValueNotifier<StressStatus?>(null);
+
+  /// Null while no stress matrix runs.
+  static ValueListenable<StressStatus?> get running => _status;
+
+  /// A matrix of [total] runs starts.
+  static void start(int total) => _status.value = StressStatus(0, total);
+
+  /// [done] runs have ended.
+  static void advance(int done) {
+    final now = _status.value;
+    if (now != null) _status.value = StressStatus(done, now.total);
+  }
+
+  /// The matrix ended: finished, failed or cancelled.
+  static void finish() => _status.value = null;
+}
 
 /// One run of the stress matrix: an environment and its short name.
 class StressRun {

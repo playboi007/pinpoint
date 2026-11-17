@@ -8,6 +8,10 @@ import '../model/annotation.dart';
 import '../search/pick_result.dart';
 import '../theme/controls.dart';
 import '../theme/pinpoint_tokens.dart';
+import '../trace/note_trace.dart';
+import '../trace/trace_causes.dart';
+import '../trace/trace_format.dart';
+import '../trace/trace_session.dart';
 import 'comment_form.dart';
 import 'highlight_painter.dart';
 import 'note_view.dart';
@@ -383,6 +387,9 @@ class InfoPanel extends StatelessWidget {
   );
   static const Key tweakTabKey = ValueKey<String>('pinpoint.infoPanel.tweak');
 
+  /// The Info tab's "Caused" section (PLAN-v2 Milestone 14, step 17).
+  static const Key causedKey = ValueKey<String>('pinpoint.infoPanel.caused');
+
   /// The `unfold_more` button in the header: the next widget under the spot.
   static const Key nextCandidateKey = ValueKey<String>(
     'pinpoint.infoPanel.nextCandidate',
@@ -532,7 +539,26 @@ class InfoPanel extends StatelessWidget {
       // frame; until then there is nothing to read.
       return const SizedBox.shrink();
     }
-    return _InfoContent(info: info);
+    return _InfoContent(info: info, caused: _caused());
+  }
+
+  /// What the selected widget's subtree started in the last 5 seconds
+  /// (PLAN-v2 Milestone 14, step 17), or null while the recorder is off.
+  String? _caused() {
+    final session = TraceSession.current;
+    if (session == null) return null;
+    try {
+      final element = selection.element;
+      final answer = causedByAnswer(
+        session.recorder,
+        sources: subtreeSources(element, session.resolver),
+        widget: element.widget.runtimeType.toString(),
+        since: const SecondsBound(5),
+      );
+      return answer['summary'] as String?;
+    } catch (_) {
+      return null;
+    }
   }
 }
 
@@ -889,9 +915,12 @@ class _TabCellState extends State<_TabCell> {
 /// The Info tab: the render object's basics, then one numbered section for
 /// each extractor that matched.
 class _InfoContent extends StatelessWidget {
-  const _InfoContent({required this.info});
+  const _InfoContent({required this.info, this.caused});
 
   final WidgetInfo info;
+
+  /// "7 requests, 31 rebuilds in the last 5 s", or null.
+  final String? caused;
 
   @override
   Widget build(BuildContext context) {
@@ -922,6 +951,14 @@ class _InfoContent extends StatelessWidget {
               for (final property in section.properties)
                 row(property.name, property.label),
             ],
+          ),
+        ],
+        if (caused case final caused?) ...[
+          const SizedBox(height: PinPointSizes.sectionGap),
+          PanelSection(
+            key: InfoPanel.causedKey,
+            heading: sectionHeading(info.sections.length + 2, 'Caused'),
+            children: [row('last 5 s', caused)],
           ),
         ],
       ],

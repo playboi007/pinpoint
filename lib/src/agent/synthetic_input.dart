@@ -27,6 +27,28 @@ abstract final class SyntheticInput {
 
   static Duration _last = Duration.zero;
 
+  /// Whether a synthetic event is being dispatched now. The replay gate
+  /// lets only these through while it blocks real input (PLAN-v2
+  /// Milestone 15, step 17). Dispatch and hit test are synchronous, and a
+  /// real event never arrives in the middle of one.
+  static bool dispatching = false;
+
+  /// Sends [event] through `GestureBinding.handlePointerEvent`, as
+  /// Pinpoint's own.
+  static void send(PointerEvent event) {
+    final before = dispatching;
+    dispatching = true;
+    try {
+      GestureBinding.instance.handlePointerEvent(event);
+    } finally {
+      dispatching = before;
+    }
+  }
+
+  /// The next time stamp for a synthetic event: now, and always later than
+  /// the one before.
+  static Duration stamp() => _stamp();
+
   /// The next time stamp: now, at least [after], and always later than the
   /// one before.
   static Duration _stamp([Duration after = Duration.zero]) {
@@ -86,9 +108,8 @@ abstract final class SyntheticInput {
     // skips (watch out for); a check on a hover state needs a hover tool
     // later.
     const kind = PointerDeviceKind.touch;
-    final binding = GestureBinding.instance;
     Duration now() => _stamp();
-    binding.handlePointerEvent(
+    send(
       PointerAddedEvent(
         viewId: viewId,
         timeStamp: now(),
@@ -98,7 +119,7 @@ abstract final class SyntheticInput {
       ),
     );
     final down = now();
-    binding.handlePointerEvent(
+    send(
       PointerDownEvent(
         viewId: viewId,
         timeStamp: down,
@@ -112,7 +133,7 @@ abstract final class SyntheticInput {
     try {
       await Future<void>.delayed(hold);
       cancel.check();
-      binding.handlePointerEvent(
+      send(
         PointerUpEvent(
           viewId: viewId,
           // At least the hold after the down, also on a clock that did not
@@ -127,7 +148,7 @@ abstract final class SyntheticInput {
       lifted = true;
     } finally {
       if (!lifted) {
-        binding.handlePointerEvent(
+        send(
           PointerCancelEvent(
             viewId: viewId,
             timeStamp: now(),
@@ -138,7 +159,7 @@ abstract final class SyntheticInput {
           ),
         );
       }
-      binding.handlePointerEvent(
+      send(
         PointerRemovedEvent(
           viewId: viewId,
           timeStamp: now(),

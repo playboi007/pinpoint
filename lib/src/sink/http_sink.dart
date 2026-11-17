@@ -29,8 +29,8 @@ class HttpSink extends PinPointSink {
     this.url, {
     this.name = 'HTTP',
     this.timeout = const Duration(seconds: 5),
-    this._client,
-  });
+    http.Client? client,
+  }) : _client = client;
 
   /// The local bridge at `http://127.0.0.1:<port>/annotations`.
   ///

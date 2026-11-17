@@ -6,13 +6,15 @@ import 'package:http/http.dart' as http;
 
 import '../bridge/bridge_protocol.dart';
 import '../sink/bridge_client.dart';
+import '../trace/cause_zone.dart';
 
 /// Runs one command and gives its answer: `{ok: true, result: …}` or
 /// `{ok: false, error: …}`.
-typedef CommandHandler = Future<Map<String, Object?>> Function(
-  String tool,
-  Map<String, Object?> args,
-);
+typedef CommandHandler =
+    Future<Map<String, Object?>> Function(
+      String tool,
+      Map<String, Object?> args,
+    );
 
 /// How agent commands reach the app.
 ///
@@ -72,7 +74,9 @@ class LongPollTransport implements CommandTransport {
   void start(CommandHandler handler) {
     if (_running) return;
     _running = true;
-    unawaited(_loop(++_generation, handler));
+    // Pinpoint's own work: its awaits are not entries and make no cause
+    // (rule 14). Each command it runs is a cause of its own.
+    unawaited(CauseZone.internal(() => _loop(++_generation, handler)));
   }
 
   @override

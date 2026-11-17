@@ -4,13 +4,16 @@ import 'package:flutter/services.dart';
 import '../theme/controls.dart';
 import '../theme/palette_store.dart';
 import '../theme/pinpoint_tokens.dart';
+import 'motion/flights.dart';
 
 /// The theme menu, opened from the rail's palette item: one row per palette
 /// with its paper and accent swatches, a check on the current one, and a
 /// footer that says the pick is saved.
 ///
 /// Picking a row switches Pinpoint's palette (and saves it), then calls
-/// [onClose]. Esc calls [onClose] too. It takes the focus while it is open,
+/// [onClose]. The new palette spreads from the row's swatch like ink
+/// (`PaletteInk`); the switch itself is not held back. Esc calls [onClose]
+/// too. It takes the focus while it is open,
 /// so Esc reaches it even in idle, when the app has the focus.
 class ThemeMenu extends StatefulWidget {
   const ThemeMenu({super.key, required this.palette, required this.onClose});
@@ -89,7 +92,12 @@ class _ThemeMenuState extends State<ThemeMenu> {
                     key: ThemeMenu.rowKey(option),
                     option: option,
                     current: option == current,
-                    onTap: () {
+                    onTap: (origin) {
+                      // Before the switch: the wipe takes a picture of the
+                      // UI as it is now.
+                      if (origin != null && option != current) {
+                        FlightScope.maybeOf(context)?.inkWipe(origin);
+                      }
                       palette.select(option);
                       onClose();
                     },
@@ -122,7 +130,10 @@ class _ThemeRow extends StatefulWidget {
 
   final PinPointPalette option;
   final bool current;
-  final VoidCallback onTap;
+
+  /// Called with the centre of the accent swatch in global pixels, or null
+  /// when it is not on screen, for example from the keyboard.
+  final ValueChanged<Offset?> onTap;
 
   @override
   State<_ThemeRow> createState() => _ThemeRowState();
@@ -130,6 +141,17 @@ class _ThemeRow extends StatefulWidget {
 
 class _ThemeRowState extends State<_ThemeRow> {
   bool _hovered = false;
+
+  /// The paper and accent swatches, where the ink starts.
+  final GlobalKey _swatches = GlobalKey(debugLabel: 'pinpoint theme swatches');
+
+  void _tap() {
+    final box = _swatches.currentContext?.findRenderObject();
+    final origin = box is RenderBox && box.attached && box.hasSize
+        ? box.localToGlobal(const Offset(13, 7))
+        : null;
+    widget.onTap(origin);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -148,14 +170,14 @@ class _ThemeRowState extends State<_ThemeRow> {
       selected: widget.current,
       label: widget.option.label,
       excludeSemantics: true,
-      onTap: widget.onTap,
+      onTap: _tap,
       child: MouseRegion(
         cursor: SystemMouseCursors.click,
         onEnter: (_) => setState(() => _hovered = true),
         onExit: (_) => setState(() => _hovered = false),
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onTap: widget.onTap,
+          onTap: _tap,
           child: Container(
             height: 30,
             padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -167,6 +189,7 @@ class _ThemeRowState extends State<_ThemeRow> {
               children: [
                 // Paper, then the accent over it, 8 px of it overlapped.
                 SizedBox(
+                  key: _swatches,
                   width: 20,
                   height: 14,
                   child: Stack(

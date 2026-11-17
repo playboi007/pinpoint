@@ -5,11 +5,12 @@ import 'package:flutter/rendering.dart';
 
 /// Runs one agent command: [tool] with [args]. Checks [cancel] after each
 /// wait, so Esc stops it.
-typedef AgentRunner = Future<Map<String, Object?>> Function(
-  String tool,
-  Map<String, Object?> args,
-  AgentCancel cancel,
-);
+typedef AgentRunner =
+    Future<Map<String, Object?>> Function(
+      String tool,
+      Map<String, Object?> args,
+      AgentCancel cancel,
+    );
 
 /// Thrown inside a command when the user stopped it.
 class AgentAborted implements Exception {
@@ -64,6 +65,8 @@ class AgentControl extends ChangeNotifier {
     'stress_matrix',
     // Its steps can drive.
     'run_steps',
+    'replay',
+    'resume_replay',
   };
 
   /// Tools that only read. They reach the app only through the command
@@ -77,6 +80,16 @@ class AgentControl extends ChangeNotifier {
     'scan',
     'screenshot',
     'get_state',
+    'get_trace',
+    'trace_detail',
+    'watch',
+    'unwatch',
+    'mark',
+    'save_tape',
+    // Only ends a replay: always allowed.
+    'stop_replay',
+    'why',
+    'caused_by',
   };
 
   /// How long a tap dot stays.

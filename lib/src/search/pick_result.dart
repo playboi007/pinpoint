@@ -28,8 +28,8 @@ class PickResult {
     required this.ancestor,
     required this.ancestorRect,
     required this.sourceUnavailable,
-    required this._root,
-  });
+    required RenderObject? root,
+  }) : _root = root;
 
   /// A result built by hand, for tests that need no render tree. The chain
   /// holds [element] alone, with no location.

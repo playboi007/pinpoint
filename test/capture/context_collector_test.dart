@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -273,8 +275,10 @@ void main() {
 
     // A new route changes the old route's status, which notifies its
     // dependents. A self-dependency would assert here.
-    navigator.currentState!.push(
-      MaterialPageRoute<void>(builder: (_) => const Text('next')),
+    unawaited(
+      navigator.currentState!.push(
+        MaterialPageRoute<void>(builder: (_) => const Text('next')),
+      ),
     );
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);

@@ -175,7 +175,9 @@ class ViewportFrame extends SingleChildRenderObjectWidget {
 /// outlines, the pins) and the screenshot's inverse transform stay right.
 class RenderViewportFrame extends RenderBox
     with RenderObjectWithChildMixin<RenderBox> {
-  RenderViewportFrame({this._viewport, this._keyboardHeight = 0});
+  RenderViewportFrame({Size? viewport, double keyboardHeight = 0})
+    : _viewport = viewport,
+      _keyboardHeight = keyboardHeight;
 
   static const Color backdrop = Color(0xFFE6E6E6);
   static const Color checker = Color(0xFFD4D4D4);
@@ -492,8 +494,6 @@ class EnvironmentGlobals {
     // applied from initState) or a pointer event. A reassemble draws a
     // warm-up frame of its own; in a test that frame runs at once, and
     // inside another frame it fails.
-    Timer.run(
-      () => unawaited(WidgetsBinding.instance.reassembleApplication()),
-    );
+    Timer.run(() => unawaited(WidgetsBinding.instance.reassembleApplication()));
   }
 }
