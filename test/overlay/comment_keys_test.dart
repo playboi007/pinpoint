@@ -277,10 +277,14 @@ void main() {
     controller.toggleFreeze();
     await tester.pump();
     expect(
-      TickerMode.valuesOf(tester.element(appText('Save'))).enabled,
+      // Flutter 3.38 exposes ticker state through of().
+      // ignore: deprecated_member_use
+      TickerMode.of(tester.element(appText('Save'))),
       isFalse,
     );
-    expect(TickerMode.valuesOf(tester.element(field)).enabled, isTrue);
+    // Flutter 3.38 exposes ticker state through of().
+    // ignore: deprecated_member_use
+    expect(TickerMode.of(tester.element(field)), isTrue);
   });
 
   testWidgets('selection handles and the text menu have an Overlay '

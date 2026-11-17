@@ -293,11 +293,9 @@ void main() {
       ),
     );
     await selectForTweak(tester, controller, inApp(find.byType(Container)));
-    final color = tweakTargetsFor(controller.selection.value!)
-        .firstWhere((t) => t.section.title == 'Color')
-        .section
-        .properties
-        .single;
+    final color = tweakTargetsFor(
+      controller.selection.value!,
+    ).firstWhere((t) => t.section.title == 'Color').section.properties.single;
     expect(color.label, '#00897B');
     expect(color.editable, isFalse);
     // The reason is the tooltip of the lock glyph.

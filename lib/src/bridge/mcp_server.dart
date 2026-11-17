@@ -10,12 +10,17 @@ import 'dart:typed_data';
 
 import '../model/annotation.dart' show NoteStatus;
 import '../sink/markdown_formatter.dart' show verificationLines;
+import '../trace/trace_format.dart';
+import '../trace/trace_recorder.dart';
 import 'agent_tools.dart';
 import 'command_queue.dart';
 import 'hot_reload.dart';
 import 'note_detail.dart';
 import 'note_store.dart';
 import 'png_resize.dart';
+import 'probe_scan.dart';
+import 'run_store.dart';
+import 'tape_store.dart';
 
 /// The MCP protocol versions this server speaks, newest first.
 const List<String> mcpProtocolVersions = [
@@ -42,9 +47,19 @@ class McpServer {
     this.store, {
     this.commands,
     this.reloader,
+    TapeStore? tapes,
+    RunStore? runs,
     this.version = '0.0.1',
-    this._log = _noLog,
-  });
+    void Function(String line) log = _noLog,
+  }) : _tapes = tapes,
+       _runs = runs,
+       _log = log;
+
+  final TapeStore? _tapes;
+  final RunStore? _runs;
+
+  /// Replay runs on disk.
+  late final RunStore runs = _runs ?? RunStore(store.root);
 
   final NoteStore store;
 
@@ -53,6 +68,9 @@ class McpServer {
 
   /// Gives the agent `hot_reload`; null: no such tool.
   final HotReloader? reloader;
+
+  /// Tapes on disk (PLAN-v2 Milestone 15).
+  late final TapeStore tapes = _tapes ?? TapeStore(store.root);
 
   final void Function(String line) _log;
 
@@ -129,7 +147,18 @@ class McpServer {
           'shows only what update_note says.'
           '${commands == null ? '' : ' To operate the app, name widgets with '
                     'target queries and put several actions in one '
-                    'run_steps call; check once at the end.'}',
+                    'run_steps call; check once at the end. To see what '
+                    'happened over time, call get_trace (trace_detail or '
+                    'watch add rebuilds and state). To learn what started '
+                    'an event, call why with its seq; to learn what a '
+                    'widget started, caused_by. For a value no '
+                    'diagnostics show, add a PinPoint.probe line, '
+                    'hot_reload, read it with get_trace, and remove it '
+                    'before you set the note fixed (list_probes). A note '
+                    'that "has tape" can happen again: replay({tape}) '
+                    'plays what the user did and answers first_difference; '
+                    'until: "mark" holds at the user\'s mark for get_state '
+                    'and screenshot. Read the run with get_trace({run}).'}',
     };
   }
 
@@ -202,6 +231,41 @@ class McpServer {
         'required': ['id'],
       },
     },
+    {
+      'name': 'list_tapes',
+      'title': 'List tapes',
+      'description':
+          'The tapes on the bridge, newest first: id, kind (full from app '
+          'start, or segment from a mark), inputs, requests, marks, body '
+          'size, and partial when a limit dropped data. A note with a tape '
+          'says "has tape" and names it. No body is ever shown.',
+      'inputSchema': {'type': 'object', 'properties': <String, Object?>{}},
+    },
+    {
+      'name': 'get_tape',
+      'title': 'Read a tape',
+      'description':
+          'One tape in short: its summary, start page, marks, route order, '
+          'inputs (step, kind, widget, how many answers it waits for) and '
+          'requests (method, masked URL, status). No body.',
+      'inputSchema': {
+        'type': 'object',
+        'properties': {
+          'id': {'type': 'string', 'description': 'For example tp_…'},
+        },
+        'required': ['id'],
+      },
+    },
+    {
+      'name': 'list_probes',
+      'title': 'List probe lines',
+      'description':
+          'The PinPoint.probe( lines left under lib/, with file and line. '
+          'A probe records values each time it runs (read them with '
+          'get_trace kinds [probe]); remove every probe before you set a '
+          'note fixed.',
+      'inputSchema': {'type': 'object', 'properties': <String, Object?>{}},
+    },
   ];
 
   static const Map<String, Object?> _detailSchema = {
@@ -221,6 +285,10 @@ class McpServer {
       'list_notes' => _listNotes(input),
       'get_note' => _getNote(input),
       'update_note' => _updateNote(input),
+      'list_probes' => _listProbes(),
+      'list_tapes' => _listTapes(),
+      'get_trace' when input['run'] != null => _runTrace(input),
+      'get_tape' => _getTape(input),
       'verify_note' when commands != null => _verifyNote(input),
       'hot_reload' when reloader != null => _hotReload(input),
       final String tool
@@ -324,9 +392,112 @@ class McpServer {
       'pinpoint: the agent set $id to ${note['status']}'
       '${message == null ? '' : ': $message'}',
     );
+    // Probe lines are for finding a bug, not for the fix: say so while
+    // any remain (PLAN-v2 Milestone 13, step 7).
+    final probes = status == 'fixed' || status == 'resolved'
+        ? await findProbes(store.root.parent)
+        : const <ProbeLine>[];
     return _text(
       'Note $id is ${note['status']}.\n\n'
-      '${noteText(note, NoteDetail.compact)}',
+      '${noteText(note, NoteDetail.compact)}'
+      '${probes.isEmpty ? '' : '\n\n${_probeWarning(probes)}'}',
+    );
+  }
+
+  static String _probeWarning(List<ProbeLine> probes) => [
+    'Warning: ${probes.length} PinPoint.probe line'
+        '${probes.length == 1 ? ' is' : 's are'} still in lib/. Remove '
+        '${probes.length == 1 ? 'it' : 'them'} before the fix is done:',
+    for (final p in probes.take(10)) '  ${p.file}:${p.line}',
+    if (probes.length > 10) '  … and ${probes.length - 10} more',
+  ].join('\n');
+
+  /// `get_trace({run})`: a stored replay run, read with the same query as
+  /// the live record. A reload cleared the app's memory; the bridge kept
+  /// the run (PLAN-v2 Milestone 15, step 14).
+  Future<Map<String, Object?>> _runTrace(Map<String, Object?> input) async {
+    final run = input['run'];
+    if (run is! String) throw const _InvalidParams('run is a run id (run_…)');
+    final events = await runs.events(run);
+    if (events == null) return _text('No run $run', isError: true);
+    final status = await runs.status(run);
+    final Map<String, Object?> answer;
+    try {
+      answer = traceAnswer(
+        TraceRecorder.of(events),
+        TraceQuery.fromArgs(input),
+      );
+    } on FormatException catch (error) {
+      return _text(error.message, isError: true);
+    }
+    answer.remove('hint');
+    return _resultContent({'run': run, 'state': ?status?['state'], ...answer});
+  }
+
+  /// `list_tapes`: every tape's summary, newest first. Never a body.
+  Future<Map<String, Object?>> _listTapes() async {
+    final list = await tapes.list();
+    if (list.isEmpty) {
+      return _text(
+        'No tapes. Save one with save_tape, or ask the user to attach what '
+        'happened to a note.',
+      );
+    }
+    return _text(
+      [
+        '${list.length} tape${list.length == 1 ? '' : 's'}:',
+        for (final summary in list.take(mcpMaxListed)) jsonEncode(summary),
+      ].join('\n'),
+    );
+  }
+
+  /// `get_tape`: one tape's summary, its marks and its inputs in short.
+  /// Masked headers stay masked and no body is shown (rule 16).
+  Future<Map<String, Object?>> _getTape(Map<String, Object?> input) async {
+    final id = input['id'];
+    if (id is! String) throw const _InvalidParams('id is required');
+    final tape = await tapes.read(id);
+    if (tape == null) return _text('No tape $id', isError: true);
+    final summary = await tapes.summary(id);
+    return _text(
+      jsonEncode({
+        ...?summary,
+        'start': {
+          'url': tape.start.url,
+          'width': tape.start.width,
+          'height': tape.start.height,
+          'storage': tape.start.storage == null ? 'not kept' : 'kept',
+        },
+        'marks': [for (final m in tape.marks) m.toJson()],
+        'routes': tape.routes,
+        'inputs': [
+          for (final i in tape.inputs.take(60))
+            '${i.step} ${i.kind.substring('input.'.length)} '
+                '${i.data['phase'] ?? ''}${i.widget == null ? '' : ' ${i.widget}'}'
+                '${i.after.isEmpty ? '' : ' after ${i.after.length} answers'}',
+          if (tape.inputs.length > 60) '… ${tape.inputs.length - 60} more',
+        ],
+        'requests': [
+          for (final e in tape.net.take(60))
+            '${e.n} ${e.method} ${e.url} → ${e.error ?? e.status ?? '-'}'
+                '${e.unsupported == null ? '' : ' (passes through: '
+                          '${e.unsupported})'}',
+          if (tape.net.length > 60) '… ${tape.net.length - 60} more',
+        ],
+      }),
+    );
+  }
+
+  /// `list_probes`: the `PinPoint.probe(` lines left under `lib/`.
+  Future<Map<String, Object?>> _listProbes() async {
+    final probes = await findProbes(store.root.parent);
+    if (probes.isEmpty) return _text('No PinPoint.probe lines in lib/.');
+    return _text(
+      [
+        '${probes.length} PinPoint.probe line'
+            '${probes.length == 1 ? '' : 's'} in lib/:',
+        for (final p in probes) '$p',
+      ].join('\n'),
     );
   }
 
@@ -401,6 +572,27 @@ class McpServer {
           ),
         );
       }
+    }
+    // A full tape restarted the page (PLAN-v2 Milestone 15, step 7). The
+    // new page reports the run when it holds or ends.
+    if (tool == 'replay' &&
+        result is Map<String, Object?> &&
+        result['state'] == 'restarting' &&
+        result['run'] is String) {
+      final run = result['run']! as String;
+      final status = await runs.nextStatus(
+        run,
+        timeout: agentToolTimeout(tool, input),
+      );
+      if (status == null) {
+        return _text(
+          'The page restarted for replay $run but did not report it within '
+          '${agentToolTimeout(tool, input).inSeconds} s. Is the tab shown? '
+          'Read what arrived with get_trace({run: "$run"}).',
+          isError: true,
+        );
+      }
+      return _resultContent({...status});
     }
     if (tool == 'stress_matrix' && result is Map<String, Object?>) {
       return _text(jsonEncode(await _stressThumbnails({...result})));

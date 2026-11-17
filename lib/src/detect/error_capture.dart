@@ -10,6 +10,10 @@ import '../search/render_search.dart';
 import 'detector.dart';
 import 'overflow_detector.dart' show formatPixels;
 
+/// Told of each error as it is reported, inside the guarded handler:
+/// [error] is the exception, [library] the library Flutter names, if any.
+typedef ErrorListener = void Function(Object error, String? library);
+
 /// Captures errors as findings: chains `FlutterError.onError` and
 /// `PlatformDispatcher.onError` through [HookRegistry], and always calls
 /// the previous handler.
@@ -37,6 +41,10 @@ class ErrorCapture {
   /// only prints.
   @visibleForTesting
   static bool debugFailHandler = false;
+
+  /// Told of each error while the handlers are installed: the trace's
+  /// error source. Called inside the guarded handler.
+  static final List<ErrorListener> listeners = <ErrorListener>[];
 
   /// At most this many errors wait for one drain; more are dropped (an
   /// error in every frame of an animation).
@@ -89,6 +97,9 @@ class ErrorCapture {
     if (_installed) {
       try {
         if (debugFailHandler) throw StateError('debugFailHandler');
+        for (final listener in List<ErrorListener>.of(listeners)) {
+          listener(details.exception, details.library);
+        }
         _enqueue(_Captured(details: details));
       } catch (error) {
         debugPrint('pinpoint: error capture failed: $error');
@@ -103,6 +114,9 @@ class ErrorCapture {
     if (_installed) {
       try {
         if (debugFailHandler) throw StateError('debugFailHandler');
+        for (final listener in List<ErrorListener>.of(listeners)) {
+          listener(error, null);
+        }
         _enqueue(_Captured(error: error, stack: stack));
       } catch (failure) {
         debugPrint('pinpoint: error capture failed: $failure');

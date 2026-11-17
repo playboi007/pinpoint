@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
@@ -191,7 +193,8 @@ void main() {
     final animation = AnimationController(
       vsync: const TestVSync(),
       duration: const Duration(seconds: 1),
-    )..repeat();
+    );
+    unawaited(animation.repeat());
     addTearDown(animation.dispose);
     await tester.pumpWidget(
       tweakHost(

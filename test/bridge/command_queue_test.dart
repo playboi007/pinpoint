@@ -4,15 +4,18 @@ import 'package:pinpoint/src/bridge/command_queue.dart';
 /// Milestone 12, build step 1: the queue between the MCP tools and the
 /// app's long poll, in plain Dart.
 void main() {
-  test('with no app polling, run answers at once that control is off', () async {
-    final queue = CommandQueue();
-    final watch = Stopwatch()..start();
-    final answer = await queue.run('tap', const {'handle': 'h1'});
-    expect(answer['ok'], isFalse);
-    expect(answer['error'], startsWith('agent control is disabled'));
-    expect(watch.elapsed, lessThan(const Duration(seconds: 1)));
-    expect(queue.pendingCount, 0);
-  });
+  test(
+    'with no app polling, run answers at once that control is off',
+    () async {
+      final queue = CommandQueue();
+      final watch = Stopwatch()..start();
+      final answer = await queue.run('tap', const {'handle': 'h1'});
+      expect(answer['ok'], isFalse);
+      expect(answer['error'], startsWith('agent control is disabled'));
+      expect(watch.elapsed, lessThan(const Duration(seconds: 1)));
+      expect(queue.pendingCount, 0);
+    },
+  );
 
   test('a waiting poll takes the command; the result comes back', () async {
     final queue = CommandQueue();

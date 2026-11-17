@@ -5,8 +5,14 @@ import '../agent/checks.dart';
 import '../agent/commands.dart' show AgentCommands;
 import '../core/pinpoint_controller.dart';
 import '../model/annotation.dart';
+import '../tape/tape_recorder.dart' show TapeRecorder;
 import '../theme/controls.dart';
+import '../theme/pinpoint_motion.dart';
 import '../theme/pinpoint_tokens.dart';
+import '../trace/trace_session.dart';
+import 'motion/copy_flip.dart';
+import 'motion/flights.dart';
+import 'tape_range_picker.dart';
 
 /// The Comment tab of the info panel: intent, comment, and whether to attach
 /// a screenshot. Its buttons are in [CommentFooter], which the info panel
@@ -25,6 +31,27 @@ class CommentForm extends StatelessWidget {
   static const Key screenshotKey = ValueKey<String>(
     'pinpoint.comment.screenshot',
   );
+
+  /// "Attach what happened".
+  static const Key tapeKey = ValueKey<String>('pinpoint.comment.tape');
+
+  /// The label of "Attach what happened", with what it would attach, or
+  /// null when the flight recorder is off.
+  static String? tapeLabel() {
+    final session = TraceSession.current;
+    if (session == null) return null;
+    final tapes = session.tapes;
+    if (!tapes.bodiesRead) return 'Attach what happened (inputs only)';
+    final bytes = tapes.estimatedBytes;
+    final size = bytes >= 1024 * 1024
+        ? '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB'
+        : '${(bytes / 1024).ceil()} KB';
+    final ago = tapes.startsAgo;
+    return 'Attach what happened ($size'
+        '${tapes.canSaveFull || ago == null ? '' : ', tape starts '
+                  '${ago < 90 ? '$ago s' : '${(ago / 60).round()} min'} ago'})';
+  }
+
   static const Key sendKey = ValueKey<String>('pinpoint.comment.send');
   static const Key draftKey = ValueKey<String>('pinpoint.comment.draft');
   static const Key copyKey = ValueKey<String>('pinpoint.comment.copy');
@@ -66,6 +93,49 @@ class CommentForm extends StatelessWidget {
     AnnotationIntent.improve => PinPointIcons.improve,
     AnnotationIntent.question => PinPointIcons.help,
   };
+
+  /// The range picker under "Attach what happened", which grows in and out.
+  ///
+  /// With reduced motion there is no growing: `AnimatedSize` with a zero
+  /// duration changes its own layout while it is laid out, which asserts.
+  Widget _tapeRange(
+    BuildContext context,
+    CommentDraft draft,
+    TapeRecorder tapes,
+    bool sending,
+  ) {
+    final motion = PinPointMotion.of(context);
+    final switcher = AnimatedSwitcher(
+      duration: motion.quick,
+      child: draft.attachTape && tapeLabel() != null
+          ? Padding(
+              key: const ValueKey<String>('range'),
+              padding: const EdgeInsets.only(top: 12, left: 22),
+              child: TapeRangePicker(
+                draft: draft,
+                tapes: tapes,
+                enabled: !sending,
+              ),
+            )
+          : const SizedBox(
+              key: ValueKey<String>('none'),
+              width: double.infinity,
+            ),
+    );
+    if (motion.reduced) {
+      return Align(
+        alignment: Alignment.topCenter,
+        heightFactor: 1,
+        child: switcher,
+      );
+    }
+    return AnimatedSize(
+      duration: motion.moderate,
+      curve: PinPointMotion.enter,
+      alignment: Alignment.topCenter,
+      child: switcher,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -134,6 +204,21 @@ class CommentForm extends StatelessWidget {
                 label: 'Include screenshot',
               ),
             ),
+            if (tapeLabel() case final label?)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: DraftCheckbox(
+                  key: tapeKey,
+                  value: draft.attachTape,
+                  onChanged: sending
+                      ? null
+                      : (value) => draft.attachTape = value,
+                  label: label,
+                ),
+              ),
+            // Which part of the run goes with the note.
+            if (TraceSession.current?.tapes case final tapes?)
+              _tapeRange(context, draft, tapes, sending),
           ],
         );
       },
@@ -143,6 +228,11 @@ class CommentForm extends StatelessWidget {
 
 /// The footer of the Comment tab, 40 px: copy as Markdown, the send shortcut
 /// as a hint, Cancel, Save draft and Send.
+///
+/// Three small moments play beside the actions, never before them: the copy
+/// icon flips to a check ([CopyFlipButton]), and the overlay's `FlightLayer`
+/// draws the paper plane of a send and the card of a saved draft. They need
+/// the overlay's flights; a footer built alone plays only the flip.
 class CommentFooter extends StatelessWidget {
   const CommentFooter({
     super.key,
@@ -174,6 +264,7 @@ class CommentFooter extends StatelessWidget {
   Widget build(BuildContext context) {
     final tokens = PinPointTokens.of(context);
     final draft = controller.draft;
+    final flights = FlightScope.maybeOf(context);
     return ListenableBuilder(
       listenable: Listenable.merge([draft, draft.text]),
       builder: (context, _) {
@@ -182,6 +273,7 @@ class CommentFooter extends StatelessWidget {
         final commenting = mode == PinPointMode.commenting;
         final ready = commenting && draft.hasText;
         return Container(
+          key: flights?.footerKey,
           height: PinPointSizes.footerTall,
           padding: const EdgeInsets.symmetric(horizontal: 12),
           decoration: BoxDecoration(
@@ -194,12 +286,10 @@ class CommentFooter extends StatelessWidget {
               final room = constraints.maxWidth - 24 - 8 - 8;
               return Row(
                 children: [
-                  DraftIconButton(
-                    key: CommentForm.copyKey,
-                    icon: PinPointIcons.contentCopy,
-                    iconSize: 16,
+                  CopyFlipButton(
+                    buttonKey: CommentForm.copyKey,
                     color: tokens.muted,
-                    tooltip: 'Copy as Markdown',
+                    flights: flights,
                     onPressed: sending ? null : onCopy,
                   ),
                   const SizedBox(width: 8),
@@ -236,10 +326,14 @@ class CommentFooter extends StatelessWidget {
                             ),
                           ],
                           const SizedBox(width: 8),
-                          DraftButton.primary(
-                            key: CommentForm.sendKey,
-                            label: sending ? 'Sending…' : 'Send',
-                            onPressed: ready ? onSend : null,
+                          // Keyed so the plane knows where to start.
+                          KeyedSubtree(
+                            key: flights?.sendKey,
+                            child: DraftButton.primary(
+                              key: CommentForm.sendKey,
+                              label: sending ? 'Sending…' : 'Send',
+                              onPressed: ready ? onSend : null,
+                            ),
                           ),
                         ],
                       ),

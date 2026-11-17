@@ -154,22 +154,24 @@ void main() {
     expect(no.measured, 'Save changes');
   });
 
-  testWidgets('contrast_min measures the text against its background', (
-    tester,
-  ) async {
-    await pumpFixture(tester);
-    final low = await check(tester, 'faint', {
-      'type': 'contrast_min',
-      'min': 4.5,
-    });
-    expect(low.passed, isFalse);
-    expect(low.measured, lessThan(2));
-    final high = await check(tester, 'label', {
-      'type': 'contrast_min',
-      'min': 4.5,
-    });
-    expect(high.passed, isTrue, reason: high.message);
-  }, semanticsEnabled: false);
+  testWidgets(
+    'contrast_min measures the text against its background',
+    (tester) async {
+      await pumpFixture(tester);
+      final low = await check(tester, 'faint', {
+        'type': 'contrast_min',
+        'min': 4.5,
+      });
+      expect(low.passed, isFalse);
+      expect(low.measured, lessThan(2));
+      final high = await check(tester, 'label', {
+        'type': 'contrast_min',
+        'min': 4.5,
+      });
+      expect(high.passed, isTrue, reason: high.message);
+    },
+    semanticsEnabled: false,
+  );
 
   testWidgets('tap_target_min measures the semantics node', (tester) async {
     await pumpFixture(tester);

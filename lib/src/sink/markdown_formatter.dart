@@ -162,6 +162,12 @@ String markdownFromJson(Map<String, Object?> json) {
     replies.forEach(out.writeln);
   }
 
+  final happened = [?tapeLine(json['tape']), ...whatHappenedLines(json)];
+  if (happened.isNotEmpty) {
+    out.writeln();
+    happened.forEach(out.writeln);
+  }
+
   final subtree = _string(json['subtree']);
   if (subtree != null && subtree.isNotEmpty) {
     out
@@ -172,6 +178,41 @@ String markdownFromJson(Map<String, Object?> json) {
     }
   }
   return out.toString();
+}
+
+/// The "What happened" section of a note (its `trace` JSON): a heading,
+/// then the compact trace lines indented. Empty without a trace.
+List<String> whatHappenedLines(Map<String, Object?> json) {
+  final trace = _map(json['trace']);
+  final lines = [for (final l in _list(trace['lines'])) ?_string(l)];
+  if (lines.isEmpty) return const <String>[];
+  final seconds = _number(trace['seconds']);
+  final partial = trace['partial'] == true;
+  return [
+    'What happened${seconds == null ? '' : ' ($seconds s before the pick)'}'
+        '${partial ? ' (partial: ${_line(_string(trace['reason']) ?? 'older events dropped')})' : ''}:',
+    for (final line in lines) '  ${_line(line)}',
+  ];
+}
+
+/// The tape line of a note (its `tape` JSON), for example `Tape:
+/// tp_… (full, 12 inputs, 3 requests, 1 mark). Replay it with replay.`,
+/// or null without a tape (PLAN-v2 Milestone 15, step 18).
+String? tapeLine(Object? tape) {
+  final t = _map(tape);
+  final id = _string(t['id']);
+  if (id == null) return null;
+  String count(String key, String word) {
+    final n = _number(t[key]) ?? 0;
+    return '$n $word${n == 1 ? '' : 's'}';
+  }
+
+  final partial = t['partial'];
+  return 'Tape: $id (${_string(t['kind']) ?? 'segment'}, '
+      '${count('inputs', 'input')}, ${count('requests', 'request')}, '
+      '${count('marks', 'mark')}'
+      '${partial == null || partial == false ? '' : ', partial: ${_line('$partial')}'}'
+      '). Replay it with replay({tape: "$id"}).';
 }
 
 /// The what-if overrides of a note (its `environment` JSON) on one line,

@@ -36,6 +36,7 @@ Future<void> main(List<String> args) async {
       lan: options.lan,
       allowedOrigins: options.allowedOrigins,
       timing: options.timing,
+      ttl: options.ttl,
       log: stdout.writeln,
     );
   } on BridgeStartException catch (error) {
@@ -51,6 +52,13 @@ Future<void> main(List<String> args) async {
       '(Claude Code: claude mcp add --transport http pinpoint $url/mcp)',
     )
     ..writeln('pinpoint: ${hotReloadHint(options.dir)}')
+    ..writeln(
+      options.ttl == null
+          ? 'pinpoint: notes, tapes and runs are kept until you delete them '
+                '(--ttl 24h deletes them a day after their last change).'
+          : 'pinpoint: notes, tapes and runs are deleted '
+                '${_age(options.ttl!)} after their last change (--ttl).',
+    )
     ..writeln('pinpoint: Ctrl+C stops it.');
 
   late final StreamSubscription<ProcessSignal> interrupt;
@@ -59,3 +67,9 @@ Future<void> main(List<String> args) async {
     await bridge.close();
   });
 }
+
+String _age(Duration ttl) => ttl.inMinutes % (60 * 24) == 0
+    ? '${ttl.inDays} d'
+    : ttl.inMinutes % 60 == 0
+    ? '${ttl.inHours} h'
+    : '${ttl.inMinutes} min';

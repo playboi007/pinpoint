@@ -4,8 +4,8 @@ version: 0.0.1
 repository: https://github.com/playboi007/pinpoint
 
 environment:
-  sdk: ^3.13.4
-  flutter: ">=1.17.0"
+  sdk: ^3.10.0-290.4.beta
+  flutter: ">=3.38.0"
 
 dependencies:
   flutter:
@@ -18,6 +18,10 @@ dev_dependencies:
   flutter_lints: ^6.0.0
 
 flutter:
+  assets:
+    # The workers, cone and tape of the "under construction" cover. Shown by
+    # CSS in the page, never drawn in Flutter. See lib/src/overlay/construction.
+    - assets/construction/
   fonts:
     # The one font Flutter does not bundle. Used as
     # `fontFamily: 'RobotoMono', package: 'pinpoint'`. See assets/fonts/OFL.txt.

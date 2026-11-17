@@ -269,6 +269,29 @@ class NoteStore {
     return true;
   });
 
+  /// Deletes every note (any status, with its screenshots) whose JSON was
+  /// last written before [cutoff]: the bridge's `--ttl`. Returns the ids.
+  /// The app sees each as deleted in [changes], so its pin goes too.
+  Future<List<String>> expire(DateTime cutoff) async {
+    await sync();
+    return _serial(() async {
+      final gone = <String>[];
+      for (final MapEntry(key: id, value: entry) in _index.entries.toList()) {
+        final file = File('${entry.folder.path}/$id.json');
+        try {
+          if (!(await file.lastModified()).isBefore(cutoff)) continue;
+        } on FileSystemException {
+          continue;
+        }
+        _index.remove(id);
+        await _removeFiles(entry.folder, id);
+        _changes[id] = _Change(++_seq, entry.origin);
+        gone.add(id);
+      }
+      return gone;
+    });
+  }
+
   /// What changed after [since] (a [cursor]), for notes of [origin] when
   /// given. Reads the folders first, so files an agent moved by hand count.
   Future<StoreChanges> changes(String? since, {String? origin}) async {

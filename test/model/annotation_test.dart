@@ -123,6 +123,26 @@ void main() {
     expect(actual, expected);
   });
 
+  test('schema 8: tape only when attached, after trace; round trip', () {
+    expect(example().toJson().containsKey('tape'), isFalse);
+    const tape = {
+      'id': 'tp_20261113_100000_ab12',
+      'kind': 'full',
+      'inputs': 12,
+      'requests': 3,
+      'marks': 1,
+    };
+    final json = example()
+        .copyWith(trace: () => const {'lines': <Object?>[]}, tape: () => tape)
+        .toJson();
+    final keys = json.keys.toList();
+    expect(keys.indexOf('tape'), keys.indexOf('trace') + 1);
+    final back = Annotation.fromJson(
+      jsonDecode(jsonEncode(json)) as Map<String, Object?>,
+    )!;
+    expect(back.tape, tape);
+  });
+
   test('schema 6: verification only once verify_note ran; round trip', () {
     expect(example().toJson().containsKey('verification'), isFalse);
     expect(example().checksPassed, isNull);
@@ -147,9 +167,9 @@ void main() {
     );
   });
 
-  test('schema is version 6 and keys come in a fixed order', () {
+  test('schema is version 8 and keys come in a fixed order', () {
     final json = example().toJson();
-    expect(json['schema'], 6);
+    expect(json['schema'], 8);
     expect(json.keys.take(6), [
       'schema',
       'id',
@@ -198,10 +218,11 @@ void main() {
     test('reads back from JSON', () {
       final back = Annotation.fromJson(
         jsonDecode(
-          jsonEncode(
-            note(environment: const {'textDirection': 'rtl'}).toJson(),
-          ),
-        ) as Map<String, Object?>,
+              jsonEncode(
+                note(environment: const {'textDirection': 'rtl'}).toJson(),
+              ),
+            )
+            as Map<String, Object?>,
       )!;
       expect(back.environment, {'textDirection': 'rtl'});
     });
@@ -366,9 +387,9 @@ void main() {
       'lib/src/model/annotation.dart',
       'lib/src/model/source_location.dart',
     ]) {
-      final imports = File(file)
-          .readAsLinesSync()
-          .where((l) => l.startsWith('import '));
+      final imports = File(
+        file,
+      ).readAsLinesSync().where((l) => l.startsWith('import '));
       for (final line in imports) {
         expect(line, isNot(contains('dart:ui')), reason: file);
         expect(line, isNot(contains('package:flutter')), reason: file);

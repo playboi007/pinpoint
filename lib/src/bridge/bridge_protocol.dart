@@ -29,6 +29,18 @@ const String mcpPath = '/mcp';
 /// (`POST /commands/control`).
 const String commandsPath = '/commands';
 
+/// Tapes (PLAN-v2 Milestone 15): `POST /tapes` stores one with its bodies,
+/// `GET /tapes/<id>` gives it back for a replay.
+const String tapesPath = '/tapes';
+
+/// Replay runs: `POST /runs/<id>/events` adds a batch of events,
+/// `POST /runs/<id>/status` says where the replay is.
+const String runsPath = '/runs';
+
+/// The largest tape the bridge reads: 20 MB of bodies as base64, and the
+/// tape itself.
+const int maxTapeBytes = 40 * 1024 * 1024;
+
 /// The app's service extension that counts its hot reloads. The bridge's
 /// `hot_reload` reads it before and after a reload: on web the reload
 /// service says success even when the code did not compile.

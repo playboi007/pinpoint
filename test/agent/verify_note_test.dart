@@ -179,10 +179,7 @@ void main() {
   testWidgets("goes to the note's route when the widget is not on screen, "
       'and comes back', (tester) async {
     await pumpApp(tester, home: const _Home());
-    final result = await verify(
-      tester,
-      note(rowAnchor(route: '/zoo')),
-    );
+    final result = await verify(tester, note(rowAnchor(route: '/zoo')));
     expect(result['passed'], isFalse, reason: 'found and measured');
     expect(result['found'], isNotNull);
     expect(tester.takeException(), isFlutterError);
@@ -258,7 +255,8 @@ class _Long extends StatelessWidget {
       children: [
         // At 960 px: built (in the cache extent) but below the screen
         // at a scroll of 300.
-        for (var i = 0; i < 16; i++) SizedBox(height: 60, child: Text('row $i')),
+        for (var i = 0; i < 16; i++)
+          SizedBox(height: 60, child: Text('row $i')),
         const Text('Deep'), // PIN:deep
         for (var i = 0; i < 30; i++) const SizedBox(height: 60),
       ],

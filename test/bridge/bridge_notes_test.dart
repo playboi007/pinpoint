@@ -298,8 +298,9 @@ void main() {
       await call('POST', '/annotations', body: note('pp_a'));
       final since = await cursor();
       for (final ext in ['md', 'json']) {
-        File('${folder('open').path}/pp_a.$ext')
-            .renameSync('${folder('resolved').path}/pp_a.$ext');
+        File(
+          '${folder('open').path}/pp_a.$ext',
+        ).renameSync('${folder('resolved').path}/pp_a.$ext');
       }
       final result = await changes(since);
       final change = asMap((result['changes']! as List<Object?>).single);

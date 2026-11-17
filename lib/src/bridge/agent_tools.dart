@@ -1,6 +1,8 @@
 // Plain Dart: the Milestone 12 tools the bridge offers over MCP. Each one
 // runs inside the app, through the command queue.
 
+import '../trace/trace_causes.dart' show whyLimits;
+
 /// The agent tools, in the order `tools/list` shows them.
 const List<String> agentToolNames = [
   'get_screen',
@@ -23,6 +25,17 @@ const List<String> agentToolNames = [
   'verify_note',
   'stress_matrix',
   'run_steps',
+  'get_trace',
+  'trace_detail',
+  'watch',
+  'unwatch',
+  'mark',
+  'save_tape',
+  'replay',
+  'resume_replay',
+  'stop_replay',
+  'why',
+  'caused_by',
 ];
 
 /// How long the bridge waits for the app's answer to [tool].
@@ -34,8 +47,11 @@ Duration agentToolTimeout(String tool, Map<String, Object?> args) {
       return Duration(milliseconds: wait + 5000);
     case 'verify_note':
     case 'scroll_to':
+    case 'save_tape':
       return const Duration(seconds: 60);
     case 'stress_matrix':
+    case 'replay':
+    case 'resume_replay':
       return const Duration(seconds: 240);
     case 'run_steps':
       // The sum of its steps' own timeouts.
@@ -411,5 +427,216 @@ final List<Map<String, Object?>> agentTools = [
       },
     },
     ['steps'],
+  ),
+  _tool(
+    'get_trace',
+    'Read what happened',
+    'The flight recorder: what the app did, one compact line per event '
+        '(seq, time, frame, kind, what), equal lines and repeating blocks '
+        'folded with ×n. Taps, keys, text, routes, errors, findings, '
+        'probes and marks are always recorded; rebuilds (build) and '
+        'watched state (state) only while level 3 runs (trace_detail). '
+        'Requests are net.request, net.response and net.error, with the '
+        'body hash when bodies are read. With PinPoint.run in main, each '
+        'line shows its cause (c37): the tap, frame, key or message that '
+        'started it; ask why({seq}) for the chain. '
+        'partial: true means a limit dropped older events; notes say where '
+        'rebuilds were not recorded. Frames are counted, not listed, '
+        'unless kinds asks for frame.',
+    {
+      'since': {
+        'description':
+            'A seq (412), seconds back ("30s") or "mark" (the last mark).',
+      },
+      'until': {'description': 'Same forms as since.'},
+      'kinds': {
+        'type': 'array',
+        'items': {'type': 'string'},
+        'description':
+            'Kinds or prefixes: input, input.pointer, build, state, probe, '
+            'route, error, finding, mark, frame, detail.',
+      },
+      'widget': {
+        'type': 'string',
+        'description': 'Part of a widget type or of its source file.',
+      },
+      'cause': {
+        'type': 'integer',
+        'description':
+            'Only the events of one cause: the c37 on each line (needs '
+            'PinPoint.run).',
+      },
+      'limit': {
+        'type': 'integer',
+        'description': 'Most lines (default 50, newest kept).',
+      },
+      'detail': {
+        'type': 'string',
+        'enum': ['compact', 'full'],
+        'description': 'full: whole events as JSON.',
+      },
+      'run': {
+        'type': 'string',
+        'description':
+            'A replay run id (run_…) from replay: reads that run as the '
+            'bridge stored it, also after the page reloaded. Without it, '
+            'the live record.',
+      },
+    },
+  ),
+  _tool(
+    'trace_detail',
+    'Record rebuilds and state',
+    'Starts or stops level 3 recording for you: rebuilds per widget per '
+        'frame and watches. Costly per event, so turn it off when done. '
+        'Answers which sources run; when another tool (DevTools "track '
+        'rebuilds") holds the rebuild slot, it says so and the other level '
+        '3 sources still run.',
+    {
+      'on': {'type': 'boolean'},
+    },
+    ['on'],
+  ),
+  _tool(
+    'watch',
+    'Watch a widget\'s state',
+    'Follows the widget\'s own State and the local States above it, up to '
+        'its route (ancestors: how many, default 3, at most 8). After each '
+        'rebuild of one of them, get_trace shows a state event with only '
+        'the values that changed. At most 8 watches; they start level 3. '
+        'Only what a State lists in debugFillProperties is seen: private '
+        'fields need a probe (PinPoint.probe).',
+    {
+      'handle': _handle,
+      'target': _target,
+      'wait_ms': _waitMs,
+      'ancestors': {
+        'type': 'integer',
+        'description': 'Most States followed (default 3).',
+      },
+    },
+  ),
+  _tool(
+    'unwatch',
+    'Stop watching',
+    'Removes a watch by id (w1), or every watch with no id. The last one '
+        'stops level 3 unless trace_detail or the Timeline holds it.',
+    {
+      'id': {'type': 'string'},
+    },
+  ),
+  _tool(
+    'why',
+    'Why did this happen',
+    'Walks back from one event (its seq from get_trace): its cause, the '
+        'events of that cause before it, and the entry that started it (a '
+        'tap, a key, a message). For a frame, the cause that made it '
+        'dirty, then that cause, up to 4 frames back; loop: true when each '
+        'frame does the same work again. Needs PinPoint.run in main. '
+        '$whyLimits',
+    {
+      'seq': {'type': 'integer', 'description': 'The event, for example 412.'},
+    },
+    ['seq'],
+  ),
+  _tool(
+    'caused_by',
+    'What did this widget start',
+    'Everything the widget\'s subtree started: requests, rebuilds, state '
+        'changes, timers and errors, as counts and the first few of each. '
+        'A cause counts when its tap landed on the subtree or the subtree '
+        'rebuilt in it; a frame\'s work is shared by every widget that '
+        'rebuilt in it. Rebuilds need level 3 (trace_detail); causes need '
+        'PinPoint.run.',
+    {
+      'handle': _handle,
+      'target': _target,
+      'wait_ms': _waitMs,
+      'since': {
+        'description':
+            'A seq (412), seconds back ("30s", the default is "10s") or '
+            '"mark".',
+      },
+    },
+  ),
+  _tool(
+    'mark',
+    'Mark this moment',
+    'Records a mark in the flight recorder, with an optional sentence, '
+        'and a thumbnail of the app. Read from it with get_trace since: '
+        '"mark".',
+    {
+      'text': {
+        'type': 'string',
+        'description': 'For example "the list is empty here".',
+      },
+    },
+  ),
+  _tool(
+    'save_tape',
+    'Save what happened as a tape',
+    'Saves the inputs and network answers of the run as a tape on the '
+        'bridge, so the run can happen again with replay. since: "start" '
+        '(the default: a full tape from app start, replayed after a '
+        'restart), "mark", "mark:N" or seconds back (a segment, replayed '
+        'from where the app is). A tape over the body limit, or made with '
+        'TraceConfig.bodies false, is a segment; partial says what was '
+        'lost. Answers the summary only; bodies stay in .pinpoint/tapes/.',
+    {
+      'since': {'description': '"start", "mark", "mark:2", 30 or "30s".'},
+      'name': {'type': 'string', 'description': 'A short name.'},
+    },
+  ),
+  _tool(
+    'replay',
+    'Replay a tape',
+    'Plays a tape\'s inputs into the app while requests are answered from '
+        'the tape: the app does what the user did. Inputs go by logical '
+        'order: each waits for the answers that came before it and for its '
+        'widget (found by anchor, so a moved button is still hit). Real '
+        'input is blocked; Esc stops. Answers when it ends or holds: state '
+        '(done, held, stopped, diverged), step of total, first_difference '
+        '{step, what, expected, got} (route order, request keys, anchors), '
+        'unmatched requests, and partial for a partial tape. Read what '
+        'happened with get_trace. Needs agent control on.',
+    {
+      'tape': {'type': 'string', 'description': 'A tape id (tp_…).'},
+      'until': {
+        'type': 'string',
+        'description':
+            '"mark", "mark:N" or "step:N": hold there. The app stays in '
+            'that moment for get_state, screenshot, inspect; then '
+            'resume_replay or stop_replay.',
+      },
+      'speed': {
+        'type': 'number',
+        'description': 'Faster than recorded (2, 4); default 1, at most 20.',
+      },
+      'unmatched': {
+        'type': 'string',
+        'enum': ['fail', 'passthrough', 'last'],
+        'description':
+            'A request the tape has no answer for: fail (default, no '
+            'request reaches a server), passthrough (to the real server; '
+            'use it after a fix that changes requests), last.',
+      },
+      'latency': {
+        'description': '"recorded" (default), "instant", or ms per answer.',
+      },
+    },
+    ['tape'],
+  ),
+  _tool(
+    'resume_replay',
+    'Go on after a hold',
+    'Goes on with a replay that holds at until. Answers as replay does.',
+    const <String, Object?>{},
+  ),
+  _tool(
+    'stop_replay',
+    'Stop the replay',
+    'Ends the replay that holds, and gives input and the network back. '
+        'Answers its last state.',
+    const <String, Object?>{},
   ),
 ];

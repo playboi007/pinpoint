@@ -4,6 +4,7 @@ import 'package:flutter/material.dart' show ThemeData;
 import '../agent/state_dump.dart';
 import '../sink/pinpoint_sink.dart';
 import '../theme/pinpoint_tokens.dart';
+import '../trace/trace_config.dart';
 import 'keymap.dart';
 
 /// Settings for [PinPointWrapper].
@@ -24,7 +25,14 @@ class PinPointConfig {
     this.allowAgentControl = true,
     this.stateAdapters = const <StateAdapter>[],
     this.palette = PinPointPalette.redline,
+    this.trace = const TraceConfig(),
   }) : assert(maxScreenshotWidth > 0);
+
+  /// The flight recorder (PLAN-v2 Milestone 13): what the app did in the
+  /// last minutes, for the Timeline, notes and `get_trace`.
+  /// `TraceConfig(enabled: false)` turns it off and leaves the rest as it
+  /// was.
+  final TraceConfig trace;
 
   /// The palette used until the user picks one in the theme menu. The pick is
   /// saved per origin on web, and wins over this on the next run.

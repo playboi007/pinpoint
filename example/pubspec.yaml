@@ -4,7 +4,8 @@ publish_to: "none"
 version: 1.0.0+1
 
 environment:
-  sdk: ^3.13.4
+  sdk: ^3.10.0-290.4.beta
+  flutter: ">=3.38.0"
 
 dependencies:
   flutter:
@@ -12,11 +13,12 @@ dependencies:
   pinpoint:
     path: ../
   web: ^1.1.0
+  # The planted loop screen makes real requests (PLAN-v2 Milestone 14).
+  http: ^1.6.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  http: ^1.6.0
   flutter_lints: ^6.0.0
 
 flutter:

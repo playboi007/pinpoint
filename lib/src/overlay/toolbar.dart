@@ -5,6 +5,7 @@ import '../core/pinpoint_controller.dart';
 import '../sink/http_sink.dart';
 import '../theme/controls.dart';
 import '../theme/pinpoint_tokens.dart';
+import 'motion/bridge_reconnect.dart';
 
 /// The launcher at the foot of the rail: an ink block that starts and stops
 /// picking.
@@ -161,18 +162,20 @@ class SystemBadgeLayer extends StatelessWidget {
                           '${sink.name} offline: ${sink.url.authority}',
                       ]
                     : const <String>[];
-                if (!controller.frozen && lines.isEmpty) {
-                  return const SizedBox.shrink();
-                }
+                // The slot is always there: when the bridge comes back it
+                // plays its reconnect and then shows nothing.
                 return Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     if (controller.frozen)
                       const SystemBadge.frozen(key: frozenKey),
-                    if (controller.frozen && lines.isNotEmpty)
-                      const SizedBox(height: 6),
-                    if (lines.isNotEmpty) BridgeBadge(offline: lines),
+                    BridgeBadgeSlot(
+                      offline: lines,
+                      active: controller.isActive,
+                      gapAbove: controller.frozen,
+                      builder: (lines) => BridgeBadge(offline: lines),
+                    ),
                   ],
                 );
               },

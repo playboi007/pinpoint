@@ -3,11 +3,16 @@ import 'package:flutter/material.dart';
 import '../agent/agent_control.dart';
 import '../search/render_search.dart';
 import '../theme/marks.dart';
+import '../theme/pinpoint_motion.dart';
 import '../theme/pinpoint_tokens.dart';
 
 /// What the agent is doing, drawn above the app: a chip while control is
 /// on ("AGENT CONTROL ON"), a banner while a command runs, a dot where each
 /// synthetic tap lands, and the outline of `flash`.
+///
+/// Nothing here moves while the agent works: its commands wait until the
+/// app stops drawing, and frames drawn by Pinpoint would count as the app
+/// moving. The chip changes fill and text instead.
 ///
 /// It takes no pointer events: a synthetic tap must reach the app, not
 /// this layer. The switch that turns control on and off is the rail's smart
@@ -72,6 +77,9 @@ class _AgentLayerState extends State<AgentLayer>
   @override
   Widget build(BuildContext context) {
     final tokens = PinPointTokens.of(context);
+    // It shows where the agent acted: it fades with reduced motion too.
+    final motion = PinPointMotion.of(context);
+    _fade.duration = motion.informative(AgentLayer.flashFade);
     return IgnorePointer(
       child: Stack(
         fit: StackFit.expand,

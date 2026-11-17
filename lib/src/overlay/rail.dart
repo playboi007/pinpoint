@@ -3,13 +3,16 @@ import 'dart:math' as math;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
+import '../agent/stress_matrix.dart';
 import '../core/pinpoint_controller.dart';
 import '../theme/controls.dart';
 import '../theme/pinpoint_tokens.dart';
 import 'agent_layer.dart';
 import 'environment_panel.dart';
 import 'findings_panel.dart';
+import 'motion/stress_strip.dart';
 import 'theme_menu.dart';
+import 'timeline_panel.dart';
 import 'toolbar.dart';
 
 /// Where the rail is, shared with the panels that open beside it.
@@ -74,6 +77,7 @@ class RailItem extends StatefulWidget {
     required this.onTap,
     this.active = false,
     this.badge,
+    this.footer,
   });
 
   final IconData icon;
@@ -85,6 +89,10 @@ class RailItem extends StatefulWidget {
 
   /// Shown top-right, inset 4.
   final Widget? badge;
+
+  /// Shown along the foot, inset 4 on the sides and 3 from the bottom: the
+  /// agent item's stress matrix strip.
+  final Widget? footer;
 
   @override
   State<RailItem> createState() => _RailItemState();
@@ -134,6 +142,13 @@ class _RailItemState extends State<RailItem> {
                   ),
                   if (widget.badge != null)
                     Positioned(right: 4, top: 4, child: widget.badge!),
+                  if (widget.footer != null)
+                    Positioned(
+                      left: 4,
+                      right: 4,
+                      bottom: 3,
+                      child: widget.footer!,
+                    ),
                 ],
               ),
             ),
@@ -212,7 +227,10 @@ class _RailLayerState extends State<RailLayer> {
         _controller.findings,
         widget.environmentPanel,
         widget.findingsPanel,
+        TimelinePanel.open,
         widget.placement,
+        // The agent item's tooltip says which run a stress matrix is at.
+        StressProgress.running,
       ]),
       builder: (context, _) {
         final visible =
@@ -221,7 +239,7 @@ class _RailLayerState extends State<RailLayer> {
             _controller.agent.enabled;
         if (!visible) return const SizedBox.shrink();
         final tokens = PinPointTokens.of(context);
-        final items = 3 + (widget.allowAgentControl ? 1 : 0);
+        final items = 4 + (widget.allowAgentControl ? 1 : 0);
         final placement = widget.placement..height = _heightFor(items);
         return LayoutBuilder(
           builder: (context, constraints) {
@@ -297,14 +315,26 @@ class _RailLayerState extends State<RailLayer> {
         onTap: () => openRailPanel(_controller, widget.findingsPanel),
       ),
       const DraftRule(),
+      RailItem(
+        key: TimelinePanel.buttonKey,
+        icon: PinPointIcons.timeline,
+        tooltip: 'Timeline',
+        active: TimelinePanel.open.value && _controller.isActive,
+        onTap: () => openRailPanel(_controller, TimelinePanel.open),
+      ),
+      const DraftRule(),
       if (widget.allowAgentControl) ...[
         RailItem(
           key: AgentLayer.toggleKey,
           icon: PinPointIcons.smartToy,
-          tooltip: agent.enabled
-              ? 'Agent control on: click or Esc to turn it off'
-              : 'Allow agent control',
+          tooltip: switch (StressProgress.running.value) {
+            final StressStatus status => StressStrip.describe(status),
+            _ when agent.enabled =>
+              'Agent control on: click or Esc to turn it off',
+            _ => 'Allow agent control',
+          },
           active: agent.enabled,
+          footer: const StressStrip(),
           onTap: () => agent.enabled = !agent.enabled,
         ),
         const DraftRule(),

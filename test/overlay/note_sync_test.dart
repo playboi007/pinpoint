@@ -252,6 +252,8 @@ void main() {
     await tester.tap(find.byKey(NoteView.acceptKey));
     await settle(tester);
     expect(bridge.notes[id]!['status'], 'verified');
+    // The pin folds away first, then it is gone.
+    await tester.pumpAndSettle();
     expect(pins(), findsNothing);
     expect(controller.mode, PinPointMode.idle);
   });

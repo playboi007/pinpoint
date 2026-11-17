@@ -109,13 +109,16 @@ enum KeyAction {
   chainUpAll,
 
   /// Select the child in the full chain (Alt+Arrow Down).
-  chainDownAll;
+  chainDownAll,
+
+  /// Mark this moment in the flight recorder (M, while picking).
+  mark;
 
   /// Whether a held key repeats the action. Navigation does; toggling,
   /// going back and freezing act once per press.
   bool get repeats => switch (this) {
     chainUp || chainDown || chainUpAll || chainDownAll => true,
-    toggle || back || freeze => false,
+    toggle || back || freeze || mark => false,
   };
 }
 
@@ -174,6 +177,13 @@ KeyAction? keyActionFor(
       !composing &&
       event.logicalKey == LogicalKeyboardKey.escape) {
     return KeyAction.back;
+  }
+  // Picking only, like P: M is a character everywhere else.
+  if (mode == PinPointMode.picking &&
+      !editingText &&
+      (event.logicalKey == LogicalKeyboardKey.keyM ||
+          event.physicalKey == PhysicalKeyboardKey.keyM)) {
+    return KeyAction.mark;
   }
   // Picking only: the comment field needs a plain P.
   if (mode == PinPointMode.picking &&

@@ -56,6 +56,39 @@ class CommentDraft extends ChangeNotifier {
     notifyListeners();
   }
 
+  // Nullable and read with `!= false`: a field added to a long-lived object
+  // is undefined after a web hot reload (api-notes item 29).
+  bool? _attachTape;
+
+  /// "Attach what happened" (PLAN-v2 Milestone 15, step 16): a tape of the
+  /// run goes to the bridge with the note. On by default; the tape stays
+  /// on this machine, in `.pinpoint/tapes/`.
+  bool get attachTape => _attachTape != false;
+  set attachTape(bool value) {
+    if (value == attachTape) return;
+    _attachTape = value;
+    notifyListeners();
+  }
+
+  int? _tapeFrom;
+  int? _tapeTo;
+
+  /// The start of the attached tape's range, in recorder ms. Null: the
+  /// default, app start when a full tape is possible, else the last mark.
+  int? get tapeFrom => _tapeFrom;
+
+  /// The end of the range, in recorder ms. Null: now, when the note goes.
+  int? get tapeTo => _tapeTo;
+
+  /// Sets the range the comment form's picker chose. Null ends keep their
+  /// defaults.
+  void setTapeRange(int? from, int? to) {
+    if (from == _tapeFrom && to == _tapeTo) return;
+    _tapeFrom = from;
+    _tapeTo = to;
+    notifyListeners();
+  }
+
   List<Map<String, Object?>> _checks = const <Map<String, Object?>>[];
 
   /// What Milestone 12's `verify_note` will measure on this note, chosen
@@ -81,9 +114,12 @@ class CommentDraft extends ChangeNotifier {
   }
 
   /// Removes every check.
+  /// Clears the checks and the tape range: both belong to one note.
   void clearChecks() {
-    if (_checks.isEmpty) return;
+    if (_checks.isEmpty && _tapeFrom == null && _tapeTo == null) return;
     _checks = const <Map<String, Object?>>[];
+    _tapeFrom = null;
+    _tapeTo = null;
     notifyListeners();
   }
 

@@ -45,9 +45,9 @@ void main() {
         ),
       ),
     );
-    final property = clipSection(tester.renderObject(find.byKey(clip)))!
-        .properties
-        .single;
+    final property = clipSection(
+      tester.renderObject(find.byKey(clip)),
+    )!.properties.single;
     expect(property.editable, isFalse);
   });
 

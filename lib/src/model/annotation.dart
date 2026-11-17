@@ -16,7 +16,14 @@ import '../sink/markdown_formatter.dart';
 /// 5 (Milestone 11): `tweaks`, the live edits, and `screenshot.beforeAfter`.
 /// 6 (Milestone 12): `verification`, the outcome of `verify_note`, written
 /// by the bridge.
-const int annotationSchema = 6;
+/// 7 (PLAN-v2 Milestone 13): `trace`, what happened in the seconds before
+/// the pick.
+/// 8 (PLAN-v2 Milestone 15): `tape`, the tape attached to the note.
+const int annotationSchema = 8;
+
+/// The start of the first line of a note's trace when rebuilds were not
+/// recorded in all or part of its window (PLAN-v2 Milestone 13, step 12).
+const String traceNotRecorded = 'rebuilds not recorded';
 
 /// Largest JSON for a note, without the screenshot, in UTF-8 bytes.
 const int maxPayloadBytes = 8 * 1024;
@@ -105,8 +112,9 @@ class NoteMessage {
 /// only when not empty, [screenshot], which appears only when the note
 /// has one, [environment], which appears only while a what-if override
 /// is active, [finding] and [checks], which appear only on a note made
-/// from a finding, [tweaks], which appear only while a tweak is active, and
-/// [verification], which appears once `verify_note` ran.
+/// from a finding, [tweaks], which appear only while a tweak is active,
+/// [verification], which appears once `verify_note` ran, and [trace],
+/// which appears when the flight recorder ran.
 /// `test/goldens/annotation_schema.json` fixes it.
 class Annotation {
   const Annotation({
@@ -130,6 +138,8 @@ class Annotation {
     this.checks = const <Map<String, Object?>>[],
     this.tweaks = const <Map<String, Object?>>[],
     this.verification,
+    this.trace,
+    this.tape,
     this.screenshot,
     this.errors = const <String>[],
     this.truncated = const <String>[],
@@ -188,6 +198,19 @@ class Annotation {
   /// screenshot's file). Null until a verification ran.
   final Map<String, Object?>? verification;
 
+  /// What happened before the pick (PLAN-v2 Milestone 13, step 12):
+  /// `seconds` (the window), `lines` (compact trace lines, at most 60),
+  /// `rebuilds` (whether rebuilds were recorded in the window) and
+  /// `partial` with a `reason` when a limit dropped events. Null when the
+  /// recorder was off.
+  final Map<String, Object?>? trace;
+
+  /// The tape attached with "Attach what happened" (PLAN-v2 Milestone 15,
+  /// step 18): `id`, `kind` (full or segment), `inputs`, `requests`,
+  /// `marks`, and `partial` when a limit dropped data. The tape itself is
+  /// on the bridge, in `.pinpoint/tapes/`. Null when none is attached.
+  final Map<String, Object?>? tape;
+
   /// Whether the last verification passed; null when none ran.
   bool? get checksPassed => switch (verification?['passed']) {
     final bool passed => passed,
@@ -226,6 +249,8 @@ class Annotation {
     List<Map<String, Object?>>? checks,
     List<Map<String, Object?>>? tweaks,
     Map<String, Object?>? Function()? verification,
+    Map<String, Object?>? Function()? trace,
+    Map<String, Object?>? Function()? tape,
     List<String>? errors,
     List<String>? truncated,
   }) => Annotation(
@@ -249,6 +274,8 @@ class Annotation {
     checks: checks ?? this.checks,
     tweaks: tweaks ?? this.tweaks,
     verification: verification == null ? this.verification : verification(),
+    trace: trace == null ? this.trace : trace(),
+    tape: tape == null ? this.tape : tape(),
     screenshot: screenshot == null ? this.screenshot : screenshot(),
     errors: errors ?? this.errors,
     truncated: truncated ?? this.truncated,
@@ -311,6 +338,9 @@ class Annotation {
   /// The budget steps, in order. A step returns null when it has nothing
   /// to cut.
   static final List<(String, Annotation? Function(Annotation))> _budgetSteps = [
+    // The trace goes first (PLAN-v2 Milestone 13, step 12): the agent can
+    // read the whole run with get_trace.
+    ('trace', (a) => a._traceLines(20)),
     ('subtree', (a) => a._subtreeLines(10)),
     ('target.properties', (a) => a._target(a.target._clipProperties(60))),
     ('siblings', (a) => a._siblingWindow(5)),
@@ -383,6 +413,26 @@ class Annotation {
     );
   }
 
+  /// This note with only the newest [max] trace lines, keeping a first
+  /// line that says rebuilds were not recorded; null when nothing to cut.
+  Annotation? _traceLines(int max) {
+    final current = trace;
+    final lines = current?['lines'];
+    if (current == null || lines is! List<Object?> || lines.length <= max) {
+      return null;
+    }
+    final first = lines.isEmpty ? null : lines.first;
+    final head = first is String && first.startsWith(traceNotRecorded);
+    final body = head ? lines.sublist(1) : lines;
+    final keep = head ? max - 1 : max;
+    return copyWith(
+      trace: () => {
+        ...current,
+        'lines': [if (head) first, ...body.sublist(body.length - keep)],
+      },
+    );
+  }
+
   /// [json] (a [toJson] map, as the bridge stores it) as a note, or null
   /// when it has no id.
   ///
@@ -430,6 +480,14 @@ class Annotation {
       ],
       verification: switch (json['verification']) {
         final Map<String, Object?> v when v.isNotEmpty => v,
+        _ => null,
+      },
+      trace: switch (json['trace']) {
+        final Map<String, Object?> t when t['lines'] is List<Object?> => t,
+        _ => null,
+      },
+      tape: switch (json['tape']) {
+        final Map<String, Object?> t when t['id'] is String => t,
         _ => null,
       },
       target: TargetInfo._fromJson(target),
@@ -480,11 +538,13 @@ class Annotation {
     'comment': comment,
     'app': app.toJson(),
     'page': page.toJson(),
-    if (environment case final env? when env.isNotEmpty) 'environment': env,
+    if (environment?.isNotEmpty ?? false) 'environment': environment,
     'finding': ?finding,
     if (checks.isNotEmpty) 'checks': checks,
     if (tweaks.isNotEmpty) 'tweaks': tweaks,
     'verification': ?verification,
+    'trace': ?trace,
+    'tape': ?tape,
     'target': target.toJson(),
     'anchor': anchor?.toJson(),
     'messages': [for (final m in messages) m.toJson()],

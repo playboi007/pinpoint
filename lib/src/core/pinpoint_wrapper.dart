@@ -1,19 +1,41 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart' show Theme;
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
+import '../capture/screenshot.dart';
 import '../detect/detector.dart';
 import '../detect/detector_hooks.dart';
 import '../detect/findings_controller.dart';
 import '../env/environment_controller.dart';
 import '../env/environment_host.dart';
+import '../model/tape.dart';
 import '../overlay/inspector_overlay.dart';
+import '../overlay/replay_blocker.dart';
+import '../search/render_search.dart';
 import '../search/source_resolver.dart';
+import '../sink/bridge_client.dart';
+import '../tape/browser_page.dart';
+import '../tape/tape_player.dart';
+import '../theme/pinpoint_theme.dart';
+import '../theme/pinpoint_tokens.dart';
+import '../trace/redact.dart';
+import '../trace/sources/error_source.dart';
+import '../trace/sources/finding_source.dart';
+import '../trace/sources/key_source.dart';
+import '../trace/sources/message_source.dart';
+import '../trace/sources/network_source.dart';
+import '../trace/sources/pointer_source.dart';
+import '../trace/sources/route_source.dart';
+import '../trace/sources/text_source.dart';
+import '../trace/trace_session.dart';
 import 'app_semantics.dart';
 import 'hook_registry.dart';
 import 'keymap.dart';
 import 'pinpoint_config.dart';
 import 'pinpoint_controller.dart';
+import 'rebuild_hook.dart';
 
 /// Hosts Pinpoint around an app.
 ///
@@ -61,6 +83,10 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
   PinPointController? _ownController;
   HookRegistry? _hooks;
 
+  /// The one `debugOnRebuildDirtyWidget` callback, shared by the rebuild
+  /// heat detector and the trace's rebuild source.
+  RebuildHook? _rebuildHook;
+
   /// Sets platform and slow motion; null while disabled.
   EnvironmentGlobals? _globals;
 
@@ -98,6 +124,10 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
       // The controller, and with it the environment, may have changed.
       _watchEnvironment();
       _watchFindings();
+      if (widget.config.trace.enabled != oldWidget.config.trace.enabled) {
+        TraceSession.stopOwnedBy(this);
+        _startTrace();
+      }
     }
   }
 
@@ -110,6 +140,7 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
     _detectors?.dispose();
     _detectors = DetectorHooks(
       registry: hooks,
+      rebuildHook: _rebuildHook,
       findings: findings,
       appRoot: () => _appKey.currentContext?.findRenderObject(),
       locator: () => FindingLocator(
@@ -121,17 +152,133 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
 
   void _installHooks() {
     final hooks = _hooks = HookRegistry()..addKeyHandler(_handleKey);
+    _rebuildHook = RebuildHook(hooks);
     _globals = EnvironmentGlobals(hooks);
     _watchEnvironment();
     _watchFindings();
+    _startTrace();
+  }
+
+  /// Starts the flight recorder and its level 1 sources (PLAN-v2
+  /// Milestone 13), unless `TraceConfig.enabled` is false. A wrapper
+  /// mounted again keeps the record of the one before it.
+  void _startTrace() {
+    final hooks = _hooks;
+    final rebuildHook = _rebuildHook;
+    if (hooks == null || rebuildHook == null) return;
+    if (!widget.config.trace.enabled) return;
+    final resolver = SourceResolver.forConfig(widget.config);
+    final routes = RouteSource(appKey: _appKey);
+    final session = TraceSession(
+      owner: this,
+      config: widget.config.trace,
+      rebuildHook: rebuildHook,
+      content: () => _contentKey.currentContext as Element?,
+      resolver: resolver,
+      recorder: TraceSession.current?.recorder,
+      tapes: TraceSession.current?.tapes,
+      pageStart: _pageStart,
+      adapters: () => widget.config.stateAdapters,
+      builtIn: [
+        PointerSource(
+          appKey: _appKey,
+          contentKey: _contentKey,
+          resolver: resolver,
+          onUp: routes.tapped,
+        ),
+        KeySource(),
+        TextSource(
+          contentKey: _contentKey,
+          resolver: resolver,
+          agentTyping: () => _controller.agent.driving == 'enter_text',
+        ),
+        routes,
+        ErrorSource(),
+        NetworkSource(
+          hooks: hooks,
+          bodies: widget.config.trace.bodies,
+          redact: TraceRedact(widget.config.trace.redact),
+          ignoreOrigins: _bridgeOrigins(),
+        ),
+        MessageSource(redact: TraceRedact(widget.config.trace.redact)),
+        FindingSource(findings: () => _controller.findings, resolver: resolver),
+      ],
+    );
+    session.thumbnail = _thumbnail;
+    // A page a replay restarted: answer requests from the tape now, before
+    // the app's first build makes any (PLAN-v2 Milestone 15, step 7).
+    TapePlayer.bootNetwork(session, storage: widget.config.trace.storage);
+  }
+
+  /// The page now, for the start of a tape (PLAN-v2 Milestone 15, step 1).
+  /// Storage is copied only at app start ([t] 0) and only with
+  /// `TraceConfig.storage`: it holds session tokens.
+  TapeStart _pageStart({required int t, required int seq}) {
+    final dispatcher = PlatformDispatcher.instance;
+    final view = dispatcher.implicitView;
+    final ratio = view?.devicePixelRatio;
+    final page = browserPage();
+    final environment = _controller.environment.value;
+    return TapeStart(
+      t: t,
+      seq: seq,
+      wallTime: DateTime.now().toUtc().toIso8601String(),
+      url: page.url,
+      width: view == null ? null : view.physicalSize.width / ratio!,
+      height: view == null ? null : view.physicalSize.height / ratio!,
+      pixelRatio: ratio,
+      locale: dispatcher.locale.toLanguageTag(),
+      environment: environment.isEmpty ? null : environment.toJson(),
+      storage: t == 0 && widget.config.trace.storage && page.available
+          ? page.readStorage()
+          : null,
+    );
+  }
+
+  /// The bridge's origin: its traffic (pins, drafts, the long poll) is
+  /// Pinpoint's own and never recorded (rule 14).
+  Set<String> _bridgeOrigins() {
+    final bridge = BridgeClient.find(
+      url: widget.config.bridgeUrl,
+      sinks: widget.config.sinks,
+    );
+    if (bridge == null) return const <String>{};
+    final base = bridge.base;
+    return {'${base.scheme}://${base.authority}'};
+  }
+
+  /// A 400 px wide image of the app, for a mark.
+  Future<Uint8List?> _thumbnail() async {
+    final boundary = _appKey.currentContext?.findRenderObject();
+    if (boundary is! RenderRepaintBoundary || !boundary.attached) return null;
+    final rect = RenderSearch.globalRectOf(boundary);
+    if (rect == null) return null;
+    final shot = await captureScreenshot(
+      boundary,
+      rect,
+      // Not View.of: this runs outside build and must subscribe nothing.
+      pixelRatio:
+          WidgetsBinding
+              .instance
+              .platformDispatcher
+              .implicitView
+              ?.devicePixelRatio ??
+          1,
+      maxWidth: 400,
+      outline: false,
+    );
+    return shot?.png;
   }
 
   /// Restores every global slot, the environment's and the detectors'
   /// included.
   void _uninstallHooks() {
     _unwatchEnvironment();
+    // Before the registry: the sources give their slots back first.
+    TraceSession.stopOwnedBy(this);
     _detectors?.dispose();
     _detectors = null;
+    _rebuildHook = null;
     _globals = null;
     final platform = debugDefaultTargetPlatformOverride;
     _hooks?.dispose();
@@ -171,6 +318,13 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
         _controller.agent.enabled) {
       _controller.agent.abort();
     }
+    // Esc ends a replay, also one that holds with no command running, and
+    // the player puts input, environment and network back.
+    if (event is KeyDownEvent &&
+        event.logicalKey == LogicalKeyboardKey.escape &&
+        TapePlayer.current != null) {
+      TapePlayer.current!.stop(reason: 'Esc');
+    }
     // Alt alone is not claimed: it only switches the rulers to measuring
     // the gap between the selection and the hovered widget.
     _controller.setMeasuring(HardwareKeyboard.instance.isAltPressed);
@@ -189,6 +343,11 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
       editingText: editingText,
       composing: editingText && _controller.draft.composing,
     );
+    // The key source shares this one handler (no second one). Pinpoint's
+    // own keys, and keys typed into its fields, are not recorded.
+    if (TraceSession.ownedBy(this)?.source('key') case final KeySource keys) {
+      keys.record(event, ours: action != null || _focusInPinpoint());
+    }
     if (action == null) return false;
     // Act once per press, except navigation, which a held key repeats.
     // Repeats are claimed either way, below.
@@ -208,6 +367,8 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
           _controller.stepSelection(up: true, localOnly: false);
         case KeyAction.chainDownAll:
           _controller.stepSelection(up: false, localOnly: false);
+        case KeyAction.mark:
+          TraceSession.ownedBy(this)?.mark();
       }
     }
     // True only for Pinpoint's own keys. It does not stop the app's focused
@@ -325,6 +486,15 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
               ),
             ),
           ),
+        ),
+        // Over the app, under Pinpoint's UI: takes real pointer input while
+        // a replay runs (PLAN-v2 Milestone 15, step 17). Always present.
+        // In the user's palette: it sits outside the overlay's own Theme.
+        ValueListenableBuilder<PinPointPalette>(
+          valueListenable: _controller.palette,
+          builder: (context, palette, child) =>
+              Theme(data: pinPointThemeData(palette), child: child!),
+          child: const ReplayBlocker(),
         ),
         // Beside the app's TickerMode, not inside it: the comment field's
         // caret and the panel's animations keep running while the app is

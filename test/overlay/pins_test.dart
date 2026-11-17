@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -529,9 +531,11 @@ void main() {
     expect(pins(), findsOneWidget);
 
     final navigator = tester.state<NavigatorState>(find.byType(Navigator));
-    navigator.push(
-      MaterialPageRoute<void>(
-        builder: (_) => const Scaffold(body: Text('Other')),
+    unawaited(
+      navigator.push(
+        MaterialPageRoute<void>(
+          builder: (_) => const Scaffold(body: Text('Other')),
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -737,6 +741,14 @@ void main() {
       await tester.pump();
       await tester.pump();
       expect(controller.notes.byId(id)!.status, NoteStatus.verified);
+      // The pin folds away, as a picture only, then it is gone.
+      expect(
+        find.byKey(PinLayer.foldKey(id)),
+        findsOneWidget,
+        reason: 'the pin folds away after Accept',
+      );
+      expect(find.byKey(ValueKey<String>('pinpoint.pin.$id')), findsNothing);
+      await tester.pumpAndSettle();
       expect(pins(), findsNothing);
     });
   });
