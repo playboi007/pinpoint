@@ -8,7 +8,7 @@ import '../model/annotation.dart';
 import '../model/source_location.dart';
 import '../search/pick_result.dart';
 import '../search/source_index.dart';
-import '../search/source_resolver.dart';
+import '../state/dependencies.dart';
 import '../trace/redact.dart';
 import 'lean_text.dart';
 import 'subtree_outline.dart';
@@ -465,6 +465,7 @@ class ContextCollector {
     SourcePaths paths,
   ) {
     final chain = selection.chain;
+    final resolver = chain.resolver;
     final owners = <StateOwnerInfo>[];
     for (
       var i = selection.chainIndex;
@@ -472,20 +473,16 @@ class ContextCollector {
       i++
     ) {
       final element = chain.elements[i];
-      if (element is StatefulElement) {
+      if (element is StatefulElement || element is StatelessElement) {
+        // A `State` the project wrote (`state`), or a stateless widget the
+        // project wrote that reads a state object (`reader`), with what
+        // it reads (Milestone 21, step 1).
         final entry = chain[i];
-        if (!entry.isLocal || !_buildsLocally(element, chain.resolver)) {
-          continue;
-        }
-        owners.add(
-          StateOwnerInfo(
-            kind: 'state',
-            type: clipText(element.state.runtimeType.toString(), maxLabel),
-            source: _ref(entry.location, paths),
-          ),
-        );
+        if (!entry.isLocal) continue;
+        final reader = readerOf(element, resolver);
+        if (reader != null) owners.add(reader.toInfo(paths));
       } else if (element is InheritedElement) {
-        final scope = _scopeOf(element.widget.runtimeType.toString());
+        final scope = scopeOf(element.widget.runtimeType.toString());
         if (scope == null) continue;
         final (kind, type) = scope;
         SourceLocation? where;
@@ -505,31 +502,6 @@ class ContextCollector {
       }
     }
     return owners;
-  }
-
-  /// Whether the first child of [element] was created in the project: the
-  /// `State` behind [element] returned it from a `build` the project wrote.
-  static bool _buildsLocally(Element element, SourceResolver resolver) {
-    Element? child;
-    element.visitChildren((c) => child ??= c);
-    final first = child;
-    return first != null && resolver.entryOf(first).isLocal;
-  }
-
-  /// `(kind, value type)` when [widgetType] names a provider-like scope.
-  static (String, String)? _scopeOf(String widgetType) {
-    final open = widgetType.indexOf('<');
-    if (open < 0 || !widgetType.endsWith('>')) return null;
-    final base = widgetType.substring(0, open);
-    // `Foo?` for a nullable argument; `Foo<Bar>` stays whole.
-    var type = widgetType.substring(open + 1, widgetType.length - 1);
-    if (type.endsWith('?')) type = type.substring(0, type.length - 1);
-    return switch (base) {
-      '_InheritedProviderScope' => ('provider', type),
-      'InheritedNotifier' => ('notifier', type),
-      'InheritedModel' => ('provider', type),
-      _ => null,
-    };
   }
 
   /// The nearest ancestor of the target with more than one child, inside

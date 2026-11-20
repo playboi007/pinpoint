@@ -20,10 +20,17 @@ const String whyLimits =
 /// Most frames `why` walks back.
 const int maxWhyHops = 4;
 
+/// `state`, `state.notify` and `state.setState`: a state change. (A watch's
+/// `state` and the lens' kinds; `state.dropped` only counts.)
+bool _isState(String kind) =>
+    kind == TraceKind.state ||
+    kind == TraceKind.stateNotify ||
+    kind == TraceKind.stateSetState;
+
 /// Kinds that say what a cause did, in a chain.
 bool _notable(String kind) =>
     kind == TraceKind.build ||
-    kind == TraceKind.state ||
+    _isState(kind) ||
     kind == TraceKind.probe ||
     kind == TraceKind.route ||
     kind == TraceKind.error ||
@@ -35,7 +42,7 @@ bool _notable(String kind) =>
 /// How strongly an event of [kind] suggests that its cause made the next
 /// frame dirty.
 int _dirtyScore(String kind) {
-  if (kind == TraceKind.state ||
+  if (_isState(kind) ||
       kind == TraceKind.netResponse ||
       kind == TraceKind.netError ||
       TraceKind.isInput(kind)) {

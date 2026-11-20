@@ -236,11 +236,35 @@ String _full(Map<String, Object?> note) {
     ..._standardLines(note),
     if (properties.isNotEmpty) 'Properties: ${_line(properties.join(', '))}',
     ?stateOwnersLine(note),
+    ...dependencyLines(note),
     if (environment.isNotEmpty) 'Environment: ${_line(environment.join(', '))}',
     if (errors.isNotEmpty) 'Not collected: ${_line(errors.join(', '))}',
     if (truncated.isNotEmpty) 'Truncated: ${_line(truncated.join(', '))}',
     if (subtree.isNotEmpty) ...['Subtree:', for (final l in subtree) '  $l'],
   ].join('\n');
+}
+
+/// One line for each state owner that reads state objects (PLAN-v3
+/// Milestone 21, step 1), for example `Reads: _CartState: provider CartModel
+/// #a1 (lib/cart_model.dart:9), inherited Flags #a2`. The same tag on two
+/// lines is one object.
+List<String> dependencyLines(Map<String, Object?> note) {
+  final root = projectRootOf(note);
+  return [
+    for (final o in _list(note['stateOwners']))
+      if (_map(o) case final owner)
+        if ([
+              for (final d in _list(owner['dependencies']))
+                if (_map(d) case final dep
+                    when _string(dep['kind']) != null &&
+                        _string(dep['type']) != null)
+                  '${_line(_string(dep['kind'])!)} ${_line(_string(dep['type'])!)}'
+                      '${_string(dep['tag']) == null ? '' : ' ${_line(_string(dep['tag'])!)}'}'
+                      '${_where(dep['source'], root: root) == null ? '' : ' (${_where(dep['source'], root: root)})'}',
+            ]
+            case final deps when deps.isNotEmpty)
+          'Reads: ${_line(_string(owner['type']) ?? '?')}: ${deps.join(', ')}',
+  ];
 }
 
 /// The `.md` the bridge writes beside a note's JSON: the standard text,

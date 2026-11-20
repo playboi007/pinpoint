@@ -471,6 +471,39 @@ void main() {
       expect(note.toJson()['stateOwners'], hasLength(2));
     });
 
+    testWidgets('stateOwners: a local widget that reads a scope is a reader '
+        'with its dependencies; a State with none has none', (tester) async {
+      await tester.pumpWidget(
+        host(
+          home: const Scaffold(
+            body: _InheritedProviderScope<_Model?>(
+              child: _Counter(child: _Reads(child: Text('reads'))),
+            ),
+          ),
+          around: (_, child) => keyed(child!),
+        ),
+      );
+      final note = collect(tester, await select(tester, 'reads'));
+
+      expect(
+        [for (final o in note.stateOwners) (o.kind, o.type)],
+        [
+          ('reader', '_Reads'),
+          ('state', '_CounterState'),
+          ('provider', '_Model'),
+        ],
+      );
+      final reads = note.stateOwners.first.dependencies.single;
+      expect((reads.kind, reads.type), ('provider', '_Model'));
+      expect(reads.tag, matches(RegExp(r'^#a\d+$')));
+      expect(reads.source!.file, contains('context_collector_test.dart'));
+      // MediaQuery and Theme are read by the same widget, and left out.
+      expect(note.stateOwners[1].dependencies, isEmpty);
+      final json = note.toJson()['stateOwners']! as List<Object?>;
+      expect((json.first! as Map)['dependencies'], hasLength(1));
+      expect((json[1]! as Map).containsKey('dependencies'), isFalse);
+    });
+
     testWidgets('stateOwners stop at 4', (tester) async {
       await tester.pumpWidget(
         host(
@@ -760,6 +793,22 @@ class _CounterState extends State<_Counter> {
 }
 
 class _Model {}
+
+/// A stateless widget that reads the scope in `build`, as `context.watch`
+/// does, and `MediaQuery` too.
+class _Reads extends StatelessWidget {
+  const _Reads({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    context
+        .dependOnInheritedWidgetOfExactType<_InheritedProviderScope<_Model?>>();
+    MediaQuery.of(context);
+    return child;
+  }
+}
 
 /// Named like the `provider` package's scope: the collector reads the
 /// name, and the value type from its generic argument.

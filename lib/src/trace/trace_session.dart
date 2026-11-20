@@ -4,10 +4,12 @@ import 'dart:typed_data';
 import 'package:flutter/widgets.dart';
 
 import '../agent/state_dump.dart';
+import '../core/hook_registry.dart';
 import '../core/rebuild_hook.dart';
 import '../model/tape.dart';
 import '../model/trace_event.dart';
 import '../search/source_resolver.dart';
+import '../state/state_lens.dart';
 import '../tape/net_matcher.dart';
 import '../tape/tape_recorder.dart';
 import 'frame_clock.dart';
@@ -31,6 +33,9 @@ abstract final class TraceDemand {
 
   /// At least one watch is set.
   static const String watch = 'watch';
+
+  /// The state lens is armed: it needs rebuilds to name the readers.
+  static const String state = 'state';
 }
 
 /// The flight recorder of one `PinPointWrapper`: the recorder, its sources
@@ -56,7 +61,10 @@ class TraceSession {
     Object? owner,
     List<StateAdapter> Function()? adapters,
     this.pageStart,
-  }) : recorder =
+    HookRegistry? hooks,
+  }) : _content = content,
+       _hooks = hooks,
+       recorder =
            recorder ??
            TraceRecorder(
              maxEvents: config.maxEvents,
@@ -137,6 +145,27 @@ class TraceSession {
   /// Inputs and exchanges since app start, for tapes (PLAN-v2 Milestone
   /// 15).
   late final TapeRecorder tapes;
+
+  final Element? Function() _content;
+  final HookRegistry? _hooks;
+  HookRegistry? _ownHooks;
+  StateLens? _lens;
+
+  /// The state lens (PLAN-v3 Milestone 21, step 5): one at a time, made on
+  /// first use. Its globals go through the wrapper's [HookRegistry], or
+  /// through one of the session's own when none was given.
+  StateLens get stateLens => _lens ??= StateLens(
+    recorder: recorder,
+    resolver: resolver,
+    hooks: _hooks ?? (_ownHooks ??= HookRegistry()),
+    rebuildSource: rebuildSource,
+    content: _content,
+    demandDetail: () => demand(TraceDemand.state),
+    releaseDetail: () => release(TraceDemand.state),
+  );
+
+  /// The lens when one was made, else null (no side effect).
+  StateLens? get stateLensIfAny => _lens;
 
   /// The page now, for the start of a segment tape. Null: an empty start.
   TapeStart Function({required int t, required int seq})? pageStart;
@@ -419,9 +448,14 @@ class TraceSession {
   /// Stops every source. The record goes with the session.
   void dispose() {
     if (_disposed) return;
+    // The lens first: it holds level 3 and globals of its own.
+    _lens?.dispose();
+    _lens = null;
     for (final source in _sources.reversed) {
       _stop(source);
     }
+    _ownHooks?.dispose();
+    _ownHooks = null;
     _demand.clear();
     tapes.stop();
     _disposed = true;

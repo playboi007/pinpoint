@@ -178,6 +178,7 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
       recorder: TraceSession.current?.recorder,
       tapes: TraceSession.current?.tapes,
       pageStart: _pageStart,
+      hooks: hooks,
       adapters: () => widget.config.stateAdapters,
       builtIn: [
         PointerSource(

@@ -115,6 +115,18 @@ String traceSummary(TraceEvent event) {
       ];
       final first = d['initial'] == true ? ' (first read)' : '';
       return '${d['state'] ?? widget ?? '?'}$first ${parts.join(', ')}';
+    case TraceKind.stateNotify:
+      final values = d.containsKey('after')
+          ? ' ${d['before']} → ${d['after']}'
+          : '';
+      final method = d['method'] is String ? ' in ${d['method']}' : '';
+      return '${d['owner'] ?? widget ?? '?'} ${d['tag'] ?? ''}'
+          '$values$method$where';
+    case TraceKind.stateSetState:
+      final method = d['method'] is String ? ' in ${d['method']}' : '';
+      return '${widget ?? '?'} setState$method$where';
+    case TraceKind.stateDropped:
+      return '${d['n'] ?? '?'} setState stacks dropped (cap)';
     case TraceKind.probe:
       return '${d['name'] ?? '?'} ${_pairs(d['values'])}$where';
     case TraceKind.error:

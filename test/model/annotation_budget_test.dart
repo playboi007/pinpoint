@@ -107,6 +107,40 @@ void main() {
     expect(bytes(fitted), lessThanOrEqualTo(3000));
   });
 
+  test('dependencies of the state owners go before the owners do', () {
+    const dep = DependencyInfo(kind: 'provider', type: 'Cart', tag: '#a1');
+    final owned = note(properties: 0, subtreeLines: 0, ancestors: 1).copyWith(
+      stateOwners: [
+        for (var i = 0; i < 4; i++)
+          StateOwnerInfo(
+            kind: 'state',
+            type: '_Owner${i}State',
+            dependencies: [
+              for (var j = 0; j < 4; j++)
+                DependencyInfo(
+                  kind: 'provider',
+                  type: 'Model${'x' * 120}$j',
+                  tag: dep.tag,
+                ),
+            ],
+          ),
+      ],
+    );
+    final without = bytes(
+      owned.copyWith(
+        stateOwners: [
+          for (final o in owned.stateOwners) o.withoutDependencies(),
+        ],
+      ),
+    );
+    // A budget that fits the owners but not what they read.
+    final fitted = owned.fitToBudget(maxBytes: without + 50);
+    expect(fitted.truncated, contains('stateOwners.dependencies'));
+    expect(fitted.truncated, isNot(contains('stateOwners')));
+    expect(fitted.stateOwners, hasLength(4));
+    expect(fitted.stateOwners.every((o) => o.dependencies.isEmpty), isTrue);
+  });
+
   test('a huge comment is cut only as the last resort', () {
     final long = note(comment: 'c' * 20000).fitToBudget();
     expect(bytes(long), lessThanOrEqualTo(maxPayloadBytes));

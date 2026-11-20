@@ -1,5 +1,5 @@
 {
-  "schema": 9,
+  "schema": 10,
   "id": "pp_20261110_143205_a1f3",
   "createdAt": "2026-11-10T14:32:05Z",
   "status": "submitted",
@@ -67,7 +67,15 @@
     {
       "kind": "state",
       "type": "_SaveBarState",
-      "source": { "file": "lib/widgets/save_bar.dart", "line": 12, "column": 7 }
+      "source": { "file": "lib/widgets/save_bar.dart", "line": 12, "column": 7 },
+      "dependencies": [
+        {
+          "kind": "provider",
+          "type": "CartModel",
+          "tag": "#a1",
+          "source": { "file": "lib/app.dart", "line": 30, "column": 9 }
+        }
+      ]
     }
   ],
   "siblings": {

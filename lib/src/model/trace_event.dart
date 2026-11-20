@@ -44,6 +44,23 @@ abstract final class TraceKind {
   /// Values of a watched `State` changed (level 3 only).
   static const String state = 'state';
 
+  /// A listenable that Pinpoint listens to notified (PLAN-v3 Milestone 21,
+  /// step 2): `notifyListeners`, a `ValueNotifier` set. `data` holds
+  /// `owner`, `tag`, the first project frame (`file`, `line`, `method`),
+  /// and `before` / `after` for a `ValueListenable`.
+  ///
+  /// A filter on `state` matches this kind and the next two too (kinds are
+  /// dotted names).
+  static const String stateNotify = 'state.notify';
+
+  /// A `setState` (or any `markNeedsBuild`) seen in an armed window (step
+  /// 3). `widget` is the element's type, `source` the first project frame.
+  static const String stateSetState = 'state.setState';
+
+  /// A window of `setState` stacks ended and its cap dropped some: `n`
+  /// stacks were not recorded.
+  static const String stateDropped = 'state.dropped';
+
   /// A `PinPoint.probe` line ran.
   static const String probe = 'probe';
 

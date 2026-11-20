@@ -94,6 +94,14 @@ void main() {
           line: 12,
           column: 7,
         ),
+        dependencies: [
+          DependencyInfo(
+            kind: 'provider',
+            type: 'CartModel',
+            tag: '#a1',
+            source: SourceRef(file: 'lib/app.dart', line: 30, column: 9),
+          ),
+        ],
       ),
     ],
     siblings: const SiblingsInfo(
@@ -172,9 +180,38 @@ void main() {
     );
   });
 
-  test('schema is version 9 and keys come in a fixed order', () {
+  test('schema 10: dependencies on a state owner; a schema 9 note still '
+      'reads, with none', () {
+    final json =
+        jsonDecode(jsonEncode(example().toJson())) as Map<String, Object?>;
+    final back = Annotation.fromJson(json)!;
+    final dep = back.stateOwners.single.dependencies.single;
+    expect((dep.kind, dep.type, dep.tag), ('provider', 'CartModel', '#a1'));
+    expect(dep.source!.file, 'lib/app.dart');
+
+    // An owner with no dependency writes no key; an old note has none.
+    final old = jsonDecode(jsonEncode(json)) as Map<String, Object?>;
+    old['schema'] = 9;
+    final owner =
+        (old['stateOwners']! as List<Object?>).single as Map<String, Object?>;
+    owner.remove('dependencies');
+    final read = Annotation.fromJson(old)!;
+    expect(read.stateOwners.single.dependencies, isEmpty);
+    expect(
+      (read.toJson()['stateOwners']! as List<Object?>).single,
+      isNot(contains('dependencies')),
+    );
+    // A broken entry is passed over, not an error.
+    owner['dependencies'] = [
+      {'kind': 'provider'},
+      'x',
+    ];
+    expect(Annotation.fromJson(old)!.stateOwners.single.dependencies, isEmpty);
+  });
+
+  test('schema is version 10 and keys come in a fixed order', () {
     final json = example().toJson();
-    expect(json['schema'], 9);
+    expect(json['schema'], 10);
     expect(json.keys.take(6), [
       'schema',
       'id',

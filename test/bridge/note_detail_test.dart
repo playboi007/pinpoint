@@ -50,6 +50,37 @@ void main() {
     expect(text, isNot(contains('State owners')));
   });
 
+  test('full shows what an owner reads, one line per owner', () {
+    final note = fixture()
+      ..['stateOwners'] = [
+        {
+          'kind': 'state',
+          'type': '_SaveBarState',
+          'source': null,
+          'dependencies': [
+            {
+              'kind': 'provider',
+              'type': 'CartModel',
+              'tag': '#a1',
+              'source': {'file': 'lib/app.dart', 'line': 30, 'column': 9},
+            },
+            {'kind': 'inherited', 'type': 'Flags', 'tag': '#a2'},
+          ],
+        },
+        {'kind': 'provider', 'type': 'CartModel', 'source': null},
+      ];
+    final text = noteText(note, NoteDetail.full);
+    expect(
+      text,
+      contains(
+        'Reads: _SaveBarState: provider CartModel #a1 (lib/app.dart:30:9), '
+        'inherited Flags #a2\n',
+      ),
+    );
+    expect('Reads:'.allMatches(text), hasLength(1));
+    expect(noteText(note, NoteDetail.standard), isNot(contains('Reads:')));
+  });
+
   test('full adds properties, subtree, state owners and environment', () {
     final note = fixture()
       ..['stateOwners'] = [
@@ -145,10 +176,10 @@ void main() {
       final md = noteMarkdown(note);
       // The screenshot on disk is the full-size file beside the .md, not
       // the MCP attachment; every other line is the standard text.
-      final standard = noteText(note, NoteDetail.standard).replaceAll(
-        ' (attached, at most 800 px wide)',
-        '',
-      );
+      final standard = noteText(
+        note,
+        NoteDetail.standard,
+      ).replaceAll(' (attached, at most 800 px wide)', '');
       expect(
         md,
         '$standard\n'
@@ -281,7 +312,7 @@ Map<String, Object?> adminLikeNote() {
     'source': at(file, line),
   };
   return {
-    'schema': 9,
+    'schema': 10,
     'id': 'pp_20261115_093759_d726',
     'createdAt': '2026-11-15T09:37:59Z',
     'status': 'fixed',
