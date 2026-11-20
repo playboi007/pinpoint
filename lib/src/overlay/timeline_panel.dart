@@ -48,6 +48,12 @@ class TimelinePanel extends StatefulWidget {
 
   static Key chipKey(String kind) =>
       ValueKey<String>('pinpoint.timeline.chip.$kind');
+
+  /// The chip that shows only `state` events: the lens's `state.notify`,
+  /// `state.setState` and `state.dropped`, and the watched values.
+  static const Key stateOnlyKey = ValueKey<String>(
+    'pinpoint.timeline.chip.onlyState',
+  );
   static Key rowKey(int seq) => ValueKey<String>('pinpoint.timeline.row.$seq');
   static Key causeKey(int id) =>
       ValueKey<String>('pinpoint.timeline.cause.$id');
@@ -93,6 +99,9 @@ class TimelinePanel extends StatefulWidget {
 
 class _TimelinePanelState extends State<TimelinePanel> {
   final Set<String> _hidden = <String>{};
+
+  /// Whether only `state` events show (the "only state" chip).
+  bool _stateOnly = false;
   final TextEditingController _name = TextEditingController();
   Timer? _poll;
   int _seen = -1;
@@ -121,6 +130,9 @@ class _TimelinePanelState extends State<TimelinePanel> {
 
   bool _shown(TraceEvent event) {
     if (event.kind == TraceKind.frame) return false;
+    if (_stateOnly && !TraceKind.matches(event.kind, TraceKind.state)) {
+      return false;
+    }
     for (final kind in _hidden) {
       if (TraceKind.matches(event.kind, kind)) return false;
     }
@@ -269,6 +281,12 @@ class _TimelinePanelState extends State<TimelinePanel> {
               if (!_hidden.remove(kind)) _hidden.add(kind);
             }),
           ),
+        DraftChip(
+          key: TimelinePanel.stateOnlyKey,
+          label: 'only state',
+          look: _stateOnly ? ChipLook.selected : ChipLook.rest,
+          onTap: () => setState(() => _stateOnly = !_stateOnly),
+        ),
       ],
     ),
   );
@@ -349,7 +367,8 @@ class _TimelinePanelState extends State<TimelinePanel> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             SizedBox(
-              width: 92,
+              // `state.setState` is 14 characters.
+              width: 100,
               child: Text(
                 event.kind,
                 style: tokens.caps,

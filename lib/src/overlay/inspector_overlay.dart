@@ -1439,6 +1439,10 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
                         onCopy: _copy,
                         noteActions: _noteActions,
                         onTweak: _applyTweak,
+                        bridge: () => BridgeClient.find(
+                          url: widget.config.bridgeUrl,
+                          sinks: widget.config.sinks,
+                        ),
                         // Keeps the panel clear of the rail, which is drawn
                         // above it so the launcher can always stop picking.
                         rightInset: RailPlacement.inset + RailPlacement.width,
