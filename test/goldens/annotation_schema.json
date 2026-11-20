@@ -1,5 +1,5 @@
 {
-  "schema": 10,
+  "schema": 11,
   "id": "pp_20261110_143205_a1f3",
   "createdAt": "2026-11-10T14:32:05Z",
   "status": "submitted",
@@ -76,6 +76,26 @@
           "source": { "file": "lib/app.dart", "line": 30, "column": 9 }
         }
       ]
+    }
+  ],
+  "rounds": [
+    {
+      "n": 1,
+      "startedAt": "2026-11-10T14:33:00.000Z",
+      "endedAt": "2026-11-10T14:39:00.000Z",
+      "start": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+      "end": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+      "changes": [
+        {
+          "id": "c1",
+          "summary": "Let the label wrap",
+          "files": [
+            { "path": "lib/widgets/save_bar.dart", "added": 4, "removed": 1, "shared": true }
+          ]
+        }
+      ],
+      "undone": [],
+      "undo": null
     }
   ],
   "siblings": {

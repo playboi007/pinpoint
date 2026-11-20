@@ -33,6 +33,40 @@ class BridgeChanges {
   final bool reset;
 }
 
+/// What the bridge answered to [BridgeClient.undo].
+class UndoResult {
+  const UndoResult({
+    required this.undo,
+    this.reverted = const <String>[],
+    this.conflicts = const <String>[],
+    this.reloaded = false,
+    this.note,
+  });
+
+  /// `done`: the bridge put the files back. `requested`: it asked the
+  /// agent to (no git, or a file changed since). `failed`: git failed, and
+  /// it asked the agent as for `requested`.
+  final String undo;
+
+  /// The files that went back, relative to the git top level.
+  final List<String> reverted;
+
+  /// The files that no longer fit the patch (a `requested` answer).
+  final List<String> conflicts;
+
+  /// Whether the bridge hot reloaded the app after a `done` undo.
+  final bool reloaded;
+
+  /// The note as the bridge has it now: submitted again, with the user's
+  /// message and the round marked.
+  final Annotation? note;
+
+  bool get isDone => undo == 'done';
+
+  /// Whether the agent was asked to undo the changes.
+  bool get isRequested => !isDone;
+}
+
 /// The app's side of the bridge, beside the [HttpSink] that posts notes:
 /// it loads the pins, stores drafts and edits, and asks what changed.
 ///
@@ -127,6 +161,41 @@ class BridgeClient {
       body: {'status': ?status?.name, 'comment': ?comment, 'message': ?message},
     );
     return Annotation.fromJson(json);
+  }
+
+  /// Undoes the changes [changes] (ids such as `c1`, or `['*']` for all) of
+  /// round [round] of note [id] (PLAN-v3 Milestone 20), with the user's
+  /// [reason]. The bridge puts the files back when it can, hot reloads the
+  /// app, and opens the note again; without git, or when a file changed
+  /// since, it asks the agent instead. Waits for the reload, so it may take
+  /// some seconds. Throws an [HttpSinkException] for a refusal (404, 409).
+  Future<UndoResult> undo(
+    String id,
+    int round,
+    List<String> changes, {
+    String? reason,
+    String? client,
+  }) async {
+    final json = await _send(
+      'POST',
+      _at('$annotationsPath/$id/$undoSegment', {'client': ?client}),
+      body: {'round': round, 'changes': changes, 'reason': ?reason},
+      timeout: const Duration(seconds: 60),
+    );
+    List<String> strings(Object? list) => [
+      if (list is List<Object?>)
+        for (final item in list)
+          if (item is String) item,
+    ];
+    return UndoResult(
+      undo: json['undo'] is String ? json['undo']! as String : 'requested',
+      reverted: strings(json['reverted']),
+      conflicts: strings(json['conflicts']),
+      reloaded: json['reloaded'] == true,
+      note: json['note'] is Map<String, Object?>
+          ? Annotation.fromJson(json['note']! as Map<String, Object?>)
+          : null,
+    );
   }
 
   /// Deletes the note [id]. A note the bridge does not have is fine.

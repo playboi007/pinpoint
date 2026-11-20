@@ -2,6 +2,7 @@
 // tools format notes with this.
 
 import '../model/annotation.dart' show clipText;
+import '../model/note_round.dart';
 import '../sink/markdown_formatter.dart';
 
 /// How much of a note an MCP tool returns. More detail costs the agent
@@ -201,6 +202,7 @@ List<String> _standardLines(Map<String, Object?> note, {bool onDisk = false}) {
       '${shot['beforeAfter'] == true ? ' (left: before the tweaks, right: after)' : ''}',
     );
   }
+  lines.addAll(roundLines(note));
   final replies = _replies(note);
   if (replies.isNotEmpty) lines.addAll(['Replies:', ...replies]);
   if (tapeLine(note['tape']) case final line?) lines.add(line);
@@ -265,6 +267,36 @@ List<String> dependencyLines(Map<String, Object?> note) {
             case final deps when deps.isNotEmpty)
           'Reads: ${_line(_string(owner['type']) ?? '?')}: ${deps.join(', ')}',
   ];
+}
+
+/// One short line for each round the agent closed (PLAN-v3 Milestone 20),
+/// for example `Round 2 (undone by user: c1; kept: c2)`. A round the user
+/// did not undo says what changed: `Round 1 (changed: c1, c2)`. After a
+/// request the agent has to do, it says `undo requested of: c1`.
+List<String> roundLines(Map<String, Object?> note) {
+  final lines = <String>[];
+  for (final json in _list(note['rounds'])) {
+    final round = json is Map<String, Object?>
+        ? NoteRound.fromJson(json)
+        : null;
+    if (round == null || round.isOpen || round.changes.isEmpty) continue;
+    final ids = [for (final c in round.changes) c.id];
+    final undone = [
+      for (final id in ids)
+        if (round.isUndone(id)) id,
+    ];
+    final kept = [
+      for (final id in ids)
+        if (!round.isUndone(id)) id,
+    ];
+    final what = undone.isEmpty
+        ? 'changed: ${ids.join(', ')}'
+        : '${round.undo == RoundUndo.done ? 'undone by user' : 'undo requested of'}'
+              ': ${undone.join(', ')}'
+              '${kept.isEmpty ? '' : '; kept: ${kept.join(', ')}'}';
+    lines.add('Round ${round.n} ($what)');
+  }
+  return lines;
 }
 
 /// The `.md` the bridge writes beside a note's JSON: the standard text,

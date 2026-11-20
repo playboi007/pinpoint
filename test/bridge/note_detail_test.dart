@@ -262,6 +262,55 @@ void main() {
     );
   });
 
+  // PLAN-v3 Milestone 20, step 5: one short line for each closed round.
+  test('standard shows the rounds in short; compact does not', () {
+    Map<String, Object?> change(String id, String summary) => {
+      'id': id,
+      'summary': summary,
+      'files': [
+        {'path': 'lib/$id.dart', 'added': 1, 'removed': 0},
+      ],
+    };
+    final note = fixture()
+      ..['rounds'] = [
+        {
+          'n': 1,
+          'startedAt': '2026-11-20T09:00:00Z',
+          'endedAt': '2026-11-20T09:05:00Z',
+          'changes': [change('c1', 'One'), change('c2', 'Two')],
+          'undone': <Object?>[],
+          'undo': null,
+        },
+        {
+          'n': 2,
+          'startedAt': '2026-11-20T09:10:00Z',
+          'endedAt': '2026-11-20T09:15:00Z',
+          'changes': [change('c1', 'One'), change('c2', 'Two')],
+          'undone': ['c1'],
+          'undo': 'done',
+        },
+        {
+          'n': 3,
+          'startedAt': '2026-11-20T09:20:00Z',
+          'endedAt': '2026-11-20T09:25:00Z',
+          'changes': [change('c1', 'One'), change('other', 'Rest')],
+          'undone': ['*'],
+          'undo': 'requested',
+        },
+        // Still open, and closed with nothing in it: no line.
+        {'n': 4, 'startedAt': '2026-11-20T09:30:00Z', 'changes': <Object?>[]},
+      ];
+    final text = noteText(note, NoteDetail.standard);
+    expect(text, contains('Round 1 (changed: c1, c2)\n'));
+    expect(text, contains('Round 2 (undone by user: c1; kept: c2)\n'));
+    expect(text, contains('Round 3 (undo requested of: c1, other)'));
+    expect(text, isNot(contains('Round 4')));
+    expect(noteText(note, NoteDetail.compact), isNot(contains('Round')));
+    expect(noteMarkdown(note), contains('Round 2 (undone by user: c1'));
+    // A note with no round has no such line.
+    expect(noteText(fixture(), NoteDetail.standard), isNot(contains('Round ')));
+  });
+
   // PLAN-v3 Milestone 19: the note of the admin app (8.5 KB JSON, 2.2 KB of
   // ancestors, 1.5 KB of absolute paths) as the new code makes it, and the
   // standard text under 3 KB.
@@ -312,7 +361,7 @@ Map<String, Object?> adminLikeNote() {
     'source': at(file, line),
   };
   return {
-    'schema': 10,
+    'schema': 11,
     'id': 'pp_20261115_093759_d726',
     'createdAt': '2026-11-15T09:37:59Z',
     'status': 'fixed',

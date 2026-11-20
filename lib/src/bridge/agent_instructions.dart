@@ -19,6 +19,11 @@ With the pinpoint MCP server connected, use its tools instead: list_notes,
 get_note (it attaches the screenshot), then update_note(id, "resolved",
 message) with one line saying what you changed. The pin in the app
 updates. Leave $dir/drafts/ alone: drafts are not sent yet.
+When you set a note fixed, give changes: one {summary, files} for each
+separate change, so the user can undo one of them. After an undo the note
+comes back submitted: do not make the undone changes again. If the last
+reply says "Undo these changes yourself", revert those files
+(get_note_diff gives the patch), then continue.
 To learn why two values change together, or what changed a value, call
 state_flow with the widget as target, act, then call it again.
 ''';

@@ -10,7 +10,9 @@ import 'dart:typed_data';
 import '../model/annotation.dart' show NoteMessage, NoteStatus;
 import '../model/tape.dart' show tapeIdPattern;
 import 'bridge_protocol.dart';
+import 'checkpoints.dart';
 import 'note_detail.dart';
+import 'note_rounds.dart';
 import 'tmp_bin.dart';
 
 /// Why a store operation was refused, with the HTTP status that says so.
@@ -22,6 +24,30 @@ class StoreException implements Exception {
 
   @override
   String toString() => message;
+}
+
+/// What [NoteStore.undo] did.
+class UndoOutcome {
+  const UndoOutcome({
+    required this.undo,
+    required this.reverted,
+    required this.conflicts,
+    required this.note,
+  });
+
+  /// `done` (the bridge put the files back), `requested` (the agent must:
+  /// no git, or a file changed since) or `failed` (git failed; the agent
+  /// is asked as for `requested`).
+  final String undo;
+
+  /// The files that went back, relative to the git top level.
+  final List<String> reverted;
+
+  /// The files that no longer fit, relative to the git top level.
+  final List<String> conflicts;
+
+  /// The note as it is now: submitted again, with the user's message.
+  final Map<String, Object?> note;
 }
 
 /// What [NoteStore.changes] found since a cursor.
@@ -109,6 +135,14 @@ class NoteStore {
   /// move the same note's files in two directions.
   Future<void> _queue = Future<void>.value();
 
+  /// Git trees of the working folder for the rounds of each note (PLAN-v3
+  /// Milestone 20); null in the answer when there is no git. Opened once,
+  /// on first use.
+  late final Future<Checkpoints?> checkpoints = Checkpoints.open(
+    root.parent,
+    undoDir: Directory('${root.path}/undo'),
+  );
+
   Directory get _drafts => Directory('${root.path}/drafts');
 
   /// The folder an agent reads: `<dir>/open/`.
@@ -118,6 +152,10 @@ class NoteStore {
 
   /// The cursor for "now".
   String get cursor => '$_epoch:$_seq';
+
+  /// Completes when the work queued so far (for example the `base`
+  /// checkpoint taken after a note is sent) is done.
+  Future<void> settled() => _serial(() async {});
 
   Future<T> _serial<T>(Future<T> Function() task) {
     final result = _queue.then((_) => task());
@@ -156,12 +194,27 @@ class NoteStore {
       throw StoreException(HttpStatus.conflict, 'Note $id is already resolved');
     }
     // A resend keeps the replies the bridge has, unless it brings its own.
-    if (old != null && _messagesOf(note).isEmpty) {
+    // The rounds are the bridge's alone: the app's copy is never used.
+    if (old != null) {
       final stored = await _readJson(old.folder, id);
-      if (stored != null) note['messages'] = stored['messages'] ?? const [];
+      if (stored != null) {
+        if (_messagesOf(note).isEmpty) {
+          note['messages'] = stored['messages'] ?? const [];
+        }
+        note.remove('rounds');
+        if (stored['rounds'] != null) note['rounds'] = stored['rounds'];
+      }
+    } else {
+      note.remove('rounds');
     }
     final file = await _write(id, note, png: png, keepPng: keepPng);
     _record(id, note, client: client);
+    if (status == NoteStatus.submitted && old?.status != NoteStatus.submitted) {
+      // Queued, not awaited: `git add -A` can take seconds in a big repo,
+      // and the app waits for this answer. Every later change of the note
+      // (inProgress, fixed) queues behind it, so the base is there first.
+      unawaited(_serial(() => _snapshotBase(id)));
+    }
     return file.path;
   });
 
@@ -221,6 +274,12 @@ class NoteStore {
   /// [verification], and adds [message] from [from]. Moves its files when the status changes folder
   /// and rewrites its `.md`. Returns the note.
   ///
+  /// The status moves keep the note's rounds (PLAN-v3 Milestone 20):
+  /// `submitted` takes the `base` checkpoint, `inProgress` opens a round,
+  /// `fixed`, `resolved` and `rejected` close it. The agent's [changes]
+  /// labels split the files of the closed round; [report] says what that
+  /// found.
+  ///
   /// Throws a [StoreException] (404) for an unknown note.
   Future<Map<String, Object?>> update(
     String id, {
@@ -231,14 +290,45 @@ class NoteStore {
     String from = 'user',
     Map<String, Object?>? verification,
     String? client,
-  }) => _serial(() async {
+    List<ChangeLabel>? changes,
+    RoundsReport? report,
+  }) => _serial(
+    () => _update(
+      id,
+      status: status,
+      comment: comment,
+      intent: intent,
+      message: message,
+      from: from,
+      verification: verification,
+      client: client,
+      changes: changes,
+      report: report,
+    ),
+  );
+
+  /// [update] without the queue, for a caller that holds it. [edit] changes
+  /// the note after the status moves and before it is written.
+  Future<Map<String, Object?>> _update(
+    String id, {
+    NoteStatus? status,
+    String? comment,
+    String? intent,
+    String? message,
+    String from = 'user',
+    Map<String, Object?>? verification,
+    String? client,
+    List<ChangeLabel>? changes,
+    RoundsReport? report,
+    void Function(Map<String, Object?> note)? edit,
+  }) async {
     final entry = _index[id];
     final note = entry == null ? null : await _readJson(entry.folder, id);
     if (entry == null || note == null) {
       throw StoreException(HttpStatus.notFound, 'No note $id');
     }
+    final before = NoteStatus.byName(note['status']);
     if (status != null) {
-      final before = NoteStatus.byName(note['status']);
       // Reopened: back to submitted after the agent worked it. The last
       // check result is about the old code, and the agent must see that
       // the note came back.
@@ -252,6 +342,8 @@ class NoteStore {
       }
       note['status'] = status.name;
     }
+    await _moveRounds(id, note, before, status, changes ?? const [], report);
+    edit?.call(note);
     if (verification != null) note['verification'] = verification;
     if (comment != null) note['comment'] = comment;
     if (intent != null) note['intent'] = intent;
@@ -264,7 +356,359 @@ class NoteStore {
     await _write(id, note, keepPng: true);
     _record(id, note, client: client);
     return note;
+  }
+
+  // ------------------------------------------------------------- rounds
+
+  /// The `base` checkpoint of note [id]: the tree when it was sent.
+  Future<void> _snapshotBase(String id) async {
+    final cp = await checkpoints;
+    if (cp != null) await cp.snapshot(id, 'base');
+  }
+
+  /// Deletes the checkpoint refs of note [id] (a deleted or expired note).
+  Future<void> _dropCheckpoints(String id) async {
+    try {
+      await (await checkpoints)?.drop(id);
+    } on Object {
+      // The refs stay; they hold only trees.
+    }
+  }
+
+  static List<Map<String, Object?>> _roundsOf(Map<String, Object?> note) => [
+    for (final r in _listOf(note['rounds']))
+      if (r is Map<String, Object?>) r,
+  ];
+
+  static List<Object?> _listOf(Object? value) =>
+      value is List<Object?> ? value : const <Object?>[];
+
+  static Map<String, Object?>? _openRound(List<Map<String, Object?>> rounds) {
+    for (final round in rounds.reversed) {
+      if (round['endedAt'] == null) return round;
+    }
+    return null;
+  }
+
+  static String _now() => DateTime.now().toUtc().toIso8601String();
+
+  /// Keeps `rounds` of [note] in step with the move from [before] to
+  /// [status] (null: no move), and takes the `base` checkpoint when the
+  /// note goes (back) to submitted.
+  Future<void> _moveRounds(
+    String id,
+    Map<String, Object?> note,
+    NoteStatus? before,
+    NoteStatus? status,
+    List<ChangeLabel> labels,
+    RoundsReport? report,
+  ) async {
+    final rounds = _roundsOf(note);
+    final open = _openRound(rounds);
+    final closing =
+        status == NoteStatus.fixed ||
+        status == NoteStatus.resolved ||
+        status == NoteStatus.rejected;
+    if (status == NoteStatus.submitted && before != NoteStatus.submitted) {
+      await _snapshotBase(id);
+    } else if (status == NoteStatus.inProgress && open == null) {
+      final n = rounds.length + 1;
+      final cp = await checkpoints;
+      final start = await cp?.snapshot(id, 'r$n-start');
+      rounds.add(_newRound(n, start));
+      note['rounds'] = rounds;
+    } else if (closing && open != null) {
+      await _closeRound(id, open, labels, report);
+      note['rounds'] = rounds;
+    } else if (closing && status != NoteStatus.rejected && !_wasDone(before)) {
+      // Set fixed without inProgress: the round starts at the base.
+      final n = rounds.length + 1;
+      final cp = await checkpoints;
+      final round = _newRound(n, await cp?.resolve(id, 'base'));
+      rounds.add(round);
+      await _closeRound(id, round, labels, report);
+      note['rounds'] = rounds;
+    } else if (labels.isNotEmpty) {
+      if (open != null) {
+        // Labels before the round closes: kept until it does.
+        open['pending'] = [
+          ..._listOf(open['pending']),
+          for (final l in labels) l.toJson(),
+        ];
+      } else if (rounds.isNotEmpty) {
+        // A second call after the round closed: labels the last one again.
+        await _relabel(id, rounds.last, labels, report);
+      }
+      note['rounds'] = rounds;
+    }
+  }
+
+  static bool _wasDone(NoteStatus? status) =>
+      status == NoteStatus.fixed ||
+      status == NoteStatus.resolved ||
+      status == NoteStatus.verified ||
+      status == NoteStatus.rejected;
+
+  static Map<String, Object?> _newRound(int n, String? start) => {
+    'n': n,
+    'startedAt': _now(),
+    'start': start,
+    'changes': <Object?>[],
+    'undone': <Object?>[],
+    'undo': null,
+  };
+
+  /// Ends [round]: takes its `end` checkpoint and fills its `changes` from
+  /// the diff and the agent's [labels].
+  Future<void> _closeRound(
+    String id,
+    Map<String, Object?> round,
+    List<ChangeLabel> labels,
+    RoundsReport? report,
+  ) async {
+    final cp = await checkpoints;
+    final start = round['start'] as String?;
+    final n = round['n'];
+    final end = cp == null || start == null
+        ? null
+        : await cp.snapshot(id, 'r$n-end');
+    round['endedAt'] = _now();
+    round['end'] = end;
+    final pending = [
+      for (final p in _listOf(round.remove('pending')))
+        ?ChangeLabel.fromJson(p),
+    ];
+    final all = [...pending, ...labels];
+    final changes = await buildChanges(
+      checkpoints: cp,
+      start: start,
+      end: end,
+      labels: all,
+      report: report,
+    );
+    if (cp != null && start != null && end != null) {
+      markShared(changes, await _filesOfOtherRounds(cp, id, round));
+    }
+    round['changes'] = changes;
+    report?.closed = round;
+  }
+
+  /// A second `update_note` with labels, after the round closed: the last
+  /// round's changes are built again with them.
+  Future<void> _relabel(
+    String id,
+    Map<String, Object?> round,
+    List<ChangeLabel> labels,
+    RoundsReport? report,
+  ) async {
+    if (round['endedAt'] == null || _listOf(round['undone']).isNotEmpty) return;
+    final cp = await checkpoints;
+    final start = round['start'] as String?;
+    final end = round['end'] as String?;
+    final changes = await buildChanges(
+      checkpoints: cp,
+      start: start,
+      end: end,
+      labels: labels,
+      report: report,
+    );
+    if (cp != null && start != null && end != null) {
+      markShared(changes, await _filesOfOtherRounds(cp, id, round));
+    }
+    round['changes'] = changes;
+    report?.closed = round;
+  }
+
+  /// The files that another note's open round changed in a window that
+  /// overlaps [round]: the paths a user may not want to undo with this
+  /// note. Two checkpoints cannot tell whose edit is whose inside one
+  /// window, so:
+  ///
+  /// - an other round that started before [round]: what it changed up to
+  ///   the start of [round];
+  /// - one that started after it began: what changed from its start to the
+  ///   end of [round].
+  Future<Set<String>> _filesOfOtherRounds(
+    Checkpoints cp,
+    String id,
+    Map<String, Object?> round,
+  ) async {
+    final shared = <String>{};
+    final start = round['start'] as String?;
+    final end = round['end'] as String?;
+    final began = DateTime.tryParse('${round['startedAt']}');
+    if (start == null || end == null || began == null) return shared;
+    for (final MapEntry(key: otherId, value: entry) in _index.entries) {
+      if (otherId == id || entry.folder.path != openDir.path) continue;
+      final other = await _readJson(entry.folder, otherId);
+      final otherOpen = other == null ? null : _openRound(_roundsOf(other));
+      final otherStart = otherOpen?['start'];
+      final otherBegan = DateTime.tryParse('${otherOpen?['startedAt']}');
+      if (otherStart is! String || otherBegan == null) continue;
+      final files = await cp.diff(
+        otherStart,
+        otherBegan.isBefore(began) ? start : end,
+      );
+      for (final f in files ?? const <FileDiff>[]) {
+        shared.add(f.path);
+      }
+    }
+    return shared;
+  }
+
+  /// The user undoes [changes] (ids, or `*`) of [round] of note [id].
+  ///
+  /// With git, the bridge puts the files back ([Checkpoints.revert]); with
+  /// none, or when a file changed since, no file changes and the agent is
+  /// asked to do it. Either way the note goes back to submitted, as a
+  /// reopen does, with the user's message and [reason].
+  ///
+  /// Throws a [StoreException]: 404 for an unknown note or round, 400 for a
+  /// change that is not in the round, 409 for a note the agent is working
+  /// on, a round still open, or changes already undone.
+  Future<UndoOutcome> undo(
+    String id, {
+    required int round,
+    required List<String> changes,
+    String? reason,
+    String? client,
+  }) => _serial(() async {
+    final entry = _index[id];
+    final note = entry == null ? null : await _readJson(entry.folder, id);
+    if (entry == null || note == null || entry.status == NoteStatus.draft) {
+      throw StoreException(HttpStatus.notFound, 'No note $id');
+    }
+    if (!_wasDone(entry.status)) {
+      throw StoreException(
+        HttpStatus.conflict,
+        'Note $id is ${entry.status.name}: the agent has it. Undo works '
+        'after the agent set it fixed.',
+      );
+    }
+    final rounds = _roundsOf(note);
+    final target = rounds.where((r) => r['n'] == round).firstOrNull;
+    if (target == null) {
+      throw StoreException(HttpStatus.notFound, 'No round $round in $id');
+    }
+    if (target['endedAt'] == null) {
+      throw StoreException(HttpStatus.conflict, 'Round $round is still open');
+    }
+    final all = [
+      for (final c in _listOf(target['changes']))
+        if (c is Map<String, Object?> && c['id'] is String) c,
+    ];
+    final already = _undoneIds(target, all);
+    final wanted = changes.contains('*')
+        ? [for (final c in all) c['id']! as String]
+        : changes;
+    for (final changeId in wanted) {
+      if (!all.any((c) => c['id'] == changeId)) {
+        throw StoreException(
+          HttpStatus.badRequest,
+          'No change $changeId in round $round. It has: '
+          '${all.map((c) => c['id']).join(', ')}',
+        );
+      }
+    }
+    final chosen = [
+      for (final c in all)
+        if (wanted.contains(c['id']) && !already.contains(c['id'])) c,
+    ];
+    if (chosen.isEmpty) {
+      throw StoreException(
+        HttpStatus.conflict,
+        all.isEmpty
+            ? 'Round $round has no changes'
+            : 'Those changes are already undone',
+      );
+    }
+    final kept = [
+      for (final c in all)
+        if (!chosen.contains(c) && !already.contains(c['id'])) c,
+    ];
+    final files = {
+      for (final c in chosen)
+        for (final f in _listOf(c['files']))
+          if (f is Map<String, Object?> && f['path'] is String)
+            f['path']! as String,
+    }.toList();
+
+    final cp = await checkpoints;
+    final start = target['start'];
+    final end = target['end'];
+    var undo = 'requested';
+    var reverted = const <String>[];
+    var conflicts = const <String>[];
+    if (cp != null && start is String && end is String) {
+      final result = await cp.revert(start, end, files);
+      switch (result.outcome) {
+        case RevertOutcome.clean:
+          undo = 'done';
+          reverted = result.reverted;
+        case RevertOutcome.conflict:
+          conflicts = result.conflicts;
+        case RevertOutcome.failed:
+          undo = 'failed';
+          _log('pinpoint: undo of $id round $round failed: ${result.error}');
+      }
+    }
+    final summaries = [for (final c in chosen) '${c['summary']}'];
+    final keptSummaries = [for (final c in kept) '${c['summary']}'];
+    final text = undo == 'done'
+        ? undoDoneMessage(
+            undone: summaries,
+            kept: keptSummaries,
+            reason: reason,
+          )
+        : undoRequestedMessage(
+            undone: summaries,
+            files: files,
+            kept: keptSummaries,
+            reason: reason,
+          );
+    final undone = {...already, for (final c in chosen) c['id']! as String};
+    final updated = await _update(
+      id,
+      status: NoteStatus.submitted,
+      message: text,
+      from: 'user',
+      client: client,
+      edit: (note) {
+        target['undone'] = undone.length == all.length
+            ? const ['*']
+            : [
+                for (final c in all)
+                  if (undone.contains(c['id'])) c['id'],
+              ];
+        target['undo'] = undo;
+        note['rounds'] = rounds;
+      },
+    );
+    _log(
+      'pinpoint: undo of $id round $round: $undo '
+      '(${summaries.join('; ')})',
+    );
+    return UndoOutcome(
+      undo: undo,
+      reverted: reverted,
+      conflicts: conflicts,
+      note: updated,
+    );
   });
+
+  /// The ids of [round]'s changes that an earlier undo took out.
+  static Set<String> _undoneIds(
+    Map<String, Object?> round,
+    List<Map<String, Object?>> changes,
+  ) {
+    final undone = _listOf(round['undone']);
+    return undone.contains('*')
+        ? {for (final c in changes) c['id']! as String}
+        : {
+            for (final u in undone)
+              if (u is String) u,
+          };
+  }
 
   /// The bin of deleted notes: `<dir>/tmp/`. [sync] never reads it.
   TmpBin get tmpBin => TmpBin(root);
@@ -306,6 +750,7 @@ class NoteStore {
       await _moveTape(tapeId, target);
     }
     _log('pinpoint: note $id moved to .pinpoint/tmp/ (flushed after 1 h)');
+    await _dropCheckpoints(id);
     _bump(id, entry.origin, client);
     return true;
   });
@@ -367,6 +812,7 @@ class NoteStore {
         }
         _index.remove(id);
         await _removeFiles(entry.folder, id);
+        await _dropCheckpoints(id);
         _bump(id, entry.origin, null);
         gone.add(id);
       }
@@ -514,6 +960,7 @@ class NoteStore {
     for (final id in _index.keys.toList()) {
       if (seen.contains(id)) continue;
       final gone = _index.remove(id)!;
+      await _dropCheckpoints(id);
       _bump(id, gone.origin, null);
     }
     _loaded = true;

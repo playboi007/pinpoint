@@ -529,6 +529,76 @@ void main() {
     });
   });
 
+  group('POST /annotations/<id>/undo (Milestone 20)', () {
+    Future<(int, String)> undo(String id, Object? body) async {
+      final (status, text, _) = await post(
+        body,
+        path: '$annotationsPath/$id/$undoSegment',
+      );
+      return (status, text);
+    }
+
+    test('answers the preflight, refuses a page from another origin, and '
+        'allows only POST', () async {
+      expect(
+        (await send('OPTIONS', '$annotationsPath/pp_a/undo')).statusCode,
+        204,
+      );
+      final (refused, _, _) = await post(
+        {
+          'round': 1,
+          'changes': ['c1'],
+        },
+        path: '$annotationsPath/pp_a/undo',
+        origin: 'http://evil.example',
+      );
+      expect(refused, 403);
+      final get = await send('GET', '$annotationsPath/pp_a/undo');
+      expect(get.statusCode, 405);
+      expect(get.headers.value('allow'), 'POST, OPTIONS');
+    });
+
+    test('a note with no round, an unknown note and a bad body', () async {
+      final (sent, _, _) = await post({
+        'schema': annotationSchema,
+        'id': 'pp_a',
+        'status': 'fixed',
+        'intent': 'bug',
+        'comment': 'x',
+      });
+      expect(sent, 201);
+      expect(
+        (await undo('pp_a', {
+          'round': 1,
+          'changes': ['c1'],
+        })).$1,
+        404,
+      );
+      expect(
+        (await undo('pp_zzz', {
+          'round': 1,
+          'changes': ['c1'],
+        })).$1,
+        404,
+      );
+      expect(
+        (await undo('pp_a', {
+          'changes': ['c1'],
+        })).$1,
+        400,
+      );
+      expect((await undo('pp_a', {'round': 1})).$1, 400);
+      expect((await undo('pp_a', [1])).$1, 400);
+      expect(
+        (await undo('pp_a', {
+          'round': 1,
+          'changes': ['c1'],
+        })).$2,
+        contains('No round 1'),
+      );
+    });
+  });
+
   test('the folder ignores itself in git', () {
     expect(
       File('${root.path}/.pinpoint/.gitignore').readAsStringSync().trim(),

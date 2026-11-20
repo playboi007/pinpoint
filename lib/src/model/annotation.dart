@@ -6,6 +6,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import '../sink/markdown_formatter.dart';
+import 'note_round.dart';
 
 /// The payload version. The receiver rejects any other value, so a change
 /// to the shape below needs a new number.
@@ -24,7 +25,9 @@ import '../sink/markdown_formatter.dart';
 /// `page.url` has its query values masked.
 /// 10 (PLAN-v3 Milestone 21): `stateOwners[].dependencies`, the state
 /// objects an owner reads, and the new owner kind `reader`.
-const int annotationSchema = 10;
+/// 11 (PLAN-v3 Milestone 20): `rounds`, what the agent changed in each pass
+/// on the note, written by the bridge. A note without it reads as before.
+const int annotationSchema = 11;
 
 /// The start of the first line of a note's trace when rebuilds were not
 /// recorded in all or part of its window (PLAN-v2 Milestone 13, step 12).
@@ -118,8 +121,9 @@ class NoteMessage {
 /// has one, [environment], which appears only while a what-if override
 /// is active, [finding] and [checks], which appear only on a note made
 /// from a finding, [tweaks], which appear only while a tweak is active,
-/// [verification], which appears once `verify_note` ran, and [trace],
-/// which appears when the flight recorder ran.
+/// [verification], which appears once `verify_note` ran, [trace], which
+/// appears when the flight recorder ran, and [rounds], which appear once the
+/// agent worked the note.
 /// `test/goldens/annotation_schema.json` fixes it.
 class Annotation {
   const Annotation({
@@ -135,6 +139,7 @@ class Annotation {
     this.messages = const <NoteMessage>[],
     this.ancestors = const <AncestorInfo>[],
     this.stateOwners = const <StateOwnerInfo>[],
+    this.rounds = const <Map<String, Object?>>[],
     this.siblings,
     this.subtree,
     this.inherited,
@@ -176,6 +181,18 @@ class Annotation {
   /// (PLAN-v3 Milestone 19, step 4): a local `State`, or a provider-like
   /// scope. Input for the state lens.
   final List<StateOwnerInfo> stateOwners;
+
+  /// The agent's passes on this note, oldest first, written by the bridge
+  /// (PLAN-v3 Milestone 20); empty for a note it has not worked. Each round
+  /// is `{n, startedAt, endedAt, start, end, changes, undone, undo}`; read
+  /// it with [roundViews]. The app never writes them: the bridge keeps its
+  /// own copy when a note is sent again.
+  final List<Map<String, Object?>> rounds;
+
+  /// [rounds] as typed values, oldest first.
+  List<NoteRound> get roundViews => [
+    for (final r in rounds) ?NoteRound.fromJson(r),
+  ];
 
   final SiblingsInfo? siblings;
 
@@ -248,6 +265,7 @@ class Annotation {
     TargetInfo? target,
     List<AncestorInfo>? ancestors,
     List<StateOwnerInfo>? stateOwners,
+    List<Map<String, Object?>>? rounds,
     SiblingsInfo? Function()? siblings,
     String? Function()? subtree,
     ScreenshotInfo? Function()? screenshot,
@@ -273,6 +291,7 @@ class Annotation {
     messages: messages ?? this.messages,
     ancestors: ancestors ?? this.ancestors,
     stateOwners: stateOwners ?? this.stateOwners,
+    rounds: rounds ?? this.rounds,
     siblings: siblings == null ? this.siblings : siblings(),
     subtree: subtree == null ? this.subtree : subtree(),
     inherited: inherited,
@@ -345,6 +364,9 @@ class Annotation {
   /// The budget steps, in order. A step returns null when it has nothing
   /// to cut.
   static final List<(String, Annotation? Function(Annotation))> _budgetSteps = [
+    // The bridge keeps the rounds and puts them back (PLAN-v3 Milestone 20),
+    // so a note that is too large loses its copy first.
+    ('rounds', (a) => a.rounds.isEmpty ? null : a.copyWith(rounds: const [])),
     // The trace goes first (PLAN-v2 Milestone 13, step 12): the agent can
     // read the whole run with get_trace.
     ('trace', (a) => a._traceLines(20)),
@@ -528,6 +550,11 @@ class Annotation {
         for (final o in _listOrEmpty(json['stateOwners']))
           ?StateOwnerInfo._fromJson(o),
       ],
+      // A schema 10 note has no `rounds`.
+      rounds: [
+        for (final r in _listOrEmpty(json['rounds']))
+          if (r is Map<String, Object?> && r['n'] is int) r,
+      ],
       siblings: SiblingsInfo._fromJson(json['siblings']),
       subtree: _stringOrNull(json['subtree']),
       inherited: json['inherited'] is Map<String, Object?>
@@ -569,6 +596,7 @@ class Annotation {
     'ancestors': [for (final a in ancestors) a.toJson()],
     if (stateOwners.isNotEmpty)
       'stateOwners': [for (final o in stateOwners) o.toJson()],
+    if (rounds.isNotEmpty) 'rounds': rounds,
     'siblings': siblings?.toJson(),
     'subtree': subtree,
     'inherited': inherited?.toJson(),

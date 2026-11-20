@@ -48,6 +48,22 @@ void main() {
     expect(text, contains('state_flow'));
   });
 
+  test(
+    'the section says how to label changes and what to do after an undo',
+    () {
+      final text = agentInstructions().replaceAll(RegExp(r'\s+'), ' ');
+      expect(text, contains('give changes: one {summary, files} for each'));
+      expect(
+        text,
+        contains('separate change, so the user can undo one of them'),
+      );
+      expect(text, contains('After an undo the note comes back submitted'));
+      expect(text, contains('do not make the undone changes again'));
+      expect(text, contains('"Undo these changes yourself"'));
+      expect(text, contains('get_note_diff gives the patch'));
+    },
+  );
+
   test('the bridge prints the section when no agent file has it', () async {
     final log = await startOnce();
     expect(log.join('\n'), contains(agentInstructions()));

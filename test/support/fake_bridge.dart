@@ -73,6 +73,17 @@ class FakeBridge {
   ];
   final Set<String> _deleted = {};
 
+  /// What an undo answers, besides the note (PLAN-v3 Milestone 20).
+  Map<String, Object?> undoAnswer = {
+    'undo': 'done',
+    'reverted': ['lib/a.dart'],
+    'conflicts': <String>[],
+    'reloaded': true,
+  };
+
+  /// The bodies of the undo requests, oldest first.
+  final List<Map<String, Object?>> undos = <Map<String, Object?>>[];
+
   /// Tapes as the app posted them: `{tape, bodies}` by id.
   final Map<String, Map<String, Object?>> tapes = {};
 
@@ -152,6 +163,27 @@ class FakeBridge {
         runStatus[run[1]!] = body;
       }
       return _json({'ok': true});
+    }
+    final undo = RegExp(r'^/annotations/([^/]+)/undo$').firstMatch(path);
+    if (undo != null && request.method == 'POST') {
+      final note = notes[undo[1]];
+      if (note == null) return _json({'error': 'No note ${undo[1]}'}, 404);
+      final body = jsonDecode(request.body) as Map<String, Object?>;
+      undos.add(body);
+      // As NoteStore.undo: the note is submitted again, with the user's
+      // message, and the tab that asked is left out of /changes.
+      note['status'] = 'submitted';
+      note['reopened'] = ((note['reopened'] as int?) ?? 0) + 1;
+      note['messages'] = [
+        ...(note['messages'] as List<Object?>? ?? const []),
+        {
+          'at': '2026-11-10T15:00:00Z',
+          'from': 'user',
+          'text': 'Undone by the bridge. Reason: ${body['reason']}',
+        },
+      ];
+      _touch(undo[1]!, client: query['client']);
+      return _json({...undoAnswer, 'note': note});
     }
     switch ((request.method, path)) {
       case ('GET', '/health'):

@@ -109,3 +109,10 @@ bool isLoopbackOrigin(String origin) {
       host == '::1' ||
       RegExp(r'^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$').hasMatch(host);
 }
+
+/// The last part of `POST /annotations/<id>/undo`: the user undoes some or
+/// all of the changes of one round of the agent (PLAN-v3 Milestone 20).
+const String undoSegment = 'undo';
+
+/// The longest the bridge waits for the hot reload after an undo.
+const Duration undoReloadWait = Duration(seconds: 45);

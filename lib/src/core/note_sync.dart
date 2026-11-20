@@ -209,6 +209,35 @@ class NoteSync {
     'Change kept in this tab only',
   );
 
+  /// Undoes [changes] of round [round] of note [id] on the bridge (see
+  /// [BridgeClient.undo]), and puts the note it answers with in the book:
+  /// this tab's own write is left out of its `/changes`, so the answer is
+  /// how the pin learns that the note is submitted again. Returns null when
+  /// the call failed ([onError] says why).
+  Future<UndoResult?> undo(
+    String id, {
+    required int round,
+    required List<String> changes,
+    String? reason,
+  }) async {
+    try {
+      final result = await client.undo(
+        id,
+        round,
+        changes,
+        reason: reason,
+        client: clientId,
+      );
+      if (!_disposed && result.note != null) {
+        _merge([result.note!], announce: false);
+      }
+      return result;
+    } on Object catch (error) {
+      if (!_disposed) onError?.call('Undo failed: $error');
+      return null;
+    }
+  }
+
   /// Deletes the note [id] on the bridge.
   Future<bool> delete(String id) => _write(
     () => client.delete(id, client: clientId),

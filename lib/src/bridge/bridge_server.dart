@@ -41,6 +41,14 @@ class BridgeStartException implements Exception {
 /// - `GET /annotations?status=a,b&origin=o`: notes, to restore pins.
 /// - `PATCH /annotations/<id>`: `status`, `comment`, `intent`, `message`.
 /// - `DELETE /annotations/<id>`.
+/// - `POST /annotations/<id>/undo`: `{round, changes: ["c1"] | ["*"],
+///   reason}`. The bridge puts the files of those changes back with git
+///   (never touching `HEAD` or the user's index) and hot reloads the app;
+///   with no git, or when a file changed since, it changes no file and asks
+///   the agent to undo them. The note goes back to submitted either way.
+///   Answers `{undo: done | requested | failed, reverted, conflicts,
+///   reloaded, note}`. 404 for an unknown note or round, 409 for a note the
+///   agent is working on or changes already undone.
 /// - `GET /changes?since=<cursor>&origin=o&wait=s&client=id`: what changed
 ///   since a cursor. With `wait` (seconds, at most [changesWait]) the
 ///   answer is held until there is a change. With `client`, the changes
@@ -202,10 +210,15 @@ class PinPointBridge {
   late final SourceLookup source = SourceLookup(store.root.parent);
 
   final List<String> _allowedOrigins;
+
+  /// Hot reload through the app's debug service, for the `hot_reload` tool
+  /// and after an undo.
+  late final HotReloader reloader = HotReloader(store.root);
+
   late final McpServer _mcp = McpServer(
     store,
     commands: commands,
-    reloader: HotReloader(store.root),
+    reloader: reloader,
     tapes: tapes,
     runs: runs,
     source: source,
@@ -241,9 +254,15 @@ class PinPointBridge {
     response.headers.set('access-control-allow-origin', '*');
     try {
       final path = request.uri.path;
-      final noteId = path.startsWith('$annotationsPath/')
+      var noteId = path.startsWith('$annotationsPath/')
           ? path.substring(annotationsPath.length + 1)
           : null;
+      // `/annotations/<id>/undo`: the id is what comes before the suffix.
+      var undo = false;
+      if (noteId != null && noteId.endsWith('/$undoSegment')) {
+        noteId = noteId.substring(0, noteId.length - undoSegment.length - 1);
+        undo = true;
+      }
       final known =
           path == annotationsPath ||
           path == healthPath ||
@@ -297,7 +316,7 @@ class PinPointBridge {
           '--allow-origin $origin to accept them.',
         );
       } else {
-        await _route(request, path, noteId);
+        await _route(request, path, noteId, undo: undo);
       }
     } on StoreException catch (error) {
       _error(response, error.status, error.message);
@@ -316,7 +335,12 @@ class PinPointBridge {
     }
   }
 
-  Future<void> _route(HttpRequest request, String path, String? noteId) async {
+  Future<void> _route(
+    HttpRequest request,
+    String path,
+    String? noteId, {
+    bool undo = false,
+  }) async {
     final response = request.response;
     final method = request.method;
     if (noteId != null) {
@@ -328,6 +352,11 @@ class PinPointBridge {
           HttpStatus.badRequest,
           'The id must match ${noteIdPattern.pattern}',
         );
+      }
+      if (undo) {
+        if (method == 'POST') return _undo(request, noteId);
+        response.headers.set('allow', 'POST, OPTIONS');
+        return _error(response, HttpStatus.methodNotAllowed, 'Use POST');
       }
       switch (method) {
         case 'GET':
@@ -639,6 +668,67 @@ class PinPointBridge {
     );
     _log('pinpoint: note $id is ${note['status']}');
     _json(response, HttpStatus.ok, note);
+  }
+
+  /// `POST /annotations/<id>/undo` (PLAN-v3 Milestone 20): the user undoes
+  /// changes of one round. After a clean undo the app is hot reloaded when
+  /// its debug service is known.
+  Future<void> _undo(HttpRequest request, String id) async {
+    final response = request.response;
+    final body = await _jsonBody(request);
+    if (body == null) return;
+    final round = body['round'];
+    final changes = body['changes'];
+    final reason = body['reason'];
+    if (round is! int || round < 1) {
+      return _error(response, HttpStatus.badRequest, 'round is a number, 1 up');
+    }
+    if (changes is! List<Object?> ||
+        changes.isEmpty ||
+        changes.any((c) => c is! String || c.isEmpty)) {
+      return _error(
+        response,
+        HttpStatus.badRequest,
+        'changes is a list of change ids, or ["*"] for all',
+      );
+    }
+    if (reason != null && reason is! String) {
+      return _error(response, HttpStatus.badRequest, 'reason must be a string');
+    }
+    final outcome = await store.undo(
+      id,
+      round: round,
+      changes: [for (final c in changes) c! as String],
+      reason: reason as String?,
+      client: request.uri.queryParameters[clientQuery],
+    );
+    final reloaded = outcome.undo == 'done' && await _reloadAfterUndo();
+    _log(
+      'pinpoint: undo of $id round $round is ${outcome.undo}'
+      '${reloaded ? ', app reloaded' : ''}',
+    );
+    _json(response, HttpStatus.ok, {
+      'undo': outcome.undo,
+      'reverted': outcome.reverted,
+      'conflicts': outcome.conflicts,
+      'reloaded': reloaded,
+      'note': outcome.note,
+    });
+  }
+
+  /// Hot reloads the app after files went back; false when no debug
+  /// service address is known, or the reload failed or took too long.
+  Future<bool> _reloadAfterUndo() async {
+    if (!reloader.addressFile.existsSync()) return false;
+    try {
+      final answer = await reloader.reload().timeout(
+        undoReloadWait,
+        onTimeout: () => const <String, Object?>{'ok': false},
+      );
+      return answer['ok'] == true;
+    } on Object {
+      return false;
+    }
   }
 
   /// The request's JSON object, or null after answering with the error.

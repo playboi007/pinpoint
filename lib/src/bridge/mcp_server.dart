@@ -9,6 +9,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import '../model/annotation.dart' show NoteStatus;
+import '../model/note_round.dart';
 import '../sink/markdown_formatter.dart' show verificationLines;
 import '../trace/trace_format.dart';
 import '../trace/trace_recorder.dart';
@@ -16,6 +17,7 @@ import 'agent_tools.dart';
 import 'command_queue.dart';
 import 'hot_reload.dart';
 import 'note_detail.dart';
+import 'note_rounds.dart';
 import 'note_store.dart';
 import 'png_resize.dart';
 import 'probe_scan.dart';
@@ -37,6 +39,10 @@ const int mcpMaxImageWidth = 800;
 
 /// The most notes one `list_notes` call returns.
 const int mcpMaxListed = 50;
+
+/// The longest patch `get_note_diff` returns, in bytes. A longer one gets
+/// the list of files only.
+const int mcpMaxDiffBytes = 40 * 1024;
 
 /// The agent's tools: `list_notes`, `get_note` and `update_note`, over the
 /// notes in [store], and with [commands] the Milestone 12 tools that run in
@@ -153,7 +159,12 @@ class McpServer {
           'the last reply: work it again, set it fixed again, and call '
           'verify_note again if it has checks. Finish every code change for '
           'a note that way, also when the user asked for it in chat: the pin '
-          'shows only what update_note says.'
+          'shows only what update_note says. When you set a note fixed, '
+          'give changes: one {summary, files} for each separate change, so '
+          'the user can undo one of them. After an undo the note is '
+          'submitted again: do not make the undone changes again. If the '
+          'last reply says "Undo these changes yourself", revert those '
+          'files (get_note_diff gives the patch), then continue.'
           '${commands == null ? '' : ' To operate the app, name widgets with '
                     'target queries and put several actions in one '
                     'run_steps call; check once at the end. To see what '
@@ -225,7 +236,9 @@ class McpServer {
           'in the app follows within seconds. resolved and rejected move '
           'the note to .pinpoint/resolved/. After each fix, also of a '
           'reopened note, set fixed or resolved: the user can accept only '
-          'what you marked done.',
+          'what you marked done. With fixed or resolved, give changes: one '
+          '{summary, files} for each separate change you made, so the user '
+          'can undo one of them. Files you did not name show as "other".',
       'inputSchema': {
         'type': 'object',
         'properties': {
@@ -237,6 +250,54 @@ class McpServer {
           'message': {
             'type': 'string',
             'description': 'One line for the user: what you did, or why not.',
+          },
+          'changes': {
+            'type': 'array',
+            'description':
+                'With fixed or resolved: your separate changes, so the user '
+                'can undo one. Each has a short summary and the files it '
+                'touched (paths relative to the app folder, or absolute). '
+                'A file that is not in this round\'s diff is dropped.',
+            'items': {
+              'type': 'object',
+              'properties': {
+                'summary': {
+                  'type': 'string',
+                  'description': 'For example "Spacing between the filters".',
+                },
+                'files': {
+                  'type': 'array',
+                  'items': {'type': 'string'},
+                },
+              },
+              'required': ['summary'],
+            },
+          },
+        },
+        'required': ['id'],
+      },
+    },
+    {
+      'name': 'get_note_diff',
+      'title': 'Get what the agent changed for a note',
+      'description':
+          'The patch (before to after) of one round of a note, for all its '
+          'changes or one change. Use it when the note says "Undo these '
+          'changes yourself": revert those files, then continue. A patch '
+          'over ${mcpMaxDiffBytes ~/ 1024} KB gives the file list only: ask '
+          'for one change at a time. Without git it lists the files you '
+          'named.',
+      'inputSchema': {
+        'type': 'object',
+        'properties': {
+          'id': {'type': 'string'},
+          'round': {
+            'type': 'integer',
+            'description': 'The round number. Default: the latest closed one.',
+          },
+          'change': {
+            'type': 'string',
+            'description': 'One change id of the round, for example c1.',
           },
         },
         'required': ['id'],
@@ -296,6 +357,7 @@ class McpServer {
       'list_notes' => _listNotes(input),
       'get_note' => _getNote(input),
       'update_note' => _updateNote(input),
+      'get_note_diff' => _getNoteDiff(input),
       'list_probes' => _listProbes(),
       'list_tapes' => _listTapes(),
       'get_trace' when input['run'] != null => _runTrace(input),
@@ -389,15 +451,24 @@ class McpServer {
     if (message != null && message is! String) {
       throw const _InvalidParams('message must be a string');
     }
-    if (status == null && message == null) {
+    final List<ChangeLabel> labels;
+    try {
+      labels = ChangeLabel.parse(input['changes']);
+    } on FormatException catch (error) {
+      throw _InvalidParams(error.message);
+    }
+    if (status == null && message == null && labels.isEmpty) {
       throw const _InvalidParams('Give a status, a message or both');
     }
     if (await _sentNote(id) == null) return _notFound(id);
+    final report = RoundsReport();
     final note = await store.update(
       id,
       status: NoteStatus.byName(status),
       message: message as String?,
       from: 'agent',
+      changes: labels,
+      report: report,
     );
     _log(
       'pinpoint: the agent set $id to ${note['status']}'
@@ -411,7 +482,127 @@ class McpServer {
     return _text(
       'Note $id is ${note['status']}.\n\n'
       '${noteText(note, NoteDetail.compact)}'
+      '${_roundReport(report, labels.isNotEmpty)}'
       '${probes.isEmpty ? '' : '\n\n${_probeWarning(probes)}'}',
+    );
+  }
+
+  /// What closing the round found, for the answer to `update_note`: the
+  /// changes with their ids, and what was dropped.
+  static String _roundReport(RoundsReport report, bool labelled) {
+    final json = report.closed;
+    final round = json == null ? null : NoteRound.fromJson(json);
+    if (round == null) return '';
+    final lines = <String>[
+      if (round.changes.isNotEmpty) 'Round ${round.n}:',
+      for (final c in round.changes)
+        '  ${c.id}: ${c.summary} (${c.files.length} '
+            'file${c.files.length == 1 ? '' : 's'})',
+      for (final file in report.droppedFiles)
+        'Dropped $file: it is not in this round\'s diff.',
+      for (final summary in report.droppedChanges)
+        'Dropped "$summary": none of its files is in this round\'s diff.',
+      if (!labelled && round.changes.isNotEmpty)
+        'Next time give changes: [{summary, files}] with fixed, so the user '
+            'can undo one change.',
+    ];
+    return lines.isEmpty ? '' : '\n\n${lines.join('\n')}';
+  }
+
+  /// `get_note_diff`: the patch of one round, or of one change of it.
+  Future<Map<String, Object?>> _getNoteDiff(Map<String, Object?> input) async {
+    final id = _id(input);
+    final note = await _sentNote(id);
+    if (note == null) return _notFound(id);
+    final asked = input['round'];
+    if (asked != null && asked is! int) {
+      throw const _InvalidParams('round is a number');
+    }
+    final change = input['change'];
+    if (change != null && change is! String) {
+      throw const _InvalidParams('change is a change id, for example c1');
+    }
+    final stored = note['rounds'];
+    final rounds = [
+      for (final r in stored is List<Object?> ? stored : const <Object?>[])
+        if (r is Map<String, Object?>) ?NoteRound.fromJson(r),
+    ];
+    final closed = rounds.where((r) => !r.isOpen).toList();
+    final round = asked == null
+        ? closed.lastOrNull
+        : rounds.where((r) => r.n == asked).firstOrNull;
+    if (round == null) {
+      return _text(
+        asked == null
+            ? 'Note $id has no finished round yet.'
+            : 'Note $id has no round $asked. It has: '
+                  '${rounds.map((r) => r.n).join(', ')}.',
+        isError: true,
+      );
+    }
+    if (round.isOpen) {
+      return _text('Round ${round.n} is still open.', isError: true);
+    }
+    final changes = [
+      for (final c in round.changes)
+        if (change == null || c.id == change) c,
+    ];
+    if (changes.isEmpty) {
+      return _text(
+        change == null
+            ? 'Round ${round.n} has no changes.'
+            : 'Round ${round.n} has no change $change. It has: '
+                  '${round.changes.map((c) => c.id).join(', ')}.',
+        isError: true,
+      );
+    }
+    final files = {
+      for (final c in changes)
+        for (final f in c.files) f.path: f,
+    };
+    final head = [
+      'Round ${round.n} of $id'
+          '${change == null ? '' : ', change $change'}'
+          '${round.undone.isEmpty ? '' : ' (undone: ${round.undone.join(', ')})'}:',
+      for (final c in changes) '  ${c.id}: ${c.summary}',
+      'Files (relative to the git top level):',
+      for (final f in files.values)
+        '  ${f.path}'
+            '${f.added == null ? '' : ' +${f.added} -${f.removed}'}'
+            '${f.shared ? ' (shared: another note changed it too)' : ''}',
+    ];
+    final cp = await store.checkpoints;
+    if (cp == null || !round.hasCheckpoints) {
+      return _text(
+        '${head.join('\n')}\n'
+        'No patch: this round has no git checkpoints. The files are the ones '
+        'you named.',
+      );
+    }
+    final patch = await cp.patch(
+      round.start!,
+      round.end!,
+      paths: files.keys.toList(),
+    );
+    if (patch == null) {
+      return _text(
+        '${head.join('\n')}\nNo patch: git could not read the checkpoints.',
+        isError: true,
+      );
+    }
+    final bytes = utf8.encode(patch).length;
+    if (bytes > mcpMaxDiffBytes) {
+      return _text(
+        '${head.join('\n')}\n'
+        'The patch is ${(bytes / 1024).ceil()} KB, over the '
+        '${mcpMaxDiffBytes ~/ 1024} KB limit: files only. Ask for one '
+        'change at a time with change.',
+      );
+    }
+    return _text(
+      '${head.join('\n')}\n'
+      'The patch goes from before to after the round. To undo it, apply it '
+      'in reverse.\n\n$patch',
     );
   }
 

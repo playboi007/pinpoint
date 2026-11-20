@@ -4,6 +4,7 @@ import 'dart:math' as math;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pinpoint/src/model/annotation.dart';
+import 'package:pinpoint/src/model/note_round.dart';
 
 /// Milestone 4, build step 1: the payload model, fixed by a golden file
 /// before any collection code exists.
@@ -103,6 +104,31 @@ void main() {
           ),
         ],
       ),
+    ],
+    rounds: const [
+      {
+        'n': 1,
+        'startedAt': '2026-11-10T14:33:00.000Z',
+        'endedAt': '2026-11-10T14:39:00.000Z',
+        'start': '4b825dc642cb6eb9a060e54bf8d69288fbee4904',
+        'end': 'e69de29bb2d1d6434b8b29ae775ad8c2e48c5391',
+        'changes': [
+          {
+            'id': 'c1',
+            'summary': 'Let the label wrap',
+            'files': [
+              {
+                'path': 'lib/widgets/save_bar.dart',
+                'added': 4,
+                'removed': 1,
+                'shared': true,
+              },
+            ],
+          },
+        ],
+        'undone': <Object?>[],
+        'undo': null,
+      },
     ],
     siblings: const SiblingsInfo(
       parent: 'Row',
@@ -209,9 +235,60 @@ void main() {
     expect(Annotation.fromJson(old)!.stateOwners.single.dependencies, isEmpty);
   });
 
-  test('schema is version 10 and keys come in a fixed order', () {
+  test('schema 11: rounds only once the agent worked the note; a schema 10 '
+      'note still reads, with none', () {
+    final bare = example().copyWith(rounds: const []);
+    expect(bare.toJson().containsKey('rounds'), isFalse);
+
+    final json =
+        jsonDecode(jsonEncode(example().toJson())) as Map<String, Object?>;
+    final keys = json.keys.toList();
+    expect(keys.indexOf('rounds'), keys.indexOf('stateOwners') + 1);
+    final back = Annotation.fromJson(json)!;
+    final round = back.roundViews.single;
+    expect(round.n, 1);
+    expect(round.isOpen, isFalse);
+    expect(round.hasCheckpoints, isTrue);
+    expect(round.undo, isNull);
+    final change = round.changes.single;
+    expect((change.id, change.summary), ('c1', 'Let the label wrap'));
+    expect(change.files.single.path, 'lib/widgets/save_bar.dart');
+    expect(change.files.single.added, 4);
+    expect(change.shared, isTrue);
+    expect(round.isUndone('c1'), isFalse);
+    expect(jsonDecode(jsonEncode(back.toJson())), json);
+
+    final old = jsonDecode(jsonEncode(json)) as Map<String, Object?>
+      ..['schema'] = 10
+      ..remove('rounds');
+    final read = Annotation.fromJson(old)!;
+    expect(read.rounds, isEmpty);
+    expect(read.toJson().containsKey('rounds'), isFalse);
+    // A broken round is passed over, not an error.
+    old['rounds'] = [
+      'x',
+      {'summary': 'no number'},
+    ];
+    expect(Annotation.fromJson(old)!.rounds, isEmpty);
+  });
+
+  test('a round that is open, or undone by "*", reads as such', () {
+    final open = NoteRound.fromJson({'n': 2, 'start': 'a'})!;
+    expect(open.isOpen, isTrue);
+    expect(open.hasCheckpoints, isFalse);
+    final undone = NoteRound.fromJson({
+      'n': 1,
+      'endedAt': '2026-11-10T14:39:00Z',
+      'undone': ['*'],
+      'undo': 'requested',
+    })!;
+    expect(undone.isUndone('c9'), isTrue);
+    expect(undone.undo, RoundUndo.requested);
+  });
+
+  test('schema is version 11 and keys come in a fixed order', () {
     final json = example().toJson();
-    expect(json['schema'], 10);
+    expect(json['schema'], 11);
     expect(json.keys.take(6), [
       'schema',
       'id',

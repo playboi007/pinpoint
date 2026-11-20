@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pinpoint/pinpoint.dart';
 import 'package:pinpoint/src/bridge/bridge_server.dart';
+import 'package:pinpoint/src/bridge/note_rounds.dart';
+import 'package:pinpoint/src/model/note_round.dart';
 import 'package:pinpoint/src/sink/bridge_client.dart';
 
 /// Milestone 8, build step 3 (second part): the app's bridge client against
@@ -123,6 +125,62 @@ void main() {
     await client.delete('pp_a', client: 'tab_a');
     expect((await client.changes(start, client: 'tab_a')).deleted, isEmpty);
     expect((await client.changes(start)).deleted, ['pp_a']);
+  });
+
+  test('undo: with no git the bridge asks the agent, and the answer carries '
+      'the note (PLAN-v3 Milestone 20)', () async {
+    await client.save(note('pp_a', status: NoteStatus.submitted));
+    await client.update('pp_a', status: NoteStatus.inProgress);
+    // The agent closes round 1 through MCP-like store calls.
+    await bridge.store.update('pp_a', status: NoteStatus.fixed);
+    await bridge.store.update(
+      'pp_a',
+      status: NoteStatus.fixed,
+      changes: [
+        ChangeLabel('Spacing', ['lib/a.dart']),
+      ],
+      from: 'agent',
+    );
+    final fixed = (await client.load()).notes.single;
+    final round = fixed.roundViews.single;
+    expect(round.isOpen, isFalse);
+    expect(round.hasCheckpoints, isFalse);
+    expect(round.changes.single.id, 'c1');
+
+    final since = (await client.load()).cursor;
+    final result = await client.undo(
+      'pp_a',
+      round.n,
+      ['c1'],
+      reason: 'No',
+      client: 'tab_a',
+    );
+    expect(result.undo, 'requested');
+    expect(result.isRequested, isTrue);
+    expect(result.reverted, isEmpty);
+    expect(result.conflicts, isEmpty);
+    expect(result.reloaded, isFalse);
+    expect(result.note!.status, NoteStatus.submitted);
+    expect(result.note!.roundViews.single.isUndone('c1'), isTrue);
+    expect(result.note!.roundViews.single.undo, RoundUndo.requested);
+    expect(result.note!.messages.last.text, contains('Reason: No'));
+    // The writer's own /changes leaves it out; another tab gets it.
+    expect((await client.changes(since, client: 'tab_a')).notes, isEmpty);
+    expect((await client.changes(since, client: 'tab_b')).notes, hasLength(1));
+
+    // A refusal throws with the status.
+    await expectLater(
+      client.undo('pp_a', 1, ['c1']),
+      throwsA(
+        isA<HttpSinkException>().having((e) => e.statusCode, 'status', 409),
+      ),
+    );
+    await expectLater(
+      client.undo('pp_none', 1, ['c1']),
+      throwsA(
+        isA<HttpSinkException>().having((e) => e.statusCode, 'status', 404),
+      ),
+    );
   });
 
   test('source and declaration: the app asks the bridge for code', () async {

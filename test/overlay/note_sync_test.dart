@@ -4,6 +4,7 @@ import 'package:pinpoint/pinpoint.dart';
 import 'package:pinpoint/src/bridge/bridge_protocol.dart';
 import 'package:pinpoint/src/core/note_book.dart';
 import 'package:pinpoint/src/core/note_sync.dart';
+import 'package:pinpoint/src/model/annotation.dart' show annotationSchema;
 import 'package:pinpoint/src/overlay/comment_form.dart';
 import 'package:pinpoint/src/overlay/note_view.dart';
 import 'package:pinpoint/src/overlay/pin_marker.dart';
@@ -311,6 +312,62 @@ void main() {
     await settle(tester);
     expect(controller.notes.byId(id), isNull);
     expect(pins(), findsNothing);
+  });
+
+  // PLAN-v3 Milestone 20, step 7: the undo goes through the sync with the
+  // tab's client id, and the note it answers with lands in the book.
+  testWidgets('undo sends the tab\'s client id and puts the answer in the '
+      'book', (tester) async {
+    bridge.notes['pp_a'] = {
+      'schema': annotationSchema,
+      'id': 'pp_a',
+      'createdAt': '2026-11-20T09:00:00Z',
+      'status': 'fixed',
+      'intent': 'bug',
+      'comment': 'Fix pp_a',
+      'app': {'buildMode': 'debug', 'platform': 'web'},
+      'page': <String, Object?>{},
+      'target': {'widget': 'Text', 'sourceUnavailable': true},
+    };
+    final errors = <String>[];
+    final sync = NoteSync(
+      client: BridgeClient(Uri.parse('http://127.0.0.1:4747')),
+      notes: NoteBook(),
+      onError: errors.add,
+    );
+    await sync.load();
+    expect(sync.notes.byId('pp_a')!.status, NoteStatus.fixed);
+
+    final result = await sync.undo(
+      'pp_a',
+      round: 2,
+      changes: ['c1', 'c3'],
+      reason: 'Too tight',
+    );
+    expect(result!.undo, 'done');
+    expect(result.isDone, isTrue);
+    expect(result.reverted, ['lib/a.dart']);
+    expect(result.reloaded, isTrue);
+    expect(bridge.undos.single, {
+      'round': 2,
+      'changes': ['c1', 'c3'],
+      'reason': 'Too tight',
+    });
+    final url = bridge.urls.lastWhere(
+      (u) => u.path == '/annotations/pp_a/undo',
+    );
+    expect(url.queryParameters['client'], sync.clientId);
+    // This tab's own write is left out of its /changes, so the book got the
+    // note from the answer.
+    final seen = sync.notes.byId('pp_a')!;
+    expect(seen.status, NoteStatus.submitted);
+    expect(seen.messages.last.from, 'user');
+    expect(errors, isEmpty);
+
+    // A refusal comes back as null, and the error is reported once.
+    expect(await sync.undo('pp_none', round: 1, changes: ['*']), isNull);
+    expect(errors.single, contains('Undo failed'));
+    sync.dispose();
   });
 
   // PLAN-v3 Milestone 19, steps 1 and 2: the long poll.
