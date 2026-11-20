@@ -286,7 +286,7 @@ void main() {
 
       final back = Annotation.fromJson(fitted.toJson())!;
       expect(back.trace, fitted.trace);
-      expect(fitted.toJson()['schema'], 8);
+      expect(fitted.toJson()['schema'], 9);
     });
   });
 }

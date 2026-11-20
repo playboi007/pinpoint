@@ -73,6 +73,58 @@ class TraceRedact {
     return '$head?${[for (final pair in query.split('&')) _pair(pair)].join('&')}';
   }
 
+  /// [url] for a note: every query value is masked, whatever its name
+  /// (a page URL can carry a session token under any name), and so is
+  /// every value in the query of a hash route (`/#/orders?token=x`) or in
+  /// a fragment that is only a query (`#access_token=x`). Names, path and
+  /// route stay. User info is masked.
+  String pageUrl(String url) {
+    var head = url;
+    var fragment = '';
+    var hasFragment = false;
+    final hash = head.indexOf('#');
+    if (hash >= 0) {
+      hasFragment = true;
+      fragment = head.substring(hash + 1);
+      head = head.substring(0, hash);
+    }
+    var query = '';
+    var hasQuery = false;
+    final mark = head.indexOf('?');
+    if (mark >= 0) {
+      hasQuery = true;
+      query = head.substring(mark + 1);
+      head = head.substring(0, mark);
+    }
+    final authority = RegExp(r'^([a-zA-Z][a-zA-Z0-9+.-]*://)([^/?#]*)@');
+    head = head.replaceFirstMapped(authority, (m) => '${m[1]}$mask@');
+    final buffer = StringBuffer(head);
+    if (hasQuery) buffer.write('?${_maskValues(query)}');
+    if (hasFragment) {
+      final route = fragment.indexOf('?');
+      if (route >= 0) {
+        buffer.write(
+          '#${fragment.substring(0, route)}?'
+          '${_maskValues(fragment.substring(route + 1))}',
+        );
+      } else if (!fragment.startsWith('/') && fragment.contains('=')) {
+        buffer.write('#${_maskValues(fragment)}');
+      } else {
+        buffer.write('#$fragment');
+      }
+    }
+    return buffer.toString();
+  }
+
+  /// The pairs of [query] with every value masked; a pair with no `=`
+  /// stays.
+  String _maskValues(String query) => [
+    for (final pair in query.split('&'))
+      pair.contains('=')
+          ? '${pair.substring(0, pair.indexOf('='))}=$mask'
+          : pair,
+  ].join('&');
+
   String _pair(String pair) {
     final eq = pair.indexOf('=');
     if (eq < 0) return pair;

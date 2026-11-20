@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
@@ -17,11 +18,59 @@ class FakeBridge {
   /// Every request, as `METHOD /path`.
   final List<String> requests = <String>[];
 
+  /// Every request's URL, for the query a test checks.
+  final List<Uri> urls = <Uri>[];
+
   /// When true, every request fails as if the bridge were stopped.
   bool offline = false;
 
+  /// When true, `GET /changes?wait=…` is held until a change comes or
+  /// [releasePolls] says the wait is over, as the real bridge does. Else
+  /// it answers at once, as a bridge that does not know `wait`.
+  bool longPoll = false;
+
   int _seq = 0;
   final Map<String, int> _changed = {};
+
+  /// The `client` query of the last write to each note; absent for the
+  /// agent's changes.
+  final Map<String, String> _changedBy = {};
+
+  /// Made by the request that holds, so it belongs to the test's zone: a
+  /// completer made in `setUp` would not wake a fake-async continuation.
+  Completer<void>? _wake;
+  int _releases = 0;
+
+  /// Ends every held `/changes` request with what it has (an empty answer
+  /// when nothing changed): the wait ran out.
+  void releasePolls() {
+    _releases++;
+    _wakeHolders();
+  }
+
+  void _wakeHolders() {
+    final waiting = _wake;
+    _wake = null;
+    waiting?.complete();
+  }
+
+  void _touch(String id, {String? client}) {
+    _changed[id] = ++_seq;
+    if (client == null) {
+      _changedBy.remove(id);
+    } else {
+      _changedBy[id] = client;
+    }
+    _wakeHolders();
+  }
+
+  List<Map<String, Object?>> _since(int since, String? client) => [
+    for (final MapEntry(key: id, value: seq) in _changed.entries)
+      if (seq > since && (client == null || _changedBy[id] != client))
+        _deleted.contains(id)
+            ? {'id': id, 'deleted': true}
+            : {'id': id, 'status': notes[id]!['status'], 'note': notes[id]},
+  ];
   final Set<String> _deleted = {};
 
   /// Tapes as the app posted them: `{tape, bodies}` by id.
@@ -51,7 +100,7 @@ class FakeBridge {
         'text': 'Checks ${passed ? 'passed' : 'failed'}',
       },
     ];
-    _changed[id] = ++_seq;
+    _touch(id);
   }
 
   /// What the agent does through `update_note`.
@@ -64,13 +113,14 @@ class FakeBridge {
         {'at': '2026-11-10T15:00:00Z', 'from': 'agent', 'text': message},
       ];
     }
-    _changed[id] = ++_seq;
+    _touch(id);
   }
 
   /// Answers [request] as the bridge would.
   Future<http.Response> handle(http.Request request) async {
     final path = request.url.path;
     requests.add('${request.method} $path');
+    urls.add(request.url);
     if (offline) throw http.ClientException('Connection refused');
     final query = request.url.queryParameters;
     final id = path.startsWith('/annotations/')
@@ -111,7 +161,7 @@ class FakeBridge {
         (note['screenshot'] as Map<String, Object?>?)?.remove('data');
         note['status'] ??= 'submitted';
         notes[note['id']! as String] = note;
-        _changed[note['id']! as String] = ++_seq;
+        _touch(note['id']! as String, client: query['client']);
         return _json({'id': note['id']}, 201);
       case ('GET', '/annotations'):
         final statuses = query['status']?.split(',').toSet();
@@ -125,21 +175,16 @@ class FakeBridge {
       case ('GET', '/changes'):
         final since = int.tryParse(query['since'] ?? '');
         if (since == null) return _json({'cursor': '$_seq', 'reset': true});
-        return _json({
-          'cursor': '$_seq',
-          'reset': false,
-          'changes': [
-            for (final MapEntry(key: id, value: seq) in _changed.entries)
-              if (seq > since)
-                _deleted.contains(id)
-                    ? {'id': id, 'deleted': true}
-                    : {
-                        'id': id,
-                        'status': notes[id]!['status'],
-                        'note': notes[id],
-                      },
-          ],
-        });
+        final client = query['client'];
+        var found = _since(since, client);
+        if (longPoll && query['wait'] != null) {
+          final released = _releases;
+          while (found.isEmpty && _releases == released) {
+            await (_wake ??= Completer<void>()).future;
+            found = _since(since, client);
+          }
+        }
+        return _json({'cursor': '$_seq', 'reset': false, 'changes': found});
     }
     if (id != null) {
       final note = notes[id];
@@ -164,12 +209,12 @@ class FakeBridge {
               {'at': '2026-11-10T15:00:00Z', 'from': 'user', 'text': text},
             ];
           }
-          _changed[id] = ++_seq;
+          _touch(id, client: query['client']);
           return _json(note);
         case 'DELETE':
           notes.remove(id);
           _deleted.add(id);
-          _changed[id] = ++_seq;
+          _touch(id, client: query['client']);
           return _json({'id': id, 'deleted': true});
       }
     }

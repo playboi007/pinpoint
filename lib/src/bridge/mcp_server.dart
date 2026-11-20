@@ -274,7 +274,7 @@ class McpServer {
     'description':
         'compact: comment, source and rect. standard (default): adds layout, '
         'enclosing widgets and the screenshot. full: adds properties, '
-        'subtree and environment.',
+        'subtree, state owners and environment.',
   };
 
   Future<Map<String, Object?>> _call(Map<String, Object?> args) async {

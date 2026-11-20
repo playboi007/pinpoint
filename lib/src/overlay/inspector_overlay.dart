@@ -11,6 +11,7 @@ import '../agent/agent_control.dart' show AgentCancel;
 import '../agent/command_channel.dart';
 import '../agent/commands.dart';
 import '../agent/reload_counter.dart';
+import '../bridge/bridge_protocol.dart' show annotationsPath;
 import '../capture/context_collector.dart';
 import '../capture/screenshot.dart';
 import '../core/note_sync.dart';
@@ -263,7 +264,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
       sinks: widget.config.sinks,
     );
     if (client == null) return null;
-    return NoteSync(
+    final sync = NoteSync(
       client: client,
       notes: widget.controller.notes,
       // Two tabs of different apps can poll one bridge. Each loads only
@@ -281,6 +282,13 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
         if (mounted) _toasts.show(_short(message), error: true);
       },
     );
+    // A note sent through the bridge sink is this tab's own write too.
+    for (final sink in widget.config.sinks) {
+      if (sink is HttpSink && sink.url.path == annotationsPath) {
+        sink.clientId = sync.clientId;
+      }
+    }
+    return sync;
   }
 
   late final NoteActions _noteActions = NoteActions(

@@ -240,7 +240,7 @@ void main() {
     };
     for (final (detail, has, hasNot) in [
       ('compact', 'Source: lib/home.dart:12:5', 'Enclosing:'),
-      ('standard', 'Enclosing: Column (lib/home.dart:10:3)', 'Subtree:'),
+      ('standard', 'Enclosing: Column (lib/home.dart:10)', 'Subtree:'),
       ('full', 'Subtree:', 'Comment:'),
     ]) {
       final app = appTakesOne(

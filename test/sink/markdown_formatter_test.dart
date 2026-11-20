@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pinpoint/pinpoint.dart';
+import 'package:pinpoint/src/model/annotation.dart' show traceNotRecorded;
 import 'package:pinpoint/src/sink/markdown_formatter.dart';
 
 /// Milestone 7, build step 1: the Markdown the agent reads, as a pure
@@ -66,7 +67,6 @@ void main() {
         ),
       ),
     ],
-    frameworkChain: const ['RichText', 'Text', 'DefaultTextStyle'],
     siblings: const SiblingsInfo(
       parent: 'Row',
       index: 1,
@@ -134,7 +134,8 @@ void main() {
       expect(lines[0], '# Pinpoint pp_20261110_143205_a1f3 (improve)');
       expect(lines[2], 'Comment: Label truncates at narrow widths');
       expect(lines[4], 'Target: Text("Save changes")');
-      expect(lines[5], 'Source: lib/widgets/save_bar.dart:42:18');
+      expect(lines[5], 'Root: /Users/me/app');
+      expect(lines[6], 'Source: lib/widgets/save_bar.dart:42:18');
     });
 
     test('lists the enclosing local widgets, nearest first', () {
@@ -186,6 +187,156 @@ void main() {
       expect(text, isNot(contains('Enclosing:')));
       expect(text, isNot(contains('Screenshot:')));
     });
+  });
+
+  // PLAN-v3 Milestone 19, step 6: one Root line, paths relative to it, and
+  // a file printed once per run of rows.
+  group('short paths', () {
+    const root = '/Users/me/app';
+    const toolbar = '$root/lib/features/detail/detail_toolbar.dart';
+    const screen = '$root/lib/features/product_detail_screen.dart';
+    Map<String, Object?> src(String file, int line, [int column = 4]) => {
+      'file': file,
+      'line': line,
+      'column': column,
+    };
+
+    Map<String, Object?> note({String? projectRoot = root}) => {
+      'id': 'pp_1',
+      'intent': 'bug',
+      'comment': 'Space',
+      'app': {'projectRoot': projectRoot},
+      'target': {'widget': 'Row', 'source': src(toolbar, 50, 16)},
+      'ancestors': [
+        {'widget': 'Container', 'source': src(toolbar, 45)},
+        {'widget': 'BxLandmark', 'source': src(toolbar, 43)},
+        {'widget': 'DetailToolbar', 'source': src(screen, 278)},
+        {'widget': 'Column', 'source': src(screen, 273)},
+        {'widget': 'Mystery'},
+        {'widget': 'Row', 'source': src(screen, 267)},
+        {'widget': 'Padding', 'source': src(toolbar, 12)},
+      ],
+      'subtree':
+          'Row  $toolbar:50\n'
+          '  _SearchField  $toolbar:52\n'
+          '    ConstrainedBox  $toolbar:223 …\n'
+          '  BxFiltersButton  $screen:57\n'
+          '    Opaque\n'
+          '    Text  $screen:60\n'
+          '  Gap  /elsewhere/other.dart:3',
+    };
+
+    test('one Root line, then every path relative to it', () {
+      final text = markdownFromJson(note());
+      expect(text, contains('Root: $root\n'));
+      expect(
+        text,
+        contains('Source: lib/features/detail/detail_toolbar.dart:50:16\n'),
+      );
+      expect(text, isNot(contains('$root/')));
+    });
+
+    test('Enclosing prints the file once per run of rows', () {
+      expect(
+        markdownFromJson(note()),
+        contains(
+          'Enclosing: Container (lib/features/detail/detail_toolbar.dart:45) '
+          '< BxLandmark :43 '
+          '< DetailToolbar (lib/features/product_detail_screen.dart:278) '
+          '< Column :273 < Mystery '
+          '< Row :267 '
+          '< Padding (lib/features/detail/detail_toolbar.dart:12)',
+        ),
+      );
+    });
+
+    test('Subtree prints the file once per run of rows', () {
+      expect(
+        markdownFromJson(note()),
+        contains(
+          'Subtree:\n'
+          '  Row  lib/features/detail/detail_toolbar.dart:50\n'
+          '    _SearchField  :52\n'
+          '      ConstrainedBox  :223 …\n'
+          '    BxFiltersButton  lib/features/product_detail_screen.dart:57\n'
+          '      Opaque\n'
+          '      Text  :60\n'
+          '    Gap  /elsewhere/other.dart:3\n',
+        ),
+      );
+    });
+
+    test('a note with no root keeps its paths as they are', () {
+      final text = markdownFromJson(note(projectRoot: null));
+      expect(text, isNot(contains('Root:')));
+      expect(text, contains('Source: $toolbar:50:16'));
+    });
+
+    test('a path that only starts like the root is not cut', () {
+      final other = note()
+        ..['target'] = {
+          'widget': 'Row',
+          'source': src('$root-two/lib/a.dart', 1),
+        };
+      expect(markdownFromJson(other), contains('Source: $root-two/lib/a.dart'));
+    });
+
+    test('the tweak lines use short paths too', () {
+      final tweaked = note()
+        ..['tweaks'] = [
+          {
+            'property': 'padding',
+            'from': 'a',
+            'to': 'b',
+            'nearestLocal': {'widget': 'Row', 'source': src(toolbar, 50)},
+          },
+        ];
+      expect(
+        markdownFromJson(tweaked),
+        contains('in Row at lib/features/detail/detail_toolbar.dart:50:4'),
+      );
+    });
+
+    test('state owners are one line, with short paths', () {
+      final owned = note()
+        ..['stateOwners'] = [
+          {'kind': 'state', 'type': '_CartState', 'source': src(screen, 12)},
+          {'kind': 'provider', 'type': 'CartModel', 'source': null},
+        ];
+      expect(
+        markdownFromJson(owned),
+        contains(
+          'State owners: state _CartState '
+          '(lib/features/product_detail_screen.dart:12), provider CartModel\n',
+        ),
+      );
+    });
+  });
+
+  test('"rebuilds not recorded" is not in the text', () {
+    final noted = {
+      'id': 'pp_1',
+      'trace': {
+        'seconds': 10,
+        'lines': [
+          traceNotRecorded,
+          '$traceNotRecorded for seq 3-9',
+          '282  +124.69s  f5770  error  AssertionError: boom',
+        ],
+      },
+    };
+    final text = markdownFromJson(noted);
+    expect(text, isNot(contains('not recorded')));
+    expect(text, contains('What happened (10 s before the pick):'));
+    expect(text, contains('282  +124.69s  f5770  error  AssertionError: boom'));
+    // Nothing else in the window: no section at all.
+    final bare = markdownFromJson({
+      'id': 'pp_1',
+      'trace': {
+        'lines': [traceNotRecorded],
+      },
+    });
+    expect(bare, isNot(contains('What happened')));
   });
 
   group('compactConstraints', () {

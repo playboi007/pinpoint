@@ -127,5 +127,4 @@ Map<String, Object?> _note(String id) => {
   },
   'messages': const <Object?>[],
   'ancestors': const <Object?>[],
-  'frameworkChain': const <Object?>[],
 };

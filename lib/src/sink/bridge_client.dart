@@ -103,11 +103,12 @@ class BridgeClient {
     );
   }
 
-  /// Stores [note] (a draft, or any note) with its image.
-  Future<void> save(Annotation note) async {
+  /// Stores [note] (a draft, or any note) with its image. [client] is the
+  /// writing tab's id: its own `/changes` leaves this write out.
+  Future<void> save(Annotation note, {String? client}) async {
     await _send(
       'POST',
-      _at(annotationsPath),
+      _at(annotationsPath, {'client': ?client}),
       body: note.toJson(includeScreenshotData: true),
     );
   }
@@ -118,29 +119,48 @@ class BridgeClient {
     NoteStatus? status,
     String? comment,
     String? message,
+    String? client,
   }) async {
     final json = await _send(
       'PATCH',
-      _at('$annotationsPath/$id'),
+      _at('$annotationsPath/$id', {'client': ?client}),
       body: {'status': ?status?.name, 'comment': ?comment, 'message': ?message},
     );
     return Annotation.fromJson(json);
   }
 
   /// Deletes the note [id]. A note the bridge does not have is fine.
-  Future<void> delete(String id) async {
+  Future<void> delete(String id, {String? client}) async {
     try {
-      await _send('DELETE', _at('$annotationsPath/$id'));
+      await _send('DELETE', _at('$annotationsPath/$id', {'client': ?client}));
     } on HttpSinkException catch (error) {
       if (error.statusCode != 404) rethrow;
     }
   }
 
   /// What changed since [cursor], for notes of [origin] when given.
-  Future<BridgeChanges> changes(String cursor, {String? origin}) async {
+  ///
+  /// With [wait], the bridge holds the answer until there is a change, for
+  /// at most [wait] (an older bridge answers at once). With [client], the
+  /// bridge leaves out the changes that tab wrote itself. An [http.Client]
+  /// passed in stays open: the caller closes it to end a held request.
+  Future<BridgeChanges> changes(
+    String cursor, {
+    String? origin,
+    Duration? wait,
+    String? client,
+    http.Client? connection,
+  }) async {
     final json = await _send(
       'GET',
-      _at(changesPath, {'since': cursor, 'origin': ?origin}),
+      _at(changesPath, {
+        'since': cursor,
+        'origin': ?origin,
+        if (wait != null) 'wait': '${wait.inSeconds}',
+        'client': ?client,
+      }),
+      client: connection,
+      timeout: wait == null ? null : wait + const Duration(seconds: 10),
     );
     final notes = <Annotation>[];
     final deleted = <String>[];

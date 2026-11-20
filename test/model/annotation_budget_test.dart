@@ -12,7 +12,7 @@ void main() {
     String comment = 'Label truncates',
     int properties = 20,
     int subtreeLines = 40,
-    int chain = 40,
+    int owners = 4,
     int ancestors = 12,
     String text = 'Save changes',
   }) => Annotation(
@@ -42,7 +42,14 @@ void main() {
           source: SourceRef(file: 'lib/widgets/a_$i.dart', line: i, column: 1),
         ),
     ],
-    frameworkChain: [for (var i = 0; i < chain; i++) '_FrameworkWidget$i'],
+    stateOwners: [
+      for (var i = 0; i < owners; i++)
+        StateOwnerInfo(
+          kind: 'state',
+          type: '_Owner${i}State',
+          source: SourceRef(file: 'lib/widgets/o_$i.dart', line: i, column: 1),
+        ),
+    ],
     siblings: SiblingsInfo(
       parent: 'Column',
       index: 6,
@@ -57,7 +64,7 @@ void main() {
   );
 
   test('a note under the budget is unchanged', () {
-    final small = note(properties: 2, subtreeLines: 3, chain: 4);
+    final small = note(properties: 2, subtreeLines: 3, owners: 1);
     final fitted = small.fitToBudget();
     expect(bytes(fitted), bytes(small));
     expect(fitted.truncated, isEmpty);
@@ -114,7 +121,7 @@ void main() {
       comment: '漢' * 3000,
       properties: 0,
       subtreeLines: 1,
-      chain: 1,
+      owners: 1,
       ancestors: 1,
     ).fitToBudget();
     expect(bytes(wide), lessThanOrEqualTo(maxPayloadBytes));

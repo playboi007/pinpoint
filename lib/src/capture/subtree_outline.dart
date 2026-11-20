@@ -11,6 +11,11 @@ import '../search/source_resolver.dart';
 ///   RichText
 /// ```
 ///
+/// With creation locations on (debug), a row with no location is left
+/// out: it is a framework internal (`SizedBox.shrink`, `_InputPadding`)
+/// that the agent cannot open. Its children that have a location show at
+/// its depth, so the outline keeps its shape. The root row always shows.
+///
 /// At most [maxDepth] levels; a node on the last level that has children
 /// ends in " …". At most [maxNodes] lines; when nodes are left out, a last
 /// line "…" says so. A child list that throws is skipped (engineering rule
@@ -24,9 +29,14 @@ String subtreeOutline(
 }) {
   final lines = <String>[];
   var cut = false;
+  final lean = resolver.available;
+  // Left-out rows cost nothing in lines, so a busy framework subtree must
+  // not run the walk on for long.
+  var visited = 0;
+  const maxVisited = 600;
 
   void visit(Element element, int depth) {
-    if (lines.length >= maxNodes) {
+    if (++visited > maxVisited) {
       cut = true;
       return;
     }
@@ -36,10 +46,23 @@ String subtreeOutline(
     } catch (_) {
       children.clear();
     }
-    final line = StringBuffer('  ' * depth)
-      ..write(clipText(shortLabel(element), maxLabel));
     final entry = resolver.entryOf(element);
     final location = entry.location;
+    if (lean &&
+        !identical(element, root) &&
+        !(entry.isLocal && location != null)) {
+      for (final child in children) {
+        visit(child, depth);
+        if (cut) return;
+      }
+      return;
+    }
+    if (lines.length >= maxNodes) {
+      cut = true;
+      return;
+    }
+    final line = StringBuffer('  ' * depth)
+      ..write(clipText(shortLabel(element), maxLabel));
     if (entry.isLocal && location != null) {
       line.write(
         '  ${resolver.paths.relativePath(location.uri)}:${location.line}',

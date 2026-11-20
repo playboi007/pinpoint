@@ -93,6 +93,38 @@ void main() {
     expect(after.deleted, ['pp_a']);
   });
 
+  test('changes: client leaves out the tab\'s own writes, wait holds the '
+      'answer', () async {
+    final start = (await client.load()).cursor;
+    await client.save(note('pp_a'), client: 'tab_a');
+    await client.update('pp_a', comment: 'Edited', client: 'tab_a');
+    expect((await client.changes(start, client: 'tab_a')).notes, isEmpty);
+    expect(
+      [
+        for (final n in (await client.changes(start, client: 'tab_b')).notes)
+          n.id,
+      ],
+      ['pp_a'],
+    );
+
+    // Held: an empty answer after the wait.
+    final clock = Stopwatch()..start();
+    final held = await client.changes(
+      start,
+      client: 'tab_a',
+      wait: const Duration(seconds: 1),
+    );
+    expect(held.notes, isEmpty);
+    expect(
+      clock.elapsed,
+      greaterThanOrEqualTo(const Duration(milliseconds: 900)),
+    );
+
+    await client.delete('pp_a', client: 'tab_a');
+    expect((await client.changes(start, client: 'tab_a')).deleted, isEmpty);
+    expect((await client.changes(start)).deleted, ['pp_a']);
+  });
+
   test('a stopped bridge throws an HttpSinkException', () async {
     await bridge.close();
     await expectLater(client.load(), throwsA(isA<HttpSinkException>()));

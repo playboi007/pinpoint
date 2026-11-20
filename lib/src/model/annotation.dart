@@ -19,7 +19,10 @@ import '../sink/markdown_formatter.dart';
 /// 7 (PLAN-v2 Milestone 13): `trace`, what happened in the seconds before
 /// the pick.
 /// 8 (PLAN-v2 Milestone 15): `tape`, the tape attached to the note.
-const int annotationSchema = 8;
+/// 9 (PLAN-v3 Milestone 19): `stateOwners`; `frameworkChain` is gone (an
+/// older note that has it still reads, and the field is ignored), and
+/// `page.url` has its query values masked.
+const int annotationSchema = 9;
 
 /// The start of the first line of a note's trace when rebuilds were not
 /// recorded in all or part of its window (PLAN-v2 Milestone 13, step 12).
@@ -129,7 +132,7 @@ class Annotation {
     this.anchor,
     this.messages = const <NoteMessage>[],
     this.ancestors = const <AncestorInfo>[],
-    this.frameworkChain = const <String>[],
+    this.stateOwners = const <StateOwnerInfo>[],
     this.siblings,
     this.subtree,
     this.inherited,
@@ -167,8 +170,10 @@ class Annotation {
   /// Local widgets above the target, nearest first.
   final List<AncestorInfo> ancestors;
 
-  /// Type names from the picked widget up, framework widgets included.
-  final List<String> frameworkChain;
+  /// The objects that hold state for the target, nearest first, at most 4
+  /// (PLAN-v3 Milestone 19, step 4): a local `State`, or a provider-like
+  /// scope. Input for the state lens.
+  final List<StateOwnerInfo> stateOwners;
 
   final SiblingsInfo? siblings;
 
@@ -240,7 +245,7 @@ class Annotation {
     List<NoteMessage>? messages,
     TargetInfo? target,
     List<AncestorInfo>? ancestors,
-    List<String>? frameworkChain,
+    List<StateOwnerInfo>? stateOwners,
     SiblingsInfo? Function()? siblings,
     String? Function()? subtree,
     ScreenshotInfo? Function()? screenshot,
@@ -265,7 +270,7 @@ class Annotation {
     anchor: anchor == null ? this.anchor : anchor(),
     messages: messages ?? this.messages,
     ancestors: ancestors ?? this.ancestors,
-    frameworkChain: frameworkChain ?? this.frameworkChain,
+    stateOwners: stateOwners ?? this.stateOwners,
     siblings: siblings == null ? this.siblings : siblings(),
     subtree: subtree == null ? this.subtree : subtree(),
     inherited: inherited,
@@ -296,7 +301,7 @@ class Annotation {
   ///
   /// Each step runs only while the note is still too large, least useful
   /// part first: the subtree, then long property values, then the sibling
-  /// and framework lists. The comment, the source and the rect are what the
+  /// and state owner lists. The comment, the source and the rect are what the
   /// agent acts on; the comment is cut only as the last resort. Each part
   /// cut is named once in [truncated].
   Annotation fitToBudget({int maxBytes = maxPayloadBytes}) {
@@ -345,10 +350,10 @@ class Annotation {
     ('target.properties', (a) => a._target(a.target._clipProperties(60))),
     ('siblings', (a) => a._siblingWindow(5)),
     (
-      'frameworkChain',
-      (a) => a.frameworkChain.length <= 12
+      'stateOwners',
+      (a) => a.stateOwners.length <= 2
           ? null
-          : a.copyWith(frameworkChain: a.frameworkChain.take(12).toList()),
+          : a.copyWith(stateOwners: a.stateOwners.take(2).toList()),
     ),
     (
       'ancestors',
@@ -365,10 +370,10 @@ class Annotation {
     ),
     ('target.properties', (a) => a._target(a.target._firstProperties(8))),
     (
-      'frameworkChain',
-      (a) => a.frameworkChain.isEmpty
+      'stateOwners',
+      (a) => a.stateOwners.isEmpty
           ? null
-          : a.copyWith(frameworkChain: const <String>[]),
+          : a.copyWith(stateOwners: const <StateOwnerInfo>[]),
     ),
     (
       'siblings',
@@ -506,9 +511,10 @@ class Annotation {
               source: SourceRef._fromJson(a['source']),
             ),
       ],
-      frameworkChain: [
-        for (final n in _listOrEmpty(json['frameworkChain']))
-          if (n is String) n,
+      // An older note's `frameworkChain` is ignored.
+      stateOwners: [
+        for (final o in _listOrEmpty(json['stateOwners']))
+          ?StateOwnerInfo._fromJson(o),
       ],
       siblings: SiblingsInfo._fromJson(json['siblings']),
       subtree: _stringOrNull(json['subtree']),
@@ -549,7 +555,8 @@ class Annotation {
     'anchor': anchor?.toJson(),
     'messages': [for (final m in messages) m.toJson()],
     'ancestors': [for (final a in ancestors) a.toJson()],
-    'frameworkChain': frameworkChain,
+    if (stateOwners.isNotEmpty)
+      'stateOwners': [for (final o in stateOwners) o.toJson()],
     'siblings': siblings?.toJson(),
     'subtree': subtree,
     'inherited': inherited?.toJson(),
@@ -619,7 +626,8 @@ class PageInfo {
     locale: _stringOrNull(json['locale']),
   );
 
-  /// The browser's URL on web; null elsewhere.
+  /// The browser's URL on web; null elsewhere. Every query value is masked
+  /// (`?token=***`): a page URL can carry a session token.
   final String? url;
 
   /// The route name of the target's route, else from the URL.
@@ -846,6 +854,41 @@ class AncestorInfo {
 
   Map<String, Object?> toJson() => {
     'widget': widget,
+    'source': source?.toJson(),
+  };
+}
+
+/// An object that holds state for the target widget (PLAN-v3 Milestone
+/// 19, step 4).
+class StateOwnerInfo {
+  const StateOwnerInfo({required this.kind, required this.type, this.source});
+
+  static StateOwnerInfo? _fromJson(Object? json) {
+    if (json is! Map<String, Object?>) return null;
+    final kind = json['kind'];
+    final type = json['type'];
+    if (kind is! String || type is! String) return null;
+    return StateOwnerInfo(
+      kind: kind,
+      type: type,
+      source: SourceRef._fromJson(json['source']),
+    );
+  }
+
+  /// `state` (a `State` of a widget made in the project), `provider` (a
+  /// provider-like scope) or `notifier` (an `InheritedNotifier`).
+  final String kind;
+
+  /// For example `ProductDetailProvider`: the `State`'s type, or the value
+  /// type of the scope.
+  final String type;
+
+  /// The creating widget's file and line, when it is local.
+  final SourceRef? source;
+
+  Map<String, Object?> toJson() => {
+    'kind': kind,
+    'type': type,
     'source': source?.toJson(),
   };
 }

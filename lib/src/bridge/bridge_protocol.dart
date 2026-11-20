@@ -53,8 +53,27 @@ const String vmServiceFileName = 'vm-service.txt';
 /// How long the app holds a command poll open.
 const Duration commandWait = Duration(seconds: 25);
 
-/// How often the app asks [changesPath], only while the overlay is active.
+/// How often the app asks [changesPath] again after an error, or after an
+/// answer from a bridge that does not hold the request. Only while the
+/// overlay is active.
 const Duration pollInterval = Duration(seconds: 2);
+
+/// The longest the bridge holds a `GET /changes?wait=<seconds>` request
+/// when nothing changed. The app asks for this long.
+const Duration changesWait = Duration(seconds: 25);
+
+/// The hold time asked for by the `wait` query value [raw] (whole
+/// seconds): zero for none or a bad value, and at most [changesWait].
+Duration changesWaitOf(String? raw) {
+  final seconds = int.tryParse(raw ?? '');
+  if (seconds == null || seconds <= 0) return Duration.zero;
+  return Duration(seconds: seconds.clamp(1, changesWait.inSeconds));
+}
+
+/// The query name of the id that tells the bridge which tab wrote: on
+/// writes (`POST /annotations`, `PATCH`, `DELETE`) and on `/changes`, so a
+/// tab is not told about its own writes.
+const String clientQuery = 'client';
 
 /// The largest request body the bridge reads. Base64 makes the screenshot a
 /// third larger than its PNG.

@@ -40,7 +40,10 @@ class BridgeStartException implements Exception {
 /// - `GET /annotations?status=a,b&origin=o`: notes, to restore pins.
 /// - `PATCH /annotations/<id>`: `status`, `comment`, `intent`, `message`.
 /// - `DELETE /annotations/<id>`.
-/// - `GET /changes?since=<cursor>&origin=o`: what changed since a cursor.
+/// - `GET /changes?since=<cursor>&origin=o&wait=s&client=id`: what changed
+///   since a cursor. With `wait` (seconds, at most [changesWait]) the
+///   answer is held until there is a change. With `client`, the changes
+///   that client wrote itself are left out. The writes take `client` too.
 /// - `GET /health`.
 ///
 /// MCP for the agent: `POST /mcp` (Streamable HTTP with JSON answers; no
@@ -188,6 +191,7 @@ class PinPointBridge {
   Future<void> close() async {
     _expireTimer?.cancel();
     commands.close();
+    store.close();
     await _subscription.cancel();
     await _server.close(force: true);
   }
@@ -295,7 +299,10 @@ class PinPointBridge {
         case 'PATCH':
           return _patch(request, noteId);
         case 'DELETE':
-          return await store.delete(noteId)
+          return await store.delete(
+                noteId,
+                client: request.uri.queryParameters[clientQuery],
+              )
               ? _json(response, HttpStatus.ok, {'id': noteId, 'deleted': true})
               : _error(response, HttpStatus.notFound, 'No note $noteId');
       }
@@ -336,9 +343,21 @@ class PinPointBridge {
         });
       case ('GET', changesPath):
         final query = request.uri.queryParameters;
+        // Ends the hold when the app closes the request (the tab went
+        // away, or the overlay went idle).
+        final gone = Completer<void>();
+        unawaited(
+          response.done.then<void>(
+            (_) => gone.isCompleted ? null : gone.complete(),
+            onError: (Object _) => gone.isCompleted ? null : gone.complete(),
+          ),
+        );
         final changes = await store.changes(
           query['since'],
           origin: query['origin'],
+          client: query[clientQuery],
+          wait: changesWaitOf(query['wait']),
+          cancelled: gone.future,
         );
         return _json(response, HttpStatus.ok, changes.toJson());
     }
@@ -527,6 +546,7 @@ class PinPointBridge {
       comment: body['comment'] as String?,
       intent: body['intent'] as String?,
       message: body['message'] as String?,
+      client: request.uri.queryParameters[clientQuery],
     );
     _log('pinpoint: note $id is ${note['status']}');
     _json(response, HttpStatus.ok, note);
@@ -632,7 +652,12 @@ class PinPointBridge {
 
     // A draft sent again (now submitted) after an app restart has no image
     // data; its PNG is already here.
-    final path = await store.save(note, png, keepPng: png == null);
+    final path = await store.save(
+      note,
+      png,
+      keepPng: png == null,
+      client: request.uri.queryParameters[clientQuery],
+    );
 
     final comment = note['comment'];
     final summary = comment is String

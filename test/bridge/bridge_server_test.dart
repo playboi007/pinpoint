@@ -5,8 +5,8 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pinpoint/src/bridge/bridge_protocol.dart';
 import 'package:pinpoint/src/bridge/bridge_server.dart';
+import 'package:pinpoint/src/bridge/note_detail.dart';
 import 'package:pinpoint/src/model/annotation.dart' show annotationSchema;
-import 'package:pinpoint/src/sink/markdown_formatter.dart';
 
 /// Milestone 7, build step 2: the bridge as a plain Dart program, tested
 /// over real loopback sockets before any Flutter code calls it.
@@ -126,11 +126,23 @@ void main() {
       expect(shot.containsKey('data'), isFalse);
       expect(shot['file'], '$sampleId.png');
       expect(File('${open().path}/$sampleId.png').readAsBytesSync(), tinyPng);
+      // The bridge knows its project folder: it fills in what the app
+      // did not send, so the text can print short paths.
+      expect((json['app']! as Map<String, Object?>)['projectRoot'], root.path);
+      final md = File('${open().path}/$sampleId.md').readAsStringSync();
       expect(
-        File('${open().path}/$sampleId.md').readAsStringSync(),
-        markdownFromJson(json),
-        reason: 'the .md is the formatter run on the stored JSON',
+        md,
+        noteMarkdown(json),
+        reason: 'the .md is the standard text of the stored JSON',
       );
+      expect(md, startsWith('$sampleId (improve, submitted)\n'));
+      expect(md, contains('Root: ${root.path}\n'));
+      expect(
+        md,
+        endsWith('More: get_note detail full, or $sampleId.json\n'),
+        reason: 'one last line says where the rest is',
+      );
+      expect(md, isNot(contains('Subtree')));
     });
 
     test(
@@ -458,7 +470,6 @@ Map<String, Object?> sampleNote({Object? id = sampleId, Uint8List? png}) => {
     'sourceUnavailable': false,
   },
   'ancestors': const <Object?>[],
-  'frameworkChain': const <Object?>[],
   'siblings': null,
   'subtree': null,
   'inherited': null,

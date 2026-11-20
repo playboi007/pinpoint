@@ -59,7 +59,9 @@ String markdownFromJson(Map<String, Object?> json) {
     out.writeln('Text: ${_block(text)}');
   }
 
-  final source = _where(target['source'], column: true);
+  final root = projectRootOf(json);
+  if (root != null) out.writeln('Root: ${_line(root)}');
+  final source = _where(target['source'], column: true, root: root);
   if (source != null) {
     out.writeln('Source: $source');
   } else {
@@ -71,14 +73,7 @@ String markdownFromJson(Map<String, Object?> json) {
     );
   }
 
-  final enclosing = [
-    for (final ancestor in _list(json['ancestors']))
-      if (_map(ancestor) case final a when _string(a['widget']) != null)
-        _where(a['source']) == null
-            ? _line(_string(a['widget'])!)
-            : '${_line(_string(a['widget'])!)} (${_where(a['source'])})',
-  ];
-  if (enclosing.isNotEmpty) out.writeln('Enclosing: ${enclosing.join(' < ')}');
+  if (enclosingLine(json) case final enclosing?) out.writeln(enclosing);
 
   final viewport = _map(page['viewport']);
   final width = _number(viewport['width']);
@@ -125,6 +120,7 @@ String markdownFromJson(Map<String, Object?> json) {
   if (properties.isNotEmpty) {
     out.writeln('Properties: ${_line(properties.join(', '))}');
   }
+  if (stateOwnersLine(json) case final owners?) out.writeln(owners);
 
   final file = _string(shot['file']);
   if (file != null) {
@@ -173,7 +169,7 @@ String markdownFromJson(Map<String, Object?> json) {
     out
       ..writeln()
       ..writeln('Subtree:');
-    for (final line in subtree.split('\n')) {
+    for (final line in subtreeLines(json)) {
       out.writeln('  $line');
     }
   }
@@ -184,7 +180,13 @@ String markdownFromJson(Map<String, Object?> json) {
 /// then the compact trace lines indented. Empty without a trace.
 List<String> whatHappenedLines(Map<String, Object?> json) {
   final trace = _map(json['trace']);
-  final lines = [for (final l in _list(trace['lines'])) ?_string(l)];
+  // "rebuilds not recorded" says nothing about the problem (PLAN-v3
+  // Milestone 19, step 9): the lines of the run stay, that one goes.
+  final lines = [
+    for (final l in _list(trace['lines']))
+      if (_string(l) case final line? when !line.startsWith(traceNotRecorded))
+        line,
+  ];
   if (lines.isEmpty) return const <String>[];
   final seconds = _number(trace['seconds']);
   final partial = trace['partial'] == true;
@@ -304,6 +306,7 @@ const String tweakInstruction =
 /// from Padding, in Container at lib/widgets/save_bar.dart:31:12)`. Empty
 /// without tweaks; a malformed one is skipped.
 List<String> tweakLines(Map<String, Object?> json) {
+  final root = projectRootOf(json);
   final lines = <String>[];
   for (final item in _list(json['tweaks'])) {
     final tweak = _map(item);
@@ -313,7 +316,7 @@ List<String> tweakLines(Map<String, Object?> json) {
     if (property == null || from == null || to == null) continue;
     final local = _map(tweak['nearestLocal']);
     final widget = _string(local['widget']);
-    final where = _where(local['source'], column: true);
+    final where = _where(local['source'], column: true, root: root);
     final maker = [
       ?_string(tweak['renderType']),
       if (_string(tweak['createdBy']) case final by?) 'from $by',
@@ -353,16 +356,102 @@ String compactConstraints(String constraints) {
   return parts.isEmpty ? 'unconstrained' : parts.join(', ');
 }
 
-/// `file:line`, or `file:line:column` with [column], or null.
-String? _where(Object? source, {bool column = false}) {
+/// `file:line`, or `file:line:column` with [column], or null. A file
+/// under [root] is printed relative to it.
+String? _where(Object? source, {bool column = false, String? root}) {
   final s = _map(source);
   final file = _string(s['file']);
   final line = s['line'];
   if (file == null || line is! int) return null;
   final col = s['column'];
-  return column && col is int
-      ? '${_line(file)}:$line:$col'
-      : '${_line(file)}:$line';
+  final name = _line(shortFile(file, root));
+  return column && col is int ? '$name:$line:$col' : '$name:$line';
+}
+
+/// The project folder of [json] (a note), without a trailing slash, or
+/// null when the note has none. The app sets it with `PINPOINT_ROOT`; the
+/// bridge fills it in when the app did not.
+String? projectRootOf(Map<String, Object?> json) {
+  final root = _string(_map(json['app'])['projectRoot']);
+  if (root == null || root.trim().isEmpty) return null;
+  return root.length > 1 && root.endsWith('/')
+      ? root.substring(0, root.length - 1)
+      : root;
+}
+
+/// [file] relative to [root] when it is under it, else as it is.
+String shortFile(String file, String? root) =>
+    root != null && file.startsWith('$root/')
+    ? file.substring(root.length + 1)
+    : file;
+
+/// The `Enclosing:` line of [json] (a note), nearest first, or null
+/// without ancestors. The file is printed once per run of rows from one
+/// file, relative to the root: `Container (a/b.dart:45) < BxLandmark :43 <
+/// DetailToolbar (c.dart:278)`. [max] cuts the list.
+String? enclosingLine(Map<String, Object?> json, {int? max}) {
+  final root = projectRootOf(json);
+  final items = <String>[];
+  String? previous;
+  for (final ancestor in _list(json['ancestors'])) {
+    if (max != null && items.length >= max) break;
+    final a = _map(ancestor);
+    final widget = _string(a['widget']);
+    if (widget == null) continue;
+    final source = _map(a['source']);
+    final file = _string(source['file']);
+    final line = source['line'];
+    if (file == null || line is! int) {
+      items.add(_line(widget));
+    } else if (file == previous) {
+      items.add('${_line(widget)} :$line');
+    } else {
+      items.add('${_line(widget)} (${_line(shortFile(file, root))}:$line)');
+    }
+    if (file != null && line is int) previous = file;
+  }
+  return items.isEmpty ? null : 'Enclosing: ${items.join(' < ')}';
+}
+
+/// The rows of a note's `subtree` as text (`Name  file:line`), with each
+/// file relative to the root and printed once per run of rows from one
+/// file: later rows show `Name  :line`. Empty without a subtree.
+List<String> subtreeLines(Map<String, Object?> json) {
+  final subtree = _string(json['subtree']);
+  if (subtree == null || subtree.isEmpty) return const <String>[];
+  final root = projectRootOf(json);
+  final row = RegExp(r'^(\s*)(.*)  (\S.*?):(\d+)( …)?$');
+  final out = <String>[];
+  String? previous;
+  for (final line in subtree.split('\n')) {
+    final match = row.firstMatch(line);
+    if (match == null) {
+      out.add(line);
+      continue;
+    }
+    final file = match[3]!;
+    final where = file == previous
+        ? ':${match[4]}'
+        : '${shortFile(file, root)}:${match[4]}';
+    previous = file;
+    out.add('${match[1]}${match[2]}  $where${match[5] ?? ''}');
+  }
+  return out;
+}
+
+/// The `State owners:` line of [json] (a note), for example `State owners:
+/// state _CartState (lib/cart.dart:12), provider CartModel`, or null
+/// without any.
+String? stateOwnersLine(Map<String, Object?> json) {
+  final root = projectRootOf(json);
+  final owners = [
+    for (final o in _list(json['stateOwners']))
+      if (_map(o) case final owner
+          when _string(owner['kind']) != null && _string(owner['type']) != null)
+        '${_line(_string(owner['kind'])!)} ${_line(_string(owner['type'])!)}'
+            '${_where(owner['source'], root: root) == null ? '' : ' (${_where(owner['source'], root: root)})'}',
+  ];
+  return owners.isEmpty ? null : 'State owners: ${owners.join(', ')}';
 }
 
 Map<String, Object?> _map(Object? value) =>

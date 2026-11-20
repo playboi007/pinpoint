@@ -11,9 +11,11 @@ enum NoteDetail {
   compact,
 
   /// Adds the layout, the enclosing widgets, the page and the replies.
+  /// The default, and the text of the `.md` file on disk.
   standard,
 
-  /// Everything: the properties, the subtree and the environment.
+  /// Everything: adds the properties, the subtree, the state owners and
+  /// the environment.
   full;
 
   /// The detail named [name]; [standard] when null.
@@ -54,9 +56,9 @@ String inspectText(
       ..._standard(note).split('\n').skip(2),
       for (final MapEntry(:key, :value) in _map(target['properties']).entries)
         if (value is String) '  $key: ${_line(value)}',
-      if (_string(note['subtree']) case final subtree?) ...[
+      if (subtreeLines(note) case final rows when rows.isNotEmpty) ...[
         'Subtree:',
-        for (final line in subtree.split('\n')) '  $line',
+        for (final line in rows) '  $line',
       ],
     ],
   };
@@ -103,7 +105,7 @@ List<String> _location(Map<String, Object?> note) {
       _string(target['description']) ?? _string(target['widget']);
   return [
     if (description != null) 'Target: ${_line(clipText(description, 120))}',
-    'Source: ${_where(target['source']) ?? 'unavailable'}',
+    'Source: ${_where(target['source'], root: projectRootOf(note)) ?? 'unavailable'}',
     if (x != null && y != null && w != null && h != null) 'Rect: $x,$y ${w}x$h',
   ];
 }
@@ -123,29 +125,52 @@ String _compact(Map<String, Object?> note) {
   return build(clipText(comment, room < 1 ? 1 : room));
 }
 
-String _standard(Map<String, Object?> note) {
+String _standard(Map<String, Object?> note) => _standardLines(note).join('\n');
+
+/// The standard text, one line per entry. PLAN-v3 Milestone 19, step 9:
+/// what finds and explains the problem, and no more. The properties, the
+/// subtree, the state owners and the environment are [NoteDetail.full].
+///
+/// [onDisk] is for the `.md` next to the note's files: there the screenshot
+/// is the full-size file beside it, not the MCP attachment.
+List<String> _standardLines(Map<String, Object?> note, {bool onDisk = false}) {
   final target = _map(note['target']);
   final page = _map(note['page']);
   final siblings = _map(note['siblings']);
   final shot = _map(note['screenshot']);
+  final root = projectRootOf(note);
+  final description =
+      _string(target['description']) ?? _string(target['widget']);
+  final text = _string(target['text']);
+  final reopened = note['reopened'];
   final lines = <String>[
     _header(note),
     'Comment: ${_block(_string(note['comment']) ?? '')}',
-    ..._location(note),
+    // The reason is the last reply; a file reader must not take a
+    // reopened note for new work.
+    if (reopened is int && reopened > 0)
+      'Reopened by the user${reopened > 1 ? ' ($reopened times)' : ''}: '
+          'their reason is the last reply.',
+    if (description != null) 'Target: ${_line(clipText(description, 120))}',
+    if (text != null &&
+        text.isNotEmpty &&
+        !(description?.contains(text) ?? false))
+      'Text: ${_block(text)}',
+    if (root != null) 'Root: ${_line(root)}',
+    'Source: ${_where(target['source'], root: root) ?? 'unavailable'}',
   ];
-  final enclosing = [
-    for (final ancestor in _list(note['ancestors']).take(6))
-      if (_map(ancestor) case final a when _string(a['widget']) != null)
-        _where(a['source']) == null
-            ? _string(a['widget'])!
-            : '${_string(a['widget'])} (${_where(a['source'])})',
-  ];
-  if (enclosing.isNotEmpty) lines.add('Enclosing: ${enclosing.join(' < ')}');
+  if (enclosingLine(note, max: 6) case final enclosing?) lines.add(enclosing);
+  final rect = _map(target['rect']);
+  final x = _number(rect['x']);
+  final y = _number(rect['y']);
+  final w = _number(rect['w']);
+  final h = _number(rect['h']);
   final constraints = _string(target['constraints']);
   final parent = _string(siblings['parent']);
   final index = siblings['index'];
   final count = siblings['count'];
   final layout = [
+    if (x != null && y != null && w != null && h != null) 'rect $x,$y ${w}x$h',
     if (constraints != null) 'constraints ${compactConstraints(constraints)}',
     ?_string(target['renderObject']),
     if (parent != null)
@@ -170,7 +195,9 @@ String _standard(Map<String, Object?> note) {
   lines.addAll(verificationLines(note));
   if (_string(shot['file']) case final file?) {
     lines.add(
-      'Screenshot: $file (attached, at most 800 px wide)'
+      'Screenshot: $file'
+      '${onDisk ? '' : ' (attached, at most 800 px wide)'}'
+      '${shot['hasPlatformViews'] == true ? ' (platform views show blank)' : ''}'
       '${shot['beforeAfter'] == true ? ' (left: before the tweaks, right: after)' : ''}',
     );
   }
@@ -178,9 +205,10 @@ String _standard(Map<String, Object?> note) {
   if (replies.isNotEmpty) lines.addAll(['Replies:', ...replies]);
   if (tapeLine(note['tape']) case final line?) lines.add(line);
   lines.addAll(whatHappenedLines(note));
-  return lines.join('\n');
+  return lines;
 }
 
+/// The standard text and what only [NoteDetail.full] shows.
 String _full(Map<String, Object?> note) {
   final app = _map(note['app']);
   final page = _map(note['page']);
@@ -195,12 +223,32 @@ String _full(Map<String, Object?> note) {
     if (inherited['useMaterial3'] == true) 'Material 3',
     ?_string(inherited['textDirection']),
   ];
-  final status = _string(note['status']);
+  final properties = [
+    for (final MapEntry(:key, :value) in _map(
+      _map(note['target'])['properties'],
+    ).entries)
+      if (_string(value) case final v?) '$key=$v',
+  ];
+  final errors = [for (final e in _list(note['errors'])) ?_string(e)];
+  final truncated = [for (final t in _list(note['truncated'])) ?_string(t)];
+  final subtree = subtreeLines(note);
   return [
-    markdownFromJson(note).trimRight(),
-    if (status == 'submitted') 'Status: submitted',
+    ..._standardLines(note),
+    if (properties.isNotEmpty) 'Properties: ${_line(properties.join(', '))}',
+    ?stateOwnersLine(note),
     if (environment.isNotEmpty) 'Environment: ${_line(environment.join(', '))}',
+    if (errors.isNotEmpty) 'Not collected: ${_line(errors.join(', '))}',
+    if (truncated.isNotEmpty) 'Truncated: ${_line(truncated.join(', '))}',
+    if (subtree.isNotEmpty) ...['Subtree:', for (final l in subtree) '  $l'],
   ].join('\n');
+}
+
+/// The `.md` the bridge writes beside a note's JSON: the standard text,
+/// and one line that says where the rest is.
+String noteMarkdown(Map<String, Object?> note) {
+  final id = _string(note['id']) ?? '<id>';
+  return '${_standardLines(note, onDisk: true).join('\n')}\n'
+      'More: get_note detail full, or $id.json\n';
 }
 
 List<String> _replies(Map<String, Object?> note) => [
@@ -210,15 +258,14 @@ List<String> _replies(Map<String, Object?> note) => [
           '${_block(_string(message['text'])!)}',
 ];
 
-String? _where(Object? source) {
+String? _where(Object? source, {String? root}) {
   final s = _map(source);
   final file = _string(s['file']);
   final line = s['line'];
   if (file == null || line is! int) return null;
   final column = s['column'];
-  return column is int
-      ? '${_line(file)}:$line:$column'
-      : '${_line(file)}:$line';
+  final name = _line(shortFile(file, root));
+  return column is int ? '$name:$line:$column' : '$name:$line';
 }
 
 Map<String, Object?> _map(Object? value) =>

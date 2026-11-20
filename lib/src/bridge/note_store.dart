@@ -8,8 +8,8 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import '../model/annotation.dart' show NoteMessage, NoteStatus;
-import '../sink/markdown_formatter.dart';
 import 'bridge_protocol.dart';
+import 'note_detail.dart';
 
 /// Why a store operation was refused, with the HTTP status that says so.
 class StoreException implements Exception {
@@ -139,10 +139,12 @@ class NoteStore {
     Map<String, Object?> note,
     Uint8List? png, {
     bool keepPng = false,
+    String? client,
   }) => _serial(() async {
     final id = note['id']! as String;
     final status = NoteStatus.byName(note['status']) ?? NoteStatus.submitted;
     note['status'] = status.name;
+    _fillProjectRoot(note);
     final old = _index[id];
     final resolvedByHand =
         File('${_resolved.path}/$id.md').existsSync() ||
@@ -156,7 +158,7 @@ class NoteStore {
       if (stored != null) note['messages'] = stored['messages'] ?? const [];
     }
     final file = await _write(id, note, png: png, keepPng: keepPng);
-    _record(id, note);
+    _record(id, note, client: client);
     return file.path;
   });
 
@@ -225,6 +227,7 @@ class NoteStore {
     String? message,
     String from = 'user',
     Map<String, Object?>? verification,
+    String? client,
   }) => _serial(() async {
     final entry = _index[id];
     final note = entry == null ? null : await _readJson(entry.folder, id);
@@ -256,16 +259,16 @@ class NoteStore {
       ];
     }
     await _write(id, note, keepPng: true);
-    _record(id, note);
+    _record(id, note, client: client);
     return note;
   });
 
   /// Deletes note [id]'s files. Returns whether there was a note.
-  Future<bool> delete(String id) => _serial(() async {
+  Future<bool> delete(String id, {String? client}) => _serial(() async {
     final entry = _index.remove(id);
     if (entry == null) return false;
     await _removeFiles(entry.folder, id);
-    _changes[id] = _Change(++_seq, entry.origin);
+    _bump(id, entry.origin, client);
     return true;
   });
 
@@ -285,7 +288,7 @@ class NoteStore {
         }
         _index.remove(id);
         await _removeFiles(entry.folder, id);
-        _changes[id] = _Change(++_seq, entry.origin);
+        _bump(id, entry.origin, null);
         gone.add(id);
       }
       return gone;
@@ -294,36 +297,100 @@ class NoteStore {
 
   /// What changed after [since] (a [cursor]), for notes of [origin] when
   /// given. Reads the folders first, so files an agent moved by hand count.
-  Future<StoreChanges> changes(String? since, {String? origin}) async {
+  ///
+  /// A change whose last writer is [client] is left out: the tab already
+  /// has it.
+  ///
+  /// With a [wait] and nothing to report, the answer is held until a change
+  /// comes, [wait] ends, [cancelled] completes (the asker went away) or the
+  /// store closes. A reset answers at once. While it holds, the folders are
+  /// read once per [syncEvery], so a note moved by hand is seen too.
+  Future<StoreChanges> changes(
+    String? since, {
+    String? origin,
+    String? client,
+    Duration wait = Duration.zero,
+    Future<void>? cancelled,
+  }) async {
     await sync();
-    return _serial(() async {
-      final parts = since?.split(':');
-      final seq = parts != null && parts.length == 2 && parts[0] == _epoch
-          ? int.tryParse(parts[1])
-          : null;
-      if (seq == null || seq > _seq) {
-        return StoreChanges(
-          cursor: cursor,
-          changes: const <Map<String, Object?>>[],
-          reset: true,
-        );
-      }
-      final changed = _changes.entries.where((e) => e.value.seq > seq).toList()
-        ..sort((a, b) => a.value.seq.compareTo(b.value.seq));
-      final out = <Map<String, Object?>>[];
-      for (final MapEntry(key: id, value: change) in changed) {
-        if (origin != null && change.origin != origin) continue;
-        final entry = _index[id];
-        final note = entry == null ? null : await _readJson(entry.folder, id);
-        out.add(
-          note == null
-              ? {'id': id, 'deleted': true}
-              : {'id': id, 'status': note['status'], 'note': note},
-        );
-      }
-      return StoreChanges(cursor: cursor, changes: out);
-    });
+    var result = await _changesSince(since, origin, client);
+    if (wait <= Duration.zero) return result;
+    var gone = false;
+    unawaited(cancelled?.then((_) => gone = true));
+    final clock = Stopwatch()..start();
+    while (result.changes.isEmpty && !result.reset && !gone && !_closed) {
+      final left = wait - clock.elapsed;
+      if (left <= Duration.zero) break;
+      await _nap(left < syncEvery ? left : syncEvery, cancelled);
+      if (gone || _closed) break;
+      await sync();
+      result = await _changesSince(since, origin, client);
+    }
+    return result;
   }
+
+  /// How often a held [changes] request reads the folders.
+  static const Duration syncEvery = Duration(seconds: 1);
+
+  bool _closed = false;
+
+  /// Completes when the next change is numbered.
+  Completer<void> _signal = Completer<void>();
+
+  /// Ends every held [changes] request. Called when the bridge stops.
+  void close() {
+    _closed = true;
+    _signal.complete();
+    _signal = Completer<void>();
+  }
+
+  /// Waits [time], or less when a change comes or [cancelled] completes.
+  Future<void> _nap(Duration time, Future<void>? cancelled) {
+    final done = Completer<void>();
+    final timer = Timer(time, () {
+      if (!done.isCompleted) done.complete();
+    });
+    void wake(Object? _) {
+      if (!done.isCompleted) done.complete();
+    }
+
+    unawaited(_signal.future.then(wake));
+    unawaited(cancelled?.then(wake));
+    return done.future.whenComplete(timer.cancel);
+  }
+
+  Future<StoreChanges> _changesSince(
+    String? since,
+    String? origin,
+    String? client,
+  ) => _serial(() async {
+    final parts = since?.split(':');
+    final seq = parts != null && parts.length == 2 && parts[0] == _epoch
+        ? int.tryParse(parts[1])
+        : null;
+    if (seq == null || seq > _seq) {
+      return StoreChanges(
+        cursor: cursor,
+        changes: const <Map<String, Object?>>[],
+        reset: true,
+      );
+    }
+    final changed = _changes.entries.where((e) => e.value.seq > seq).toList()
+      ..sort((a, b) => a.value.seq.compareTo(b.value.seq));
+    final out = <Map<String, Object?>>[];
+    for (final MapEntry(key: id, value: change) in changed) {
+      if (origin != null && change.origin != origin) continue;
+      if (client != null && change.client == client) continue;
+      final entry = _index[id];
+      final note = entry == null ? null : await _readJson(entry.folder, id);
+      out.add(
+        note == null
+            ? {'id': id, 'deleted': true}
+            : {'id': id, 'status': note['status'], 'note': note},
+      );
+    }
+    return StoreChanges(cursor: cursor, changes: out);
+  });
 
   /// Reads the three folders and records what changed on disk: a note an
   /// agent moved to `resolved/` by hand becomes resolved; one deleted by
@@ -362,13 +429,13 @@ class NoteStore {
           await _removeFiles(known.folder, id, keep: folder);
         }
         _index[id] = _Entry(folder, status, _originOf(json));
-        if (_loaded) _changes[id] = _Change(++_seq, _originOf(json));
+        if (_loaded) _bump(id, _originOf(json), null);
       }
     }
     for (final id in _index.keys.toList()) {
       if (seen.contains(id)) continue;
       final gone = _index.remove(id)!;
-      _changes[id] = _Change(++_seq, gone.origin);
+      _bump(id, gone.origin, null);
     }
     _loaded = true;
   });
@@ -408,7 +475,7 @@ class NoteStore {
     await _writeAtomic(json, utf8.encode(_pretty(note)));
     final markdown = File('${folder.path}/$id.md');
     if (status != NoteStatus.draft) {
-      await _writeAtomic(markdown, utf8.encode(markdownFromJson(note)));
+      await _writeAtomic(markdown, utf8.encode(noteMarkdown(note)));
     } else if (markdown.existsSync()) {
       await markdown.delete();
     }
@@ -423,8 +490,28 @@ class NoteStore {
     return status == NoteStatus.draft ? json : markdown;
   }
 
-  void _record(String id, Map<String, Object?> note) {
-    _changes[id] = _Change(++_seq, _originOf(note));
+  void _record(String id, Map<String, Object?> note, {String? client}) {
+    _bump(id, _originOf(note), client);
+  }
+
+  /// Numbers a change to [id] and wakes the requests that wait for one.
+  /// [client] is the tab that wrote it; null for the agent or the disk.
+  void _bump(String id, String? origin, String? client) {
+    _changes[id] = _Change(++_seq, origin, client);
+    final waiting = _signal;
+    _signal = Completer<void>();
+    waiting.complete();
+  }
+
+  /// The bridge's project folder is the one that holds the notes folder.
+  /// A note from an app that does not know its root gets it here, so the
+  /// agent's text can print paths relative to it.
+  void _fillProjectRoot(Map<String, Object?> note) {
+    final app = note['app'];
+    if (app is! Map<String, Object?>) return;
+    final root = app['projectRoot'];
+    if (root is String && root.isNotEmpty) return;
+    app['projectRoot'] = this.root.parent.path;
   }
 
   Future<void> _removeFiles(
@@ -504,10 +591,13 @@ class _Entry {
 }
 
 class _Change {
-  const _Change(this.seq, this.origin);
+  const _Change(this.seq, this.origin, this.client);
 
   final int seq;
   final String? origin;
+
+  /// The tab that made the change; null for the agent, the disk or expiry.
+  final String? client;
 }
 
 void _noLog(String line) {}

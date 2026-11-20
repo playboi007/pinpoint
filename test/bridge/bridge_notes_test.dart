@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pinpoint/src/bridge/bridge_protocol.dart';
 import 'package:pinpoint/src/bridge/bridge_server.dart';
 import 'package:pinpoint/src/model/annotation.dart' show annotationSchema;
 
@@ -190,8 +191,8 @@ void main() {
       expect(names('open'), isEmpty);
       expect(names('resolved'), ['pp_a.json', 'pp_a.md', 'pp_a.png']);
       final md = File('${folder('resolved').path}/pp_a.md').readAsStringSync();
-      expect(md, contains('Status: resolved'));
-      expect(md, contains('- user ('));
+      expect(md, contains('pp_a (bug, resolved)'));
+      expect(md, contains('- user: Not needed after all.'));
       expect(md, contains('Not needed after all.'));
     });
 
@@ -322,6 +323,174 @@ void main() {
     });
   });
 
+  // PLAN-v3 Milestone 19, steps 1 and 2: `GET /changes` can be held until
+  // something changes, and a tab is not told about its own writes.
+  group('GET /changes, held (long poll)', () {
+    Future<String> cursor() async =>
+        asMap((await call('GET', '/annotations')).$2)['cursor']! as String;
+
+    /// One request, and how long the bridge took to answer it.
+    Future<(Map<String, Object?>, Duration)> ask(
+      String since, {
+      int? wait,
+      String? client,
+    }) async {
+      final clock = Stopwatch()..start();
+      final query = {
+        'since': since,
+        'origin': 'http://localhost:5000',
+        if (wait != null) 'wait': '$wait',
+        'client': ?client,
+      };
+      final (status, body) = await call(
+        'GET',
+        Uri(path: '/changes', queryParameters: query).toString(),
+      );
+      expect(status, 200);
+      return (asMap(body), clock.elapsed);
+    }
+
+    List<Object?> found(Map<String, Object?> result) => [
+      for (final c in result['changes']! as List<Object?>) asMap(c)['id'],
+    ];
+
+    test('answers at once when a change is already there', () async {
+      final since = await cursor();
+      await call('POST', '/annotations', body: note('pp_a'));
+      final (result, took) = await ask(since, wait: 20);
+      expect(found(result), ['pp_a']);
+      expect(took, lessThan(const Duration(seconds: 2)));
+    });
+
+    test('answers at once on a reset', () async {
+      final (result, took) = await ask('nonsense', wait: 20);
+      expect(result['reset'], isTrue);
+      expect(took, lessThan(const Duration(seconds: 2)));
+    });
+
+    test('answers as a change comes, not at the end of the wait', () async {
+      await call('POST', '/annotations', body: note('pp_a'));
+      final since = await cursor();
+      final pending = ask(since, wait: 20);
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      await call('PATCH', '/annotations/pp_a', body: {'status': 'inProgress'});
+      final (result, took) = await pending;
+      expect(found(result), ['pp_a']);
+      expect(took, lessThan(const Duration(seconds: 3)));
+    });
+
+    test('answers empty when the wait ends with no change', () async {
+      final since = await cursor();
+      final (result, took) = await ask(since, wait: 1);
+      expect(result['changes'], isEmpty);
+      expect(result['reset'], isFalse);
+      expect(result['cursor'], since);
+      expect(took, greaterThanOrEqualTo(const Duration(milliseconds: 900)));
+      expect(took, lessThan(const Duration(seconds: 4)));
+    });
+
+    test('a note moved on disk during the wait is seen within about a '
+        'second', () async {
+      await call('POST', '/annotations', body: note('pp_a'));
+      final since = await cursor();
+      final pending = ask(since, wait: 20);
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      for (final ext in ['md', 'json']) {
+        File(
+          '${folder('open').path}/pp_a.$ext',
+        ).renameSync('${folder('resolved').path}/pp_a.$ext');
+      }
+      final (result, took) = await pending;
+      expect(found(result), ['pp_a']);
+      expect(took, lessThan(const Duration(seconds: 3)));
+    });
+
+    test('a wait above 25 seconds is capped, and a bad one is none', () {
+      expect(changesWait, const Duration(seconds: 25));
+      expect(changesWaitOf('60'), changesWait);
+      expect(changesWaitOf('25'), changesWait);
+      expect(changesWaitOf('7'), const Duration(seconds: 7));
+      expect(changesWaitOf('0'), Duration.zero);
+      expect(changesWaitOf('-3'), Duration.zero);
+      expect(changesWaitOf('soon'), Duration.zero);
+      expect(changesWaitOf(null), Duration.zero);
+    });
+
+    test('no wait: the old answer, at once', () async {
+      final since = await cursor();
+      final (result, took) = await ask(since);
+      expect(result['changes'], isEmpty);
+      expect(took, lessThan(const Duration(seconds: 1)));
+    });
+
+    test('a tab does not get its own writes back; others and the agent '
+        'do', () async {
+      final since = await cursor();
+      await call('POST', '/annotations?client=tab_a', body: note('pp_a'));
+      await call(
+        'PATCH',
+        '/annotations/pp_a?client=tab_a',
+        body: {'comment': 'Edited'},
+      );
+      expect(found((await ask(since, client: 'tab_a')).$1), isEmpty);
+      expect(found((await ask(since, client: 'tab_b')).$1), ['pp_a']);
+      expect(found((await ask(since)).$1), ['pp_a']);
+
+      // The agent (no client id) changes it: every tab hears of it.
+      await call('PATCH', '/annotations/pp_a', body: {'status': 'fixed'});
+      expect(found((await ask(since, client: 'tab_a')).$1), ['pp_a']);
+      expect(found((await ask(since, client: 'tab_b')).$1), ['pp_a']);
+
+      // A delete by tab_a is left out for tab_a only.
+      final next = await cursor();
+      await call('DELETE', '/annotations/pp_a?client=tab_a');
+      expect(found((await ask(next, client: 'tab_a')).$1), isEmpty);
+      expect(found((await ask(next, client: 'tab_b')).$1), ['pp_a']);
+    });
+
+    test('a held request is not woken by its own tab\'s write', () async {
+      final since = await cursor();
+      final pending = ask(since, wait: 1, client: 'tab_a');
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      await call('POST', '/annotations?client=tab_a', body: note('pp_a'));
+      final (result, took) = await pending;
+      expect(result['changes'], isEmpty);
+      expect(took, greaterThanOrEqualTo(const Duration(milliseconds: 900)));
+    });
+
+    test('a held request ends when the bridge stops', () async {
+      final since = await cursor();
+      final pending = ask(since, wait: 20);
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      final stopped = Stopwatch()..start();
+      await bridge.close();
+      await pending.then<void>((_) {}, onError: (Object _) {});
+      expect(stopped.elapsed, lessThan(const Duration(seconds: 3)));
+      bridge = await start();
+    });
+  });
+
+  test('the bridge fills app.projectRoot when the app sent none', () async {
+    await call('POST', '/annotations', body: note('pp_a'));
+    await call(
+      'POST',
+      '/annotations',
+      body: note('pp_b')
+        ..['app'] = {
+          'buildMode': 'debug',
+          'platform': 'web',
+          'projectRoot': '/x/app',
+        },
+    );
+    Map<String, Object?> app(String id) => asMap(
+      asMap(
+        jsonDecode(File('${folder('open').path}/$id.json').readAsStringSync()),
+      )['app'],
+    );
+    expect(app('pp_a')['projectRoot'], root.path);
+    expect(app('pp_b')['projectRoot'], '/x/app', reason: 'the app wins');
+  });
+
   // Acceptance (bridge side): "Restarting the app with the bridge running
   // restores all open pins." A restarted bridge has them too.
   test('a restarted bridge still has every note', () async {
@@ -364,7 +533,6 @@ Map<String, Object?> note(
   'anchor': {'file': 'lib/main.dart', 'line': 12, 'widget': 'Text'},
   'messages': const <Object?>[],
   'ancestors': const <Object?>[],
-  'frameworkChain': const <Object?>[],
   'siblings': null,
   'subtree': null,
   'inherited': null,

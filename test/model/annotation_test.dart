@@ -85,11 +85,16 @@ void main() {
         ),
       ),
     ],
-    frameworkChain: const [
-      'RichText',
-      'Text',
-      'DefaultTextStyle',
-      'ElevatedButton',
+    stateOwners: const [
+      StateOwnerInfo(
+        kind: 'state',
+        type: '_SaveBarState',
+        source: SourceRef(
+          file: 'lib/widgets/save_bar.dart',
+          line: 12,
+          column: 7,
+        ),
+      ),
     ],
     siblings: const SiblingsInfo(
       parent: 'Row',
@@ -167,9 +172,9 @@ void main() {
     );
   });
 
-  test('schema is version 8 and keys come in a fixed order', () {
+  test('schema is version 9 and keys come in a fixed order', () {
     final json = example().toJson();
-    expect(json['schema'], 8);
+    expect(json['schema'], 9);
     expect(json.keys.take(6), [
       'schema',
       'id',

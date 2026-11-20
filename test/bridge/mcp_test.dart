@@ -198,8 +198,8 @@ void main() {
     expect(names('open'), isEmpty);
     expect(names('resolved'), ['pp_sent.json', 'pp_sent.md', 'pp_sent.png']);
     final md = File('${folder('resolved').path}/pp_sent.md').readAsStringSync();
-    expect(md, contains('Status: resolved'));
-    expect(md, contains('- agent ('));
+    expect(md, contains('pp_sent (bug, resolved)'));
+    expect(md, contains('- agent: Gave the label room.'));
     expect(md, contains('Gave the label room.'));
     final changes = await bridge.store.changes(since);
     expect(changes.changes.single['status'], 'resolved');
@@ -279,7 +279,6 @@ Map<String, Object?> note(
   },
   'messages': const <Object?>[],
   'ancestors': const <Object?>[],
-  'frameworkChain': const <Object?>[],
   if (png != null)
     'screenshot': {
       'file': '$id.png',
