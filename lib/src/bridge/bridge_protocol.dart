@@ -28,6 +28,13 @@ const String sourcePath = '/source';
 /// Where a class is declared (`GET /declaration?type=Name`).
 const String declarationPath = '/declaration';
 
+/// How long a deleted note stays in `.pinpoint/tmp/` before a flush may
+/// remove it.
+const Duration tmpKeep = Duration(hours: 1);
+
+/// How often the bridge flushes `.pinpoint/tmp/` after the start.
+const Duration tmpFlushEvery = Duration(hours: 1);
+
 /// The MCP endpoint for the agent (Streamable HTTP, JSON answers).
 const String mcpPath = '/mcp';
 

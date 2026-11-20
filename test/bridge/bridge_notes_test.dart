@@ -1,10 +1,13 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pinpoint/src/bridge/bridge_protocol.dart';
 import 'package:pinpoint/src/bridge/bridge_server.dart';
+import 'package:pinpoint/src/bridge/tmp_bin.dart';
 import 'package:pinpoint/src/model/annotation.dart' show annotationSchema;
+import 'package:pinpoint/src/model/tape.dart';
 
 /// Milestone 8, build step 3: the bridge keeps one JSON file per note and
 /// tells the app what changed.
@@ -32,9 +35,10 @@ void main() {
   });
 
   Directory folder(String name) => Directory('${root.path}/.pinpoint/$name');
-  List<String> names(String name) =>
-      [for (final f in folder(name).listSync()) f.uri.pathSegments.last]
-        ..sort();
+  List<String> names(String name) => [
+    for (final f in folder(name).listSync())
+      f.uri.pathSegments.lastWhere((s) => s.isNotEmpty),
+  ]..sort();
 
   Future<(int, Object?)> call(
     String method,
@@ -229,11 +233,212 @@ void main() {
     });
   });
 
-  test('DELETE removes every file of the note', () async {
-    await call('POST', '/annotations', body: note('pp_a', png: true));
-    expect((await call('DELETE', '/annotations/pp_a')).$1, 200);
-    expect(names('open'), isEmpty);
-    expect((await call('DELETE', '/annotations/pp_a')).$1, 404);
+  group('DELETE moves the note to tmp/', () {
+    final png = Uint8List.fromList(const [137, 80, 78, 71]);
+
+    Map<String, Object?> withTape(String id, String tapeId) => {
+      ...note(id, png: true),
+      'tape': {'id': tapeId, 'kind': 'full'},
+    };
+
+    Future<void> saveTape(String id) => bridge.tapes.save(
+      Tape(
+        id: id,
+        kind: TapeKind.full,
+        start: const TapeStart(t: 0, seq: 1, wallTime: 'w'),
+        bodies: {0: Uint8List.fromList(utf8.encode('{}'))},
+      ).toJson(),
+      {'0': base64Encode(utf8.encode('{}'))},
+    );
+
+    test('every file goes into one tmp/<id>__<stamp>/ folder', () async {
+      await call('POST', '/annotations', body: note('pp_a', png: true));
+      await bridge.store.saveAfter('pp_a', png);
+      expect(names('open'), [
+        'pp_a.after.png',
+        'pp_a.json',
+        'pp_a.md',
+        'pp_a.png',
+      ]);
+      final since = asMap((await call('GET', '/annotations')).$2)['cursor'];
+
+      expect((await call('DELETE', '/annotations/pp_a')).$1, 200);
+
+      expect(names('open'), isEmpty);
+      final entries = names('tmp');
+      expect(entries, hasLength(1));
+      expect(entries.single, matches(RegExp(r'^pp_a__\d{8}T\d{6}Z$')));
+      expect(TmpBin.stampOf(entries.single), isNotNull);
+      expect(names('tmp/${entries.single}'), [
+        'pp_a.after.png',
+        'pp_a.json',
+        'pp_a.md',
+        'pp_a.png',
+      ]);
+      // Gone for the app: list, load, and /changes.
+      expect(ids((await call('GET', '/annotations')).$2), isEmpty);
+      expect((await call('GET', '/annotations/pp_a')).$1, 404);
+      expect(await bridge.store.read('pp_a'), isNull);
+      final changes = asMap(
+        (await call(
+          'GET',
+          '/changes?since=${Uri.encodeQueryComponent('$since')}',
+        )).$2,
+      );
+      expect(changes['changes'], [
+        {'id': 'pp_a', 'deleted': true},
+      ]);
+      // A second delete: no note any more.
+      expect((await call('DELETE', '/annotations/pp_a')).$1, 404);
+    });
+
+    test('a draft goes to tmp/ too', () async {
+      await call(
+        'POST',
+        '/annotations',
+        body: note('pp_d', status: 'draft', png: true),
+      );
+      await call('DELETE', '/annotations/pp_d');
+      expect(names('drafts'), isEmpty);
+      expect(names('tmp/${names('tmp').single}'), ['pp_d.json', 'pp_d.png']);
+    });
+
+    test('the same id deleted twice gives two entries', () async {
+      for (var i = 0; i < 2; i++) {
+        await call('POST', '/annotations', body: note('pp_a', png: true));
+        expect((await call('DELETE', '/annotations/pp_a')).$1, 200);
+      }
+      final entries = names('tmp');
+      expect(entries, hasLength(2));
+      for (final entry in entries) {
+        expect(entry, startsWith('pp_a__'));
+        expect(names('tmp/$entry'), ['pp_a.json', 'pp_a.md', 'pp_a.png']);
+      }
+    });
+
+    test('its tape moves too when no other note uses it', () async {
+      await saveTape('tp_only_0001');
+      await call(
+        'POST',
+        '/annotations',
+        body: withTape('pp_a', 'tp_only_0001'),
+      );
+      await call('DELETE', '/annotations/pp_a');
+      expect(names('tapes'), isEmpty);
+      final entry = names('tmp').single;
+      expect(names('tmp/$entry'), contains('tapes'));
+      expect(names('tmp/$entry/tapes'), ['tp_only_0001', 'tp_only_0001.json']);
+      expect(names('tmp/$entry/tapes/tp_only_0001/bodies'), ['0.bin']);
+    });
+
+    test('its tape stays when another note uses it', () async {
+      await saveTape('tp_both_0001');
+      await call(
+        'POST',
+        '/annotations',
+        body: withTape('pp_a', 'tp_both_0001'),
+      );
+      // The other note is a draft, so the check covers every folder.
+      await call(
+        'POST',
+        '/annotations',
+        body: {...withTape('pp_b', 'tp_both_0001'), 'status': 'draft'},
+      );
+      await call('DELETE', '/annotations/pp_a');
+      expect(names('tapes'), ['tp_both_0001', 'tp_both_0001.json']);
+      expect(names('tmp/${names('tmp').single}'), isNot(contains('tapes')));
+      // Now the last user of the tape goes: the tape follows.
+      await call('DELETE', '/annotations/pp_b');
+      expect(names('tapes'), isEmpty);
+    });
+  });
+
+  group('the tmp/ flush', () {
+    final t0 = DateTime.utc(2026, 11, 20, 12);
+
+    Directory entry(String name) =>
+        Directory('${folder('tmp').path}/$name')..createSync(recursive: true);
+
+    test('removes an entry 61 min old, keeps one 59 min old', () async {
+      entry(
+        'pp_old__${TmpBin.stamp(t0.subtract(const Duration(minutes: 61)))}',
+      );
+      entry(
+        'pp_new__${TmpBin.stamp(t0.subtract(const Duration(minutes: 59)))}',
+      );
+      entry('pp_edge__${TmpBin.stamp(t0.subtract(tmpKeep))}');
+      expect(await bridge.flushTmp(now: t0), 2);
+      expect(names('tmp'), [
+        'pp_new__${TmpBin.stamp(t0.subtract(const Duration(minutes: 59)))}',
+      ]);
+      expect(await bridge.flushTmp(now: t0), 0);
+    });
+
+    test('an unreadable name uses the modification time', () async {
+      // Dart cannot set a folder's time, so the entries are files here.
+      folder('tmp').createSync(recursive: true);
+      File('${folder('tmp').path}/odd_name')
+        ..writeAsStringSync('x')
+        ..setLastModifiedSync(t0.subtract(const Duration(hours: 3)));
+      File('${folder('tmp').path}/fresh_name')
+        ..writeAsStringSync('x')
+        ..setLastModifiedSync(t0);
+      expect(await bridge.flushTmp(now: t0), 1);
+      expect(names('tmp'), ['fresh_name']);
+    });
+
+    test('does nothing on an empty or missing folder', () async {
+      folder('tmp').createSync(recursive: true);
+      expect(await bridge.flushTmp(now: t0), 0);
+      folder('tmp').deleteSync(recursive: true);
+      expect(await bridge.flushTmp(now: t0), 0);
+    });
+
+    test('runs on a timer that close() cancels', () async {
+      expect(bridge.tmpFlushActive, isTrue);
+      await bridge.close();
+      expect(bridge.tmpFlushActive, isFalse);
+      // tearDown closes it again: that must be harmless.
+    });
+
+    test('flushes at start what is already old', () async {
+      await bridge.close();
+      entry('pp_old__${TmpBin.stamp(DateTime.now().subtract(tmpKeep * 2))}');
+      bridge = await start();
+      // The first flush runs without being awaited: wait for it.
+      await bridge.store.list(); // queued behind the start flush
+      expect(names('tmp'), isEmpty);
+    });
+  });
+
+  group('sync and tmp/', () {
+    test(
+      'sync never reads tmp/ as notes; a hand-restored note returns',
+      () async {
+        await call('POST', '/annotations', body: note('pp_a', png: true));
+        await call('DELETE', '/annotations/pp_a');
+        await bridge.store.sync();
+        expect(ids((await call('GET', '/annotations')).$2), isEmpty);
+
+        // The manual undo: move the files back into open/.
+        final entry = Directory('${folder('tmp').path}/${names('tmp').single}');
+        final since = asMap((await call('GET', '/annotations')).$2)['cursor'];
+        for (final file in entry.listSync().whereType<File>()) {
+          file.renameSync(
+            '${folder('open').path}/${file.uri.pathSegments.last}',
+          );
+        }
+        await bridge.store.sync();
+        expect(ids((await call('GET', '/annotations')).$2), ['pp_a']);
+        final changes = asMap(
+          (await call(
+            'GET',
+            '/changes?since=${Uri.encodeQueryComponent('$since')}',
+          )).$2,
+        );
+        expect((changes['changes']! as List<Object?>).length, 1);
+      },
+    );
   });
 
   group('GET /changes', () {

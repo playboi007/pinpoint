@@ -8,8 +8,10 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import '../model/annotation.dart' show NoteMessage, NoteStatus;
+import '../model/tape.dart' show tapeIdPattern;
 import 'bridge_protocol.dart';
 import 'note_detail.dart';
+import 'tmp_bin.dart';
 
 /// Why a store operation was refused, with the HTTP status that says so.
 class StoreException implements Exception {
@@ -54,6 +56,7 @@ class StoreChanges {
 /// <dir>/drafts/    <id>.json, <id>.png      drafts: never seen by the agent
 /// <dir>/open/      <id>.md, .json, .png     submitted, inProgress, fixed
 /// <dir>/resolved/  <id>.md, .json, .png     resolved, verified, rejected
+/// <dir>/tmp/       <id>__<stamp>/            deleted notes, flushed after 1 h
 /// ```
 ///
 /// The folders are the file inbox of Milestone 7: an agent without MCP
@@ -263,14 +266,90 @@ class NoteStore {
     return note;
   });
 
-  /// Deletes note [id]'s files. Returns whether there was a note.
+  /// The bin of deleted notes: `<dir>/tmp/`. [sync] never reads it.
+  TmpBin get tmpBin => TmpBin(root);
+
+  /// Removes what has been in `<dir>/tmp/` for [tmpKeep] or more. Returns
+  /// how many entries it removed.
+  Future<int> flushTmp({DateTime? now}) =>
+      _serial(() => tmpBin.flush(now: now));
+
+  /// Deletes note [id] for the user: moves every file of it, and its tape
+  /// when no other note uses that tape, into `<dir>/tmp/<id>__<stamp>/`
+  /// (see [TmpBin]). The note is gone for the app at once. Returns whether
+  /// there was a note.
   Future<bool> delete(String id, {String? client}) => _serial(() async {
     final entry = _index.remove(id);
     if (entry == null) return false;
-    await _removeFiles(entry.folder, id);
+    final note = await _readJson(entry.folder, id);
+    final tapeId = _tapeIdOf(note);
+    final bin = tmpBin;
+    final target = await bin.newEntry(id, DateTime.now());
+    // Every file that starts with `<id>.`: the ids hold no dot, so these
+    // are this note's alone.
+    final files = <File>[];
+    if (entry.folder.existsSync()) {
+      await for (final file in entry.folder.list()) {
+        if (file is! File) continue;
+        final name = file.uri.pathSegments.last;
+        if (name.startsWith('$id.')) files.add(file);
+      }
+    }
+    for (final file in files) {
+      try {
+        await TmpBin.moveInto(file, target);
+      } on FileSystemException {
+        // Gone already.
+      }
+    }
+    if (tapeId != null && !await _tapeUsedByOther(tapeId, id)) {
+      await _moveTape(tapeId, target);
+    }
+    _log('pinpoint: note $id moved to .pinpoint/tmp/ (flushed after 1 h)');
     _bump(id, entry.origin, client);
     return true;
   });
+
+  static String? _tapeIdOf(Map<String, Object?>? note) {
+    final tape = note?['tape'];
+    if (tape is! Map<String, Object?>) return null;
+    final id = tape['id'];
+    return id is String && tapeIdPattern.hasMatch(id) ? id : null;
+  }
+
+  /// Whether a note other than [except], in any folder, names [tapeId].
+  Future<bool> _tapeUsedByOther(String tapeId, String except) async {
+    for (final folder in [_drafts, openDir, _resolved]) {
+      if (!folder.existsSync()) continue;
+      await for (final file in folder.list()) {
+        final name = file.uri.pathSegments.last;
+        if (file is! File || !name.endsWith('.json') || name.startsWith('.')) {
+          continue;
+        }
+        final id = name.substring(0, name.length - 5);
+        if (id == except || !noteIdPattern.hasMatch(id)) continue;
+        final json = await _readJson(folder, id);
+        if (_tapeIdOf(json) == tapeId) return true;
+      }
+    }
+    return false;
+  }
+
+  /// Moves tape [tapeId] (`tapes/<id>.json` and `tapes/<id>/`) into
+  /// `<target>/tapes/`, the same layout as under `<dir>/`.
+  Future<void> _moveTape(String tapeId, Directory target) async {
+    final json = File('${root.path}/tapes/$tapeId.json');
+    final bodies = Directory('${root.path}/tapes/$tapeId');
+    if (!json.existsSync() && !bodies.existsSync()) return;
+    final into = Directory('${target.path}/tapes');
+    await into.create(recursive: true);
+    try {
+      if (json.existsSync()) await TmpBin.moveInto(json, into);
+      if (bodies.existsSync()) await TmpBin.moveInto(bodies, into);
+    } on FileSystemException {
+      // The tape stays where it is; the note is moved all the same.
+    }
+  }
 
   /// Deletes every note (any status, with its screenshots) whose JSON was
   /// last written before [cutoff]: the bridge's `--ttl`. Returns the ids.

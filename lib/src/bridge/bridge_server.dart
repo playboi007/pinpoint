@@ -70,6 +70,8 @@ class PinPointBridge {
       unawaited(expire());
       _expireTimer = Timer.periodic(expireEvery, (_) => unawaited(expire()));
     }
+    unawaited(flushTmp());
+    _tmpTimer = Timer.periodic(tmpFlushEvery, (_) => unawaited(flushTmp()));
   }
 
   /// How long notes, tapes and runs live after their last change
@@ -80,6 +82,27 @@ class PinPointBridge {
   static const Duration expireEvery = Duration(hours: 1);
 
   Timer? _expireTimer;
+
+  Timer? _tmpTimer;
+
+  /// Whether the hourly flush of `.pinpoint/tmp/` runs (false after
+  /// [close]).
+  bool get tmpFlushActive => _tmpTimer?.isActive ?? false;
+
+  /// Removes what has been in `.pinpoint/tmp/` (deleted notes) for
+  /// [tmpKeep] or more at [now]. Returns how many entries it removed.
+  Future<int> flushTmp({DateTime? now}) async {
+    try {
+      final removed = await store.flushTmp(now: now);
+      if (removed > 0) {
+        _log('pinpoint: flushed $removed deleted notes from .pinpoint/tmp/');
+      }
+      return removed;
+    } on FileSystemException catch (error) {
+      _log('pinpoint: could not flush .pinpoint/tmp/: ${error.message}');
+      return 0;
+    }
+  }
 
   /// Deletes what is older than [ttl] at [now]: notes in every folder with
   /// their screenshots, tapes with their bodies, and replay runs. Returns
@@ -203,6 +226,7 @@ class PinPointBridge {
   /// Stops listening and drops open connections.
   Future<void> close() async {
     _expireTimer?.cancel();
+    _tmpTimer?.cancel();
     commands.close();
     store.close();
     await _subscription.cancel();

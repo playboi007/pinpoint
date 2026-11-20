@@ -10,7 +10,8 @@ Usage: dart run pinpoint:bridge [options]
 
 Receives notes from the Pinpoint overlay and writes each one into
 <dir>/open/ as <id>.md, <id>.json and <id>.png (drafts into <dir>/drafts/,
-which no agent reads). Serves MCP tools for the agent at /mcp: list_notes,
+which no agent reads); a deleted note moves to <dir>/tmp/ and is flushed
+after 1 to 2 hours. Serves MCP tools for the agent at /mcp: list_notes,
 get_note and update_note.
 
 Options:
