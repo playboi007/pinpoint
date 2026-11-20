@@ -7,6 +7,7 @@ import 'package:pinpoint/src/core/hook_registry.dart';
 import 'package:pinpoint/src/model/source_location.dart';
 import 'package:pinpoint/src/model/trace_event.dart';
 import 'package:pinpoint/src/state/build_stacks.dart';
+import 'package:pinpoint/src/state/stack_frames.dart';
 import 'package:pinpoint/src/trace/trace_recorder.dart';
 
 import '../support/markers.dart';
@@ -54,6 +55,8 @@ void main() {
 
   BuildStacks make({
     Iterable<Element> Function()? watched,
+    Element? Function()? content,
+    ProjectFiles Function()? projectFiles,
     TraceRecorder? into,
     int maxPerSecond = BuildStacks.defaultMaxPerSecond,
   }) => BuildStacks(
@@ -61,6 +64,8 @@ void main() {
     recorder: into ?? recorder,
     paths: paths,
     watched: watched,
+    content: content,
+    projectFiles: projectFiles,
     maxPerSecond: maxPerSecond,
     clock: () => now,
   );
@@ -239,6 +244,121 @@ void main() {
     expect(console, isEmpty);
   });
 
+  // The app's content next to a panel of Pinpoint's, as the wrapper builds
+  // them: the content element is the boundary.
+  final contentKey = GlobalKey();
+  Future<(_SState, _OState)> pumpAppAndOverlay(WidgetTester tester) async {
+    await tester.pumpWidget(
+      Directionality(
+        textDirection: TextDirection.ltr,
+        child: Column(
+          children: [
+            KeyedSubtree(key: contentKey, child: const _S()),
+            const _O(),
+          ],
+        ),
+      ),
+    );
+    return (
+      tester.state<_SState>(find.byType(_S)),
+      tester.state<_OState>(find.byType(_O)),
+    );
+  }
+
+  Element? contentElement() => contentKey.currentContext as Element?;
+
+  scenario('a setState in a widget of the overlay is not recorded, with a '
+      'project frame in its stack or not', (tester) async {
+    final (app, overlay) = await pumpAppAndOverlay(tester);
+    // Two budgets: a label outside the content must not use them up.
+    final stacks = make(content: contentElement, maxPerSecond: 2);
+    stacks.start(const Duration(seconds: 5));
+
+    for (var i = 0; i < 5; i++) {
+      overlay.bump();
+      await tester.pump();
+    }
+    app.bump();
+    await tester.pump();
+    final summary = stacks.stop();
+
+    // The test file is a project frame for both; only the content counts.
+    final event = setStates().single;
+    expect(event.widget, '_S');
+    expect(event.data['watched'], isFalse);
+    expect(event.data['state'], '_SState');
+    expect(event.data['file'], _thisFile);
+    expect(event.data['method'], '_SState.bump');
+    expect(summary.seen, 6);
+    expect(summary.filtered, 5);
+    expect(summary.recorded, 1);
+    expect(summary.dropped, 0);
+    expect(console, isEmpty);
+  });
+
+  scenario('an element the lens follows is recorded, also outside the '
+      'content', (tester) async {
+    final (_, overlay) = await pumpAppAndOverlay(tester);
+    final element = tester.element(find.byType(_O));
+    // Watched wins: the lens follows what it was told to follow.
+    final stacks = make(content: contentElement, watched: () => [element]);
+    stacks.start(const Duration(seconds: 5));
+    overlay.bump();
+    await tester.pump();
+    stacks.stop();
+    expect(setStates().single.data['watched'], isTrue);
+  });
+
+  scenario('a stack of the engine alone, for an element of the app, is left '
+      'out', (tester) async {
+    await pumpAppAndOverlay(tester);
+    final element = tester.element(find.byType(_S));
+    element.markNeedsBuild();
+    final stacks = make(content: contentElement);
+    stacks.start(const Duration(seconds: 5));
+    // As a real app in Chrome prints it (api-notes item 34).
+    debugPrint('scheduleBuildFor() called for $element');
+    debugPrint(
+      'lib/_engine/engine/platform_dispatcher.dart 1733:5   invoke\n'
+      'packages/flutter/src/widgets/framework.dart 5307:7   markNeedsBuild\n'
+      'lib/_engine/engine/platform_dispatcher.dart 1748:5   invoke1',
+    );
+    final summary = stacks.stop();
+    await tester.pump();
+
+    expect(setStates(), isEmpty);
+    expect(summary.seen, 1);
+    expect(summary.filtered, 1);
+    expect(console, isEmpty);
+  });
+
+  scenario('a stack with a frame in a file of the app is recorded, as the '
+      'path the bridge can open', (tester) async {
+    await pumpAppAndOverlay(tester);
+    final element = tester.element(find.byType(_S));
+    element.markNeedsBuild();
+    final files = ProjectFiles([
+      'file://${Directory.current.path}/lib/src/features/x/y.dart',
+    ], paths);
+    final stacks = make(content: contentElement, projectFiles: () => files);
+    stacks.start(const Duration(seconds: 5));
+    debugPrint('scheduleBuildFor() called for $element');
+    debugPrint(
+      'lib/_engine/engine/platform_dispatcher.dart 1733:5   invoke\n'
+      'packages/flutter/src/widgets/framework.dart 5307:7   markNeedsBuild\n'
+      'package:genai_product/src/features/x/y.dart 88:5   fetchDialog',
+    );
+    stacks.stop();
+    await tester.pump();
+
+    final event = setStates().single;
+    expect(event.widget, '_S');
+    expect(event.data['file'], 'lib/src/features/x/y.dart');
+    expect(event.data['line'], 88);
+    expect(event.data['method'], 'fetchDialog');
+    expect(event.data['state'], '_SState');
+  });
+
   scenario('a line after a label that is not a stack is forwarded', (
     tester,
   ) async {
@@ -301,4 +421,22 @@ class _SState extends State<_S> {
   @override
   Widget build(BuildContext context) =>
       Text('$n', textDirection: TextDirection.ltr);
+}
+
+class _O extends StatefulWidget {
+  const _O();
+
+  @override
+  State<_O> createState() => _OState();
+}
+
+// Stands for a panel of Pinpoint's own, outside the content.
+class _OState extends State<_O> {
+  int n = 0;
+
+  void bump() => setState(() => n++);
+
+  @override
+  Widget build(BuildContext context) =>
+      Text('o$n', textDirection: TextDirection.ltr);
 }

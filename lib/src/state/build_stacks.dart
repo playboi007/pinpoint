@@ -28,8 +28,9 @@ class BuildStacksSummary {
   /// Stacks recorded as `state.setState`.
   final int recorded;
 
-  /// Stacks left out because their element was not watched and no frame
-  /// of them was the project's.
+  /// Stacks left out: their element is outside the app's content (Pinpoint's
+  /// own panels), or it was not watched and no frame of them was the
+  /// project's (the framework's own `setState`: a scroll bar, a focus node).
   final int filtered;
 
   /// Stacks that the cap dropped: over [BuildStacks.maxPerSecond] in one
@@ -76,6 +77,8 @@ class BuildStacks {
     required this.recorder,
     required this.paths,
     this.watched,
+    this.content,
+    this.projectFiles,
     this.maxPerSecond = defaultMaxPerSecond,
     int Function()? clock,
   }) : _clock = clock ?? _realClock {
@@ -106,6 +109,15 @@ class BuildStacks {
   /// is always recorded.
   final Iterable<Element> Function()? watched;
 
+  /// The element directly above the app's own widgets. A `setState` of an
+  /// element that is not under it (Pinpoint's panels and overlay) is never
+  /// recorded. Null: every element counts as the app's.
+  final Element? Function()? content;
+
+  /// The app's own files, to tell its frames from the framework's. Null or
+  /// empty: the deny list of [firstProjectFrameIn] decides.
+  final ProjectFiles Function()? projectFiles;
+
   final int maxPerSecond;
   final int Function() _clock;
 
@@ -121,7 +133,12 @@ class BuildStacks {
 
   // The label of the stack that comes next, when it is to be recorded.
   String? _pendingLabel;
+  _Subject? _pendingSubject;
   bool _expectStack = false;
+
+  // Per window: what each label turned out to be, so a `setState` loop
+  // (Pinpoint's own, 60 a second) does not walk the tree again.
+  final Map<String, _Subject> _subjects = <String, _Subject>{};
 
   int _seen = 0;
   int _recorded = 0;
@@ -166,6 +183,8 @@ class BuildStacks {
     _inSecond = 0;
     _failure = null;
     _pendingLabel = null;
+    _pendingSubject = null;
+    _subjects.clear();
     _expectStack = false;
     try {
       final printSlot = _printSlot ??= hooks.slot<DebugPrintCallback>(
@@ -214,6 +233,8 @@ class BuildStacks {
     _timer?.cancel();
     _timer = null;
     _pendingLabel = null;
+    _pendingSubject = null;
+    _subjects.clear();
     _expectStack = false;
     if (identical(_open, this)) _open = null;
     // The flag first: no new line is printed once it is off.
@@ -268,35 +289,57 @@ class BuildStacks {
           _looksLikeStack(message)) {
         _expectStack = false;
         final label = _pendingLabel;
+        final subject = _pendingSubject;
         _pendingLabel = null;
-        if (label != null) _record(label, message);
+        _pendingSubject = null;
+        if (label != null && subject != null) _record(label, message, subject);
         return true;
       }
       // Not a stack: the expected one never came. Read this line afresh.
       _expectStack = false;
       _pendingLabel = null;
+      _pendingSubject = null;
     }
     if (message.startsWith(_labelPrefix)) {
       _expectStack = true;
       _seen++;
+      _pendingLabel = null;
+      _pendingSubject = null;
+      final text = _labelText(message).$1;
+      // An element known to be outside the app costs nothing and does not
+      // count toward the cap: Pinpoint's own panel must not use up the
+      // budget of the app's setStates.
+      var subject = _subjects[text];
+      if (subject != null && !subject.inContent) {
+        _filtered++;
+        return !fromDump;
+      }
       final now = _clock();
       if (now - _secondStart >= 1000) {
         _secondStart = now;
         _inSecond = 0;
       }
       if (_inSecond >= maxPerSecond) {
+        // Whether the stack was worth keeping is not known without a walk
+        // of the tree, which is the cost the cap is there to avoid.
         _dropped++;
-        _pendingLabel = null;
-      } else {
-        _inSecond++;
-        _pendingLabel = message;
+        return !fromDump;
       }
+      _inSecond++;
+      subject ??= _subjectOf(text);
+      if (!subject.inContent) {
+        _filtered++;
+        return !fromDump;
+      }
+      _pendingLabel = message;
+      _pendingSubject = subject;
       return !fromDump;
     }
     if (message.startsWith(_resortLabel)) {
       // The element was in the dirty list already: no new setState.
       _expectStack = true;
       _pendingLabel = null;
+      _pendingSubject = null;
       return !fromDump;
     }
     if (message.startsWith(_dirtyListLine)) return !fromDump;
@@ -306,18 +349,30 @@ class BuildStacks {
   static bool _looksLikeStack(String message) =>
       ConsoleLineFilter.looksLikeStack(message);
 
-  void _record(String label, String stack) {
+  static (String, bool) _labelText(String label) {
     var text = label.substring(_labelPrefix.length);
     var inList = false;
     if (text.endsWith(_alreadyListed)) {
       text = text.substring(0, text.length - _alreadyListed.length);
       inList = true;
     }
-    final element = _match(text);
-    final frame = firstProjectFrameIn(stack, paths);
+    return (text, inList);
+  }
+
+  void _record(String label, String stack, _Subject subject) {
+    final (text, inList) = _labelText(label);
+    final element = subject.element;
+    ProjectFiles? files;
+    try {
+      files = projectFiles?.call();
+    } catch (_) {
+      // Without files the deny list decides.
+    }
+    final frame = firstProjectFrameIn(stack, paths, files: files);
     // A stack counts when its element is followed, or when app code is in
-    // it. The rest is the framework's own `setState` (a scroll, a tooltip).
-    if (element == null && frame == null) {
+    // it. The rest is the framework's own `setState` (a scroll, a tooltip,
+    // a focus change): the engine's `invoke()` is not app code.
+    if (!subject.watched && frame == null) {
       _filtered++;
       return;
     }
@@ -329,7 +384,7 @@ class BuildStacks {
       source: frame?.where,
       data: {
         'element': clipText(text, 160),
-        'watched': element != null,
+        'watched': subject.watched,
         if (element is StatefulElement)
           'state': element.state.runtimeType.toString(),
         if (inList) 'inDirtyList': true,
@@ -340,6 +395,61 @@ class BuildStacks {
         },
       },
     );
+  }
+
+  /// Most elements one walk for a label visits.
+  static const int maxWalk = 50000;
+
+  /// Most labels remembered in a window.
+  static const int maxSubjects = 512;
+
+  /// What the element of [text] is: followed, in the app's content, or
+  /// neither (Pinpoint's own, or gone).
+  _Subject _subjectOf(String text) {
+    final watchedElement = _match(text);
+    if (watchedElement != null) {
+      return _Subject(watchedElement, watched: true, inContent: true);
+    }
+    final root = _content();
+    if (root == null) {
+      // No boundary to test against: every element counts as the app's.
+      return const _Subject(null, watched: false, inContent: true);
+    }
+    final found = _findDirty(root, text);
+    final subject = _Subject(found, watched: false, inContent: found != null);
+    if (_subjects.length >= maxSubjects) _subjects.clear();
+    _subjects[text] = subject;
+    return subject;
+  }
+
+  Element? _content() {
+    final get = content;
+    if (get == null) return null;
+    try {
+      final element = get();
+      return element != null && element.mounted ? element : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// The dirty element under [root] that [text] describes, or null.
+  /// Only a dirty element is described: the label was made after it was
+  /// marked.
+  static Element? _findDirty(Element root, String text) {
+    var visited = 0;
+    final stack = <Element>[root];
+    while (stack.isNotEmpty) {
+      final element = stack.removeLast();
+      if (++visited > maxWalk) break;
+      try {
+        if (element.dirty && element.toString() == text) return element;
+        element.visitChildren(stack.add);
+      } catch (_) {
+        // An element that cannot be described or walked is passed over.
+      }
+    }
+    return null;
   }
 
   /// The watched element whose description is [text], or null. The label
@@ -370,4 +480,23 @@ class BuildStacks {
     final open = text.indexOf('(');
     return open > 0 ? text.substring(0, open) : clipText(text, 60);
   }
+}
+
+/// What the element of one `scheduleBuildFor` label is.
+class _Subject {
+  const _Subject(
+    this.element, {
+    required this.watched,
+    required this.inContent,
+  });
+
+  /// The element, when it was found (watched, or under the content).
+  final Element? element;
+
+  /// Whether the lens follows it.
+  final bool watched;
+
+  /// Whether it is the app's: under the content element, or the lens
+  /// follows it. False: Pinpoint's own panels and overlay, or gone.
+  final bool inContent;
 }

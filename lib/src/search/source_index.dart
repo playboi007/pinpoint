@@ -234,6 +234,35 @@ class SourceIndex {
     return [for (final f in tier) f.$1];
   }
 
+  /// The source files of the project that created a widget under [root]
+  /// (the creation locations that [SourcePaths.isLocal] accepts), as the
+  /// inspector names them. At most [maxNodes] elements are visited. Empty
+  /// when creation locations do not exist (outside debug).
+  ///
+  /// The state lens matches stack frames against this to tell the app's code
+  /// from the framework's.
+  Set<String> localFiles({required Element root}) {
+    final files = <String>{};
+    if (!resolver.available) return files;
+    var visited = 0;
+    final stack = <Element>[root];
+    while (stack.isNotEmpty) {
+      final element = stack.removeLast();
+      if (++visited > maxNodes) break;
+      // Each element's read is guarded (engineering rule 4).
+      try {
+        final location = resolver.locationOf(element);
+        if (location != null && resolver.paths.isLocal(location.uri)) {
+          files.add(location.uri);
+        }
+        element.visitChildren(stack.add);
+      } catch (_) {
+        continue;
+      }
+    }
+    return files;
+  }
+
   /// Whether the creation [location] is [file]: the same file as
   /// [SourcePaths.sameFile] says, or a relative [file] that is its tail.
   bool fileMatches(String location, String file) {

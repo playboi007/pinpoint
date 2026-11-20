@@ -226,6 +226,52 @@ void main() {
     expect(host.console.installs, 0);
   });
 
+  testWidgets('a setState in a panel outside the content is not in the chain; '
+      'one in the content, with this file in its stack, is', (tester) async {
+    final contentKey = GlobalKey();
+    final lensHost = LensHost(
+      content: () => contentKey.currentContext as Element?,
+    );
+    try {
+      final model = ProductModel();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Column(
+            children: [
+              KeyedSubtree(
+                key: contentKey,
+                child: FakeScope<ProductModel>(
+                  model: model,
+                  child: const _Counter(),
+                ),
+              ),
+              const _Panel(),
+            ],
+          ),
+        ),
+      );
+      lensHost.lens.arm(tester.element(find.byType(_Counter)));
+      for (var i = 0; i < 3; i++) {
+        tester.state<_PanelState>(find.byType(_Panel)).bump();
+        await tester.pump();
+      }
+      tester.state<_CounterState>(find.byType(_Counter)).bump();
+      await tester.pump();
+      lensHost.lens.stop();
+
+      final widgets = [
+        for (final e in lensHost.recorder.events)
+          if (e.kind == TraceKind.stateSetState) e.widget,
+      ];
+      expect(widgets, isNot(contains('_Panel')));
+      expect(widgets, contains('_Counter'));
+      expect(lensHost.lens.stacksSummary!.filtered, greaterThanOrEqualTo(3));
+    } finally {
+      lensHost.dispose();
+      expect(debugPrint, same(initialPrint));
+    }
+  });
+
   scenario('the state is a listenable: arm and stop notify', (tester) async {
     final model = ProductModel();
     await pumpScreen(tester, model);
@@ -253,4 +299,37 @@ class _CartOnly extends StatelessWidget {
   @override
   Widget build(BuildContext context) =>
       Text('cart ${watchFake<CartModel>(context).count}');
+}
+
+class _Counter extends StatefulWidget {
+  const _Counter();
+
+  @override
+  State<_Counter> createState() => _CounterState();
+}
+
+class _CounterState extends State<_Counter> {
+  int n = 0;
+
+  void bump() => setState(() => n++);
+
+  @override
+  Widget build(BuildContext context) => Text('c$n');
+}
+
+/// Stands for a panel of Pinpoint's own, outside the content.
+class _Panel extends StatefulWidget {
+  const _Panel();
+
+  @override
+  State<_Panel> createState() => _PanelState();
+}
+
+class _PanelState extends State<_Panel> {
+  int n = 0;
+
+  void bump() => setState(() => n++);
+
+  @override
+  Widget build(BuildContext context) => Text('p$n');
 }

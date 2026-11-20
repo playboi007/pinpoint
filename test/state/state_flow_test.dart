@@ -330,4 +330,43 @@ void main() {
       );
     });
   });
+
+  test('a setState that no one follows and no project frame names is not a '
+      'row, and a cause left with no row is not listed', () {
+    final recorder = TraceRecorder();
+    // As an older build recorded the engine's `invoke()` setStates.
+    recorder.add(
+      TraceKind.stateSetState,
+      widget: '_Interactive',
+      data: {'element': '_Interactive(dirty)', 'watched': false},
+    );
+    recorder.add(
+      TraceKind.stateSetState,
+      widget: 'Home',
+      data: {
+        'element': 'Home(dirty)',
+        'watched': false,
+        'file': 'lib/home.dart',
+        'line': 3,
+        'method': 'HomeState.load',
+      },
+    );
+    final chain = stateFlowChain(recorder, fromSeq: 0, rebuilds: const []);
+    expect(chain['events'], 1);
+    final causes = chain['causes']! as List<Object?>;
+    expect(causes, hasLength(1));
+    final rows = (causes.single! as Map)['setStates']! as List<Object?>;
+    expect(rows, hasLength(1));
+    expect((rows.single! as Map)['widget'], 'Home');
+
+    final noise = TraceRecorder();
+    noise.add(
+      TraceKind.stateSetState,
+      widget: 'Focus',
+      data: {'element': 'Focus(dirty)', 'watched': false},
+    );
+    final empty = stateFlowChain(noise, fromSeq: 0, rebuilds: const []);
+    expect(empty['events'], 0);
+    expect(empty['causes'], isEmpty);
+  });
 }

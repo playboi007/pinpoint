@@ -76,6 +76,15 @@ const int maxFlowEvents = 6;
 /// Most readers listed for one cause.
 const int maxFlowReaders = 12;
 
+/// Whether [e] is a `state.setState` that says nothing: its element is not
+/// followed and no frame of its stack is the project's. The lens does not
+/// record such an event; a recorder that holds one from an older build must
+/// not show it as a row either.
+bool isNoiseSetState(TraceEvent e) =>
+    e.kind == TraceKind.stateSetState &&
+    e.data['watched'] != true &&
+    e.data['file'] == null;
+
 /// The answer of `state_flow` for the events from [fromSeq] on: per cause,
 /// what notified (and from which line), what rebuilt, and a coupling hint.
 ///
@@ -103,6 +112,7 @@ Map<String, Object?> stateFlowChain(
     if (e.kind != TraceKind.stateNotify && e.kind != TraceKind.stateSetState) {
       continue;
     }
+    if (isNoiseSetState(e)) continue;
     events++;
     final key = e.cause == null ? 'f${e.frame}' : 'c${e.cause}';
     final group = groups.putIfAbsent(key, () => _Group(e.cause, e.frame));

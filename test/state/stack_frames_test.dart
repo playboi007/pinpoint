@@ -147,4 +147,132 @@ state_web_test.dart 197:5                           toggle
       isNotNull,
     );
   });
+
+  group('a real app in Chrome (api-notes item 34)', () {
+    // `flutter run -d chrome`: the engine and the framework print `lib/...`
+    // and `packages/...` paths; they must never be the project's.
+    const engine =
+        'lib/_engine/engine/platform_dispatcher.dart 1733:5   invoke';
+    const scrollbar =
+        'packages/flutter/src/material/scrollbar.dart 429:5   handleHoverExit';
+    const framework =
+        'packages/flutter/src/widgets/framework.dart 5307:7   markNeedsBuild';
+    const app =
+        'package:genai_product/src/features/x/y.dart 88:5   fetchDialog';
+    final files = ProjectFiles([
+      'file:///work/app/lib/src/features/x/y.dart',
+      'file:///work/app/lib/src/features/x/z.dart',
+    ], rooted);
+
+    test('engine and framework frames alone are not the project, with files '
+        'known or not', () {
+      final stack = [engine, scrollbar, framework].join('\n');
+      expect(firstProjectFrameIn(stack, rooted, files: files), isNull);
+      expect(firstProjectFrameIn(stack, rooted), isNull);
+      expect(
+        firstProjectFrameIn(
+          'lib/_engine/engine/platform_dispatcher.dart 1748:5   invoke1',
+          unrooted,
+        ),
+        isNull,
+      );
+    });
+
+    test('the app frame is the answer; with files it is shown as the project '
+        'path the bridge can open', () {
+      final stack = [engine, scrollbar, framework, app].join('\n');
+      final known = firstProjectFrameIn(stack, rooted, files: files)!;
+      expect(known.file, 'lib/src/features/x/y.dart');
+      expect(known.line, 88);
+      expect(known.column, 5);
+      expect(known.method, 'fetchDialog');
+      // The same frame with no file set: the package URI, as before.
+      final fallback = firstProjectFrameIn(stack, rooted)!;
+      expect(fallback.file, 'package:genai_product/src/features/x/y.dart');
+      expect(fallback.method, 'fetchDialog');
+    });
+
+    test('every name DDC and the VM give a file finds the same file', () {
+      for (final line in [
+        'packages/genai_product/src/features/x/y.dart 88:5   fetchDialog',
+        'http://localhost:5000/packages/genai_product/src/features/x/y.dart 88:5   fetchDialog',
+        'lib/src/features/x/y.dart 88:5   fetchDialog',
+        'org-dartlang-app:///lib/src/features/x/y.dart 88:5   fetchDialog',
+        'file:///work/app/lib/src/features/x/y.dart 88:5   fetchDialog',
+        '#0      Foo.fetchDialog (package:genai_product/src/features/x/y.dart:88:5)',
+        '#0      Foo.fetchDialog (file:///work/app/lib/src/features/x/y.dart:88:5)',
+      ]) {
+        expect(
+          firstProjectFrameIn(line, rooted, files: files)?.file,
+          'lib/src/features/x/y.dart',
+          reason: line,
+        );
+      }
+    });
+
+    test('a file of the app that no widget names: its package was seen in the '
+        'stack, so it counts', () {
+      final stack = [
+        'package:genai_product/src/domain/cart_model.dart 10:3   add',
+        app,
+      ].join('\n');
+      final frame = firstProjectFrameIn(stack, rooted, files: files)!;
+      expect(frame.file, 'package:genai_product/src/domain/cart_model.dart');
+      expect(frame.method, 'add');
+      // Another package in front is not the app's.
+      final other = firstProjectFrameIn(
+        ['package:go_router/src/route.dart 4:1   go', app].join('\n'),
+        rooted,
+        files: files,
+      )!;
+      expect(other.method, 'fetchDialog');
+    });
+
+    test(
+      'with files known, a frame that is none of them is not the project',
+      () {
+        expect(
+          firstProjectFrameIn(
+            'package:go_router/src/route.dart 4:1   go',
+            rooted,
+            files: files,
+          ),
+          isNull,
+        );
+        expect(
+          firstProjectFrameIn(
+            'lib/src/scrollbar.dart 429:5   handleHoverExit',
+            rooted,
+            files: files,
+          ),
+          isNull,
+        );
+      },
+    );
+
+    test(
+      'Dart, the SDK and Pinpoint are never the project, even in the set',
+      () {
+        final odd = ProjectFiles([
+          'file:///work/app/lib/src/features/x/y.dart',
+          'file:///sdk/lib/_engine/engine/platform_dispatcher.dart',
+        ], unrooted);
+        for (final line in [
+          'dart-sdk/lib/async/zone.dart 710:7   run',
+          'dart:async 1:1   foo',
+          'org-dartlang-sdk:///lib/ui/x.dart 1:1   foo',
+          'lib/_engine/engine/platform_dispatcher.dart 1733:5   invoke',
+          'packages/pinpoint/src/overlay/state_tab.dart 9:9   setState',
+          'package:pinpoint/src/state/listen.dart 9:9   _notified',
+          'package:flutter/src/material/scrollbar.dart 429:5   handleHoverExit',
+        ]) {
+          expect(
+            firstProjectFrameIn(line, unrooted, files: odd),
+            isNull,
+            reason: line,
+          );
+        }
+      },
+    );
+  });
 }

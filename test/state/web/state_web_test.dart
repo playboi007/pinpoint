@@ -10,6 +10,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pinpoint/src/core/hook_registry.dart';
 import 'package:pinpoint/src/model/source_location.dart';
 import 'package:pinpoint/src/model/trace_event.dart';
+import 'package:pinpoint/src/search/source_index.dart';
+import 'package:pinpoint/src/search/source_resolver.dart';
 import 'package:pinpoint/src/state/build_stacks.dart';
 import 'package:pinpoint/src/state/console_filter.dart';
 import 'package:pinpoint/src/state/stack_frames.dart';
@@ -176,6 +178,64 @@ void main() {
     print('state.setState: ${event.toJsonLine()}');
   });
 
+  testWidgets('with the content and the app files known, a panel outside '
+      'the content is not recorded, and the app is, with the file the '
+      'widgets were created in', (tester) async {
+    final recorder = TraceRecorder();
+    final appKey = GlobalKey<_SpinnerState>();
+    final panelKey = GlobalKey<_SpinnerState>();
+    final contentKey = GlobalKey();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Column(
+          children: [
+            KeyedSubtree(
+              key: contentKey,
+              child: _Spinner(key: appKey),
+            ),
+            _Spinner(key: panelKey),
+          ],
+        ),
+      ),
+    );
+    const paths = SourcePaths();
+    final uris = SourceIndex(
+      resolver: const SourceResolver(paths: paths),
+    ).localFiles(root: contentKey.currentContext! as Element);
+    final files = ProjectFiles(uris, paths);
+    // ignore: avoid_print
+    print('project files: $uris');
+    expect(files.isEmpty, isFalse);
+
+    final stacks = BuildStacks(
+      hooks: hooks,
+      recorder: recorder,
+      paths: paths,
+      content: () => contentKey.currentContext as Element?,
+      projectFiles: () => files,
+    )..start(const Duration(seconds: 10));
+    try {
+      panelKey.currentState!.toggle();
+      await tester.pump();
+      appKey.currentState!.toggle();
+      await tester.pump();
+    } finally {
+      stacks.stop();
+      hooks.dispose();
+    }
+
+    final events = [
+      for (final e in recorder.events)
+        if (e.kind == TraceKind.stateSetState) e,
+    ];
+    // ignore: avoid_print
+    print('events: ${events.map((e) => e.toJsonLine()).join('\n')}');
+    expect(events, hasLength(1), reason: '${stacks.summary}');
+    expect(events.single.data['watched'], isFalse);
+    expect(events.single.data['file'], contains('state_web_test.dart'));
+    expect(stacks.summary.filtered, greaterThanOrEqualTo(1));
+  });
+
   test('firstProjectFrame reads the DDC lines seen in Chrome', () {
     final frame = firstProjectFrameIn(
       'packages/flutter/src/widgets/framework.dart 5307:7  markNeedsBuild\n'
@@ -189,6 +249,17 @@ void main() {
     expect(frame!.file, 'package:shop/product_detail_provider.dart');
     expect(frame.line, 88);
     expect(frame.method, 'fetchDialog');
+
+    // As the user's app in `flutter run -d chrome` prints the engine and
+    // the framework (api-notes item 34): never the project.
+    expect(
+      firstProjectFrameIn(
+        'lib/_engine/engine/platform_dispatcher.dart 1733:5   invoke\n'
+        'packages/flutter/src/material/scrollbar.dart 429:5   handleHoverExit',
+        const SourcePaths(),
+      ),
+      isNull,
+    );
   });
 }
 

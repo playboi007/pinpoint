@@ -34,6 +34,7 @@ class StateListen {
     IdentityTags? tags,
     this.redact = const TraceRedact(),
     this.maxAttachments = defaultMaxAttachments,
+    this.projectFiles,
   }) : tags = tags ?? IdentityTags.shared {
     hooks?.onDispose(stop);
   }
@@ -53,6 +54,10 @@ class StateListen {
   final IdentityTags tags;
   final TraceRedact redact;
   final int maxAttachments;
+
+  /// The app's own files, to tell its frames from the framework's. Null or
+  /// empty: the deny list of [firstProjectFrame] decides.
+  final ProjectFiles Function()? projectFiles;
 
   final Map<Listenable, _Attachment> _attached =
       Map<Listenable, _Attachment>.identity();
@@ -207,7 +212,13 @@ class StateListen {
         return;
       }
       final stack = StackTrace.current;
-      final frame = firstProjectFrame(stack, resolver.paths);
+      ProjectFiles? files;
+      try {
+        files = projectFiles?.call();
+      } catch (_) {
+        // Without files the deny list decides.
+      }
+      final frame = firstProjectFrame(stack, resolver.paths, files: files);
       final depth = notifyDepth(stack.toString());
       final data = <String, Object?>{
         'owner': attachment.owner,

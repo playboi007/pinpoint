@@ -5,6 +5,7 @@ import 'package:flutter/widgets.dart';
 
 import '../core/hook_registry.dart';
 import '../model/trace_event.dart';
+import '../search/source_index.dart';
 import '../search/source_resolver.dart';
 import '../trace/sources/rebuild_source.dart';
 import '../trace/state_flow.dart';
@@ -13,6 +14,7 @@ import 'build_stacks.dart';
 import 'console_filter.dart';
 import 'dependencies.dart';
 import 'listen.dart';
+import 'stack_frames.dart';
 
 /// What the lens knows now. A new object after each change, so a UI can
 /// listen to [StateLens] and read this.
@@ -108,6 +110,8 @@ class StateLens extends ChangeNotifier
       recorder: recorder,
       paths: resolver.paths,
       watched: _watchedElements,
+      content: content,
+      projectFiles: _projectFiles,
       maxPerSecond: maxPerSecond,
     );
     hooks.onDispose(() => stop(reason: 'disposed'));
@@ -146,6 +150,10 @@ class StateLens extends ChangeNotifier
   final int Function() _clock;
   late final ConsoleFilter _console;
   late final BuildStacks _stacks;
+
+  // The app's own files, read when a window opens (a walk of the tree) and
+  // used for every stack of it.
+  ProjectFiles? _files;
 
   static final Stopwatch _stopwatch = Stopwatch()..start();
   static int _realClock() => _stopwatch.elapsedMilliseconds;
@@ -217,6 +225,22 @@ class StateLens extends ChangeNotifier
     }
   }
 
+  ProjectFiles _projectFiles() => _files ?? ProjectFiles.none;
+
+  // The files that the project's widgets were created in, under the app's
+  // content. Empty when there is no content or no creation location.
+  ProjectFiles _readProjectFiles() {
+    try {
+      final root = content();
+      if (root == null || !root.mounted) return ProjectFiles.none;
+      final uris = SourceIndex(resolver: resolver).localFiles(root: root);
+      return ProjectFiles(uris, resolver.paths);
+    } catch (_) {
+      // Diagnostics run code written by widget authors.
+      return ProjectFiles.none;
+    }
+  }
+
   /// Opens a window on [element], or moves the open one to it. [window] is
   /// cut to [maxWindow].
   void arm(Element element, {Duration window = defaultWindow}) {
@@ -262,6 +286,7 @@ class StateLens extends ChangeNotifier
     } catch (_) {
       // Diagnostics run code written by widget authors.
     }
+    _files = _readProjectFiles();
     _armed = true;
     try {
       // Part 2: Pinpoint's listener on what the target reads and on the
@@ -270,6 +295,7 @@ class StateLens extends ChangeNotifier
         recorder: recorder,
         resolver: resolver,
         tags: tags,
+        projectFiles: _projectFiles,
       );
       listen
         ..attachDependencies(_dependencies)
@@ -365,6 +391,7 @@ class StateLens extends ChangeNotifier
           e.kind != TraceKind.stateSetState) {
         continue;
       }
+      if (isNoiseSetState(e)) continue;
       groups
           .putIfAbsent(
             e.cause == null ? 'f${e.frame}' : 'c${e.cause}',

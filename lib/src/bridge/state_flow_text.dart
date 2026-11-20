@@ -244,7 +244,10 @@ Future<String> _causeText(
       if (r is Map<String, Object?>) r,
   ];
   if (rebuilt.isEmpty) {
-    out.add(' └ no rebuilt reader seen for it');
+    // Only news for a notify: a setState rebuilds its own widget.
+    if (_list(cause['notifies']).isNotEmpty) {
+      out.add(' └ no rebuilt reader seen for it');
+    }
   } else {
     out.add(' └ rebuilt because they read it:');
     final sharedTags = <String, Set<Object?>>{};

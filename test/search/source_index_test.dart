@@ -297,4 +297,21 @@ void main() {
       expect(warmMs, lessThan(20));
     });
   });
+
+  group('localFiles', () {
+    testWidgets('the files of the widgets the project created, and no '
+        'framework file', (tester) async {
+      await tester.pumpWidget(const MaterialApp(home: PinFixture()));
+      final files = newIndex().localFiles(root: root(tester));
+      expect(files, isNotEmpty);
+      expect(files.any((f) => f.endsWith(fixture)), isTrue);
+      expect(files.any((f) => f.contains('/packages/flutter/')), isFalse);
+    });
+
+    testWidgets('empty when creation locations do not exist', (tester) async {
+      await tester.pumpWidget(const MaterialApp(home: PinFixture()));
+      final index = SourceIndex(resolver: const SourceResolver(tracked: false));
+      expect(index.localFiles(root: root(tester)), isEmpty);
+    });
+  });
 }

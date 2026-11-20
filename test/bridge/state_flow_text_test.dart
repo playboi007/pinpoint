@@ -249,6 +249,45 @@ class _FetchDialog {}
     expect(text, contains('Note: no causes: wrap runApp in PinPoint.run'));
   });
 
+  test(
+    '"no rebuilt reader" is said for a notify, not for a setState',
+    () async {
+      Map<String, Object?> cause({required bool notify}) => {
+        'frame': 9,
+        'notifies': [
+          if (notify)
+            {
+              'seq': 1,
+              'owner': 'ProductModel',
+              'tag': '#a1',
+              'file': 'package:my_app/providers/product_detail_provider.dart',
+              'line': 11,
+            },
+        ],
+        'setStates': [
+          if (!notify)
+            {
+              'seq': 2,
+              'widget': '_FetchDialog',
+              'file': 'package:my_app/providers/product_detail_provider.dart',
+              'line': 11,
+            },
+        ],
+        'rebuilt': <Object?>[],
+      };
+      final notified = await stateFlowText(
+        answer(causes: [cause(notify: true)]),
+        lookup,
+      );
+      final setState = await stateFlowText(
+        answer(causes: [cause(notify: false)]),
+        lookup,
+      );
+      expect(notified, contains('no rebuilt reader seen for it'));
+      expect(setState, isNot(contains('no rebuilt reader seen for it')));
+    },
+  );
+
   test('a frame outside the project shows no code, never throws', () async {
     final text = await stateFlowText(
       answer(
