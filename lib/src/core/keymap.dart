@@ -131,6 +131,10 @@ enum KeyAction {
 /// [editingText] is true while one of Pinpoint's text fields (the comment
 /// field) has focus, and [composing] while an input method composes text in
 /// it.
+///
+/// [watching] is true while the watch card is open (state lens, watch
+/// mode): then a plain Esc is Pinpoint's in idle too, to stop the lens and
+/// then close the card. The key still reaches the app.
 KeyAction? keyActionFor(
   KeyEvent event, {
   required PinPointMode mode,
@@ -138,6 +142,7 @@ KeyAction? keyActionFor(
   required KeyModifiers modifiers,
   bool editingText = false,
   bool composing = false,
+  bool watching = false,
 }) {
   if (event is KeyUpEvent) return null;
   if (shortcut.matches(event, modifiers)) return KeyAction.toggle;
@@ -173,7 +178,7 @@ KeyAction? keyActionFor(
 
   // While an input method composes, Esc cancels the composition and must
   // reach it.
-  if (mode != PinPointMode.idle &&
+  if ((mode != PinPointMode.idle || watching) &&
       !composing &&
       event.logicalKey == LogicalKeyboardKey.escape) {
     return KeyAction.back;

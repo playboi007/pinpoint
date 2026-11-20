@@ -13,6 +13,7 @@ import '../trace/note_trace.dart';
 import '../trace/trace_causes.dart';
 import '../trace/trace_format.dart';
 import '../trace/trace_session.dart';
+import 'candidate_dial.dart';
 import 'comment_form.dart';
 import 'highlight_painter.dart';
 import 'note_view.dart';
@@ -175,6 +176,7 @@ class InfoPanelLayer extends StatelessWidget {
     required this.noteActions,
     required this.onTweak,
     this.bridge,
+    this.onToast,
     this.rightInset = 0,
   });
 
@@ -190,6 +192,10 @@ class InfoPanelLayer extends StatelessWidget {
   /// The bridge the State tab reads source lines from; null, or a bridge
   /// that answers null, shows no code line.
   final BridgeClient? Function()? bridge;
+
+  /// Shows a toast, for example "Copied lib/main.dart:12" after the State
+  /// tab's folder button copied.
+  final ValueChanged<String>? onToast;
 
   /// Space at the right edge the panel never covers: the rail sits there,
   /// drawn above the panel. The panel is placed and dragged in the rest.
@@ -234,6 +240,7 @@ class InfoPanelLayer extends StatelessWidget {
               drafts: controller.notes.drafts.length,
               noteActions: noteActions,
               bridge: bridge,
+              onToast: onToast,
               // A tweak can move the widget; the panel stays where it is.
               onTweak: (target, property, value) {
                 keepPlace();
@@ -385,6 +392,7 @@ class InfoPanel extends StatelessWidget {
     this.noteActions,
     this.onTweak,
     this.bridge,
+    this.onToast,
   });
 
   static const Key panelKey = ValueKey<String>('pinpoint.infoPanel');
@@ -402,7 +410,7 @@ class InfoPanel extends StatelessWidget {
   /// The Info tab's "Caused" section (PLAN-v2 Milestone 14, step 17).
   static const Key causedKey = ValueKey<String>('pinpoint.infoPanel.caused');
 
-  /// The `unfold_more` button in the header: the next widget under the spot.
+  /// The dial in the header ([CandidateDial]): the widgets under the spot.
   static const Key nextCandidateKey = ValueKey<String>(
     'pinpoint.infoPanel.nextCandidate',
   );
@@ -442,6 +450,37 @@ class InfoPanel extends StatelessWidget {
 
   /// The bridge the State tab reads source lines from.
   final BridgeClient? Function()? bridge;
+
+  /// Shows a toast. The State tab's folder button reports its Copy through
+  /// it; without it the popover stays open and says "Copied".
+  final ValueChanged<String>? onToast;
+
+  /// The State tab's "Watch state": the lens is armed on the selection, so
+  /// Pinpoint leaves picking, which closes this panel, and opens the watch
+  /// card.
+  void _watch() {
+    final lens = TraceSession.current?.stateLens;
+    final element = selection.element;
+    if (lens == null || !lens.isTarget(element)) return;
+    controller.startWatching(
+      lens: lens,
+      target: element,
+      name: selection.entry.name,
+      window: lens.value.window,
+    );
+  }
+
+  /// The dial's tooltip: the outer widget above, the inner one below.
+  String _neighbours() {
+    final here = selection.index;
+    final outer = controller.candidateName(here + 1);
+    final inner = controller.candidateName(here - 1);
+    final parts = [
+      if (outer != null) '↑ $outer',
+      if (inner != null) '↓ $inner',
+    ];
+    return parts.isEmpty ? 'Widgets under the pointer' : parts.join('  ');
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -496,7 +535,8 @@ class InfoPanel extends StatelessWidget {
               child: _Header(
                 selection: selection,
                 onClose: onClose,
-                onNextCandidate: controller.selectNextCandidate,
+                onSelectCandidate: controller.selectCandidate,
+                describeNeighbours: _neighbours,
               ),
             ),
             _Crumbs(
@@ -535,6 +575,9 @@ class InfoPanel extends StatelessWidget {
                           selection: selection,
                           session: TraceSession.current,
                           bridge: bridge,
+                          onToast: onToast,
+                          codeLines: controller.codeLines,
+                          onWatch: _watch,
                         ),
                         PanelTab.comment => CommentForm(
                           controller: controller,
@@ -583,17 +626,19 @@ class InfoPanel extends StatelessWidget {
 }
 
 /// 40 px: the widget's name over its source path, then the hit-candidate
-/// count, the button for the next candidate, and close.
+/// count, the dial for the candidates, and close.
 class _Header extends StatelessWidget {
   const _Header({
     required this.selection,
     required this.onClose,
-    required this.onNextCandidate,
+    required this.onSelectCandidate,
+    required this.describeNeighbours,
   });
 
   final PickResult selection;
   final VoidCallback onClose;
-  final bool Function() onNextCandidate;
+  final bool Function(int index) onSelectCandidate;
+  final String Function() describeNeighbours;
 
   @override
   Widget build(BuildContext context) {
@@ -640,12 +685,14 @@ class _Header extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 4),
-            DraftIconButton(
+            CandidateDial(
               key: InfoPanel.nextCandidateKey,
-              icon: PinPointIcons.unfoldMore,
-              tooltip: 'Next widget under the pointer',
-              onPressed: candidates > 1 ? onNextCandidate : null,
+              count: candidates,
+              index: selection.index,
+              onSelect: onSelectCandidate,
+              describeNeighbours: describeNeighbours,
             ),
+            const SizedBox(width: 2),
             DraftIconButton(
               icon: PinPointIcons.close,
               tooltip: 'Close panel',

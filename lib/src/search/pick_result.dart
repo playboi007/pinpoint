@@ -108,6 +108,45 @@ class PickResult {
     return fallback;
   }
 
+  /// [current] with candidate [index] chosen, as the dial in the info panel
+  /// does: exactly that candidate, with no wrapping and without passing over
+  /// one that refines to the same widget as [current]'s.
+  ///
+  /// Null when [index] is out of range or equals [current]'s, or the
+  /// candidate's element is gone or cannot be found.
+  static PickResult? atCandidate(
+    PickResult current,
+    int index, {
+    required Element rootElement,
+    Element? chainBoundary,
+    SourceResolver resolver = const SourceResolver(),
+  }) {
+    if (index == current.index ||
+        index < 0 ||
+        index >= current.candidates.length) {
+      return null;
+    }
+    final picked = elementFor(
+      current.candidates[index].renderObject,
+      root: rootElement,
+    );
+    if (picked == null || !picked.mounted) return null;
+    final chain = resolver.chain(
+      picked,
+      boundary: chainBoundary ?? rootElement,
+    );
+    final chosen = chain.defaultIndex;
+    return _build(
+      position: current.position,
+      candidates: current.candidates,
+      index: index,
+      chain: chain,
+      chainIndex: chosen ?? 0,
+      sourceUnavailable: chosen == null,
+      root: rootElement.renderObject,
+    );
+  }
+
   /// A result that selects [element] itself, with no search: for a widget
   /// found another way than by position (a sweep over the tree, and later a
   /// pin's anchor).

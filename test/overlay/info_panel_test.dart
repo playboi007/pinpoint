@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pinpoint/pinpoint.dart';
@@ -30,6 +31,11 @@ void main() {
     await tester.pump();
     await tester.tapAt(tester.getCenter(appText));
     await tester.pump();
+  }
+
+  Future<void> pumpHostAndSelect(WidgetTester tester) async {
+    await tester.pumpWidget(host());
+    await selectText(tester);
   }
 
   /// A new selection opens the Comment tab (Milestone 5).
@@ -150,20 +156,63 @@ void main() {
     expect(tester.getTopLeft(panel), moved);
   });
 
-  testWidgets('the next-candidate button does what a second click does', (
-    tester,
-  ) async {
-    await tester.pumpWidget(host());
-    await selectText(tester);
+  testWidgets('the dial: a click on its upper half does what a second click '
+      'does', (tester) async {
+    await pumpHostAndSelect(tester);
     final first = controller.selection.value!;
     expect(first.index, 0);
 
-    await tester.tap(find.byKey(InfoPanel.nextCandidateKey));
+    // Up is the outer widget: the next candidate, as the old button gave.
+    final dial = find.byKey(InfoPanel.nextCandidateKey);
+    await tester.tapAt(tester.getRect(dial).topCenter + const Offset(0, 6));
     await tester.pump();
     final next = controller.selection.value!;
     expect(next.index, 1);
     expect(next.candidates.length, first.candidates.length);
     expect(inPanel('2/${first.candidates.length}'), findsOneWidget);
+
+    // Down is the inner widget again.
+    await tester.tapAt(tester.getRect(dial).bottomCenter - const Offset(0, 6));
+    await tester.pump();
+    expect(controller.selection.value!.index, 0);
+    expect(inPanel('1/${first.candidates.length}'), findsOneWidget);
+  });
+
+  testWidgets('selectCandidate picks exactly that candidate', (tester) async {
+    await pumpHostAndSelect(tester);
+    final first = controller.selection.value!;
+    final last = first.candidates.length - 1;
+    expect(controller.selectCandidate(last), isTrue);
+    await tester.pump();
+    expect(controller.selection.value!.index, last);
+    expect(inPanel('${last + 1}/${last + 1}'), findsOneWidget);
+    // Same index, or out of range: nothing changes.
+    expect(controller.selectCandidate(last), isFalse);
+    expect(controller.selectCandidate(last + 1), isFalse);
+    expect(controller.selectCandidate(-1), isFalse);
+    expect(controller.selection.value!.index, last);
+    // The old call still steps on (and wraps).
+    expect(controller.selectNextCandidate(), isTrue);
+    await tester.pump();
+    expect(controller.selection.value!.index, 0);
+  });
+
+  testWidgets('the dial names the outer and inner widget in its tooltip', (
+    tester,
+  ) async {
+    await pumpHostAndSelect(tester);
+    expect(controller.candidateName(1), isNotNull);
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    addTearDown(mouse.removePointer);
+    await mouse.moveTo(
+      tester.getCenter(find.byKey(InfoPanel.nextCandidateKey)),
+    );
+    await tester.pump(const Duration(seconds: 1));
+    // At the innermost there is no inner widget: only the arrow up.
+    final tip = find.textContaining('↑ ${controller.candidateName(1)}');
+    expect(tip, findsOneWidget);
+    expect(find.textContaining('↓'), findsNothing);
   });
 
   testWidgets('tabs are caps cells; the breadcrumb is one scrolling line', (

@@ -6,9 +6,12 @@ import '../detect/findings_controller.dart';
 import '../env/environment_controller.dart';
 import '../model/annotation.dart';
 import '../search/pick_result.dart';
+import '../state/state_lens.dart';
 import '../theme/palette_store.dart';
 import '../tweak/tweak_session.dart';
+import 'code_line_cache.dart';
 import 'note_book.dart';
+import 'watch_session.dart';
 
 /// What Pinpoint is doing right now.
 enum PinPointMode {
@@ -206,6 +209,15 @@ class PinPointController extends ChangeNotifier {
   /// every start.
   final AgentControl agent = AgentControl();
 
+  /// Watch mode of the state lens: the live changes card and the marker on
+  /// the watched widget. Independent of [mode]: watching starts by leaving
+  /// picking ([startWatching]), and the app then gets every event.
+  final WatchSession watch = WatchSession();
+
+  /// The source lines under the state lens's chain rows, asked from the
+  /// bridge once per `file:line` for the session.
+  final CodeLineCache codeLines = CodeLineCache();
+
   final ValueNotifier<String?> _openNote = ValueNotifier<String?>(null);
 
   /// The id of the note whose pin was clicked. While set, the panel shows
@@ -236,10 +248,29 @@ class PinPointController extends ChangeNotifier {
   bool Function()? candidateCycler;
 
   /// Selects the next widget under the spot the selection was picked at (the
-  /// panel's `unfold_more` button). Keeps the mode and the comment draft.
+  /// panel's next-widget call). Keeps the mode and the comment draft.
   ///
   /// Returns whether the selection changed.
   bool selectNextCandidate() => candidateCycler?.call() ?? false;
+
+  /// Chooses hit candidate [index] under the selection's click spot. Set by
+  /// the pick tracker; null while there is none. Call it through
+  /// [selectCandidate].
+  bool Function(int index)? candidateSelector;
+
+  /// The name of the widget candidate [index] would select. Set by the pick
+  /// tracker. Call it through [candidateName].
+  String? Function(int index)? candidateNamer;
+
+  /// Selects candidate [index] of the selection (0 is the innermost, the
+  /// last the outermost): the info panel's dial. Keeps the mode and the
+  /// comment draft.
+  ///
+  /// Returns whether the selection changed.
+  bool selectCandidate(int index) => candidateSelector?.call(index) ?? false;
+
+  /// The name of the widget candidate [index] would select, or null.
+  String? candidateName(int index) => candidateNamer?.call(index);
 
   /// Top-left of the info panel after a drag, in global logical pixels.
   /// Null means the default corner. Kept here so the panel's place survives
@@ -348,11 +379,32 @@ class PinPointController extends ChangeNotifier {
   bool sendFailed() =>
       _move(from: PinPointMode.sending, to: PinPointMode.commenting);
 
+  /// Starts watching [target]: the caller armed the state lens on it for
+  /// [window] ("Watch state"). Pinpoint leaves picking and drops the
+  /// selection, so the Info panel closes and the app gets every pointer and
+  /// key event, and the watch card and marker open. Entering picking again
+  /// later is allowed; the lens keeps running.
+  void startWatching({
+    required StateLens lens,
+    required Element target,
+    required String name,
+    required Duration window,
+  }) {
+    watch.begin(lens: lens, target: target, name: name, window: window);
+    stop();
+    clearSelection();
+  }
+
+  /// Whether Esc has something to do while idle: a watch card is open.
+  bool get watching => watch.open;
+
   /// One step back, as Esc does. Going back to picking keeps the selection.
+  /// While idle with a watch card open: the first Esc stops the lens, the
+  /// next closes the card.
   bool back() {
     switch (_mode) {
       case PinPointMode.idle:
-        return false;
+        return watch.back();
       case PinPointMode.picking:
         stop();
         return true;
@@ -478,6 +530,8 @@ class PinPointController extends ChangeNotifier {
     findings.dispose();
     tweaks.dispose();
     agent.dispose();
+    watch.dispose();
+    codeLines.dispose();
     palette.dispose();
     super.dispose();
   }

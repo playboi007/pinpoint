@@ -343,6 +343,7 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
       modifiers: modifiersOf(HardwareKeyboard.instance),
       editingText: editingText,
       composing: editingText && _controller.draft.composing,
+      watching: _controller.watching,
     );
     // The key source shares this one handler (no second one). Pinpoint's
     // own keys, and keys typed into its fields, are not recorded.
