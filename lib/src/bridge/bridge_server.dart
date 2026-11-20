@@ -185,6 +185,7 @@ class PinPointBridge {
     reloader: HotReloader(store.root),
     tapes: tapes,
     runs: runs,
+    source: source,
     log: _log,
   );
   final void Function(String line) _log;

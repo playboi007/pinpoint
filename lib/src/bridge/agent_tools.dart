@@ -36,6 +36,7 @@ const List<String> agentToolNames = [
   'stop_replay',
   'why',
   'caused_by',
+  'state_flow',
 ];
 
 /// How long the bridge waits for the app's answer to [tool].
@@ -556,6 +557,44 @@ final List<Map<String, Object?>> agentTools = [
         'description':
             'A seq (412), seconds back ("30s", the default is "10s") or '
             '"mark".',
+      },
+    },
+  ),
+  _tool(
+    'state_flow',
+    'Why a value changed',
+    'Use it to learn why two values change together, or what changed a '
+        'value. For a widget (usually a screen or a dialog): first call '
+        'opens a window of seconds (default and most 30) and answers what '
+        'the widget reads (provider and inherited objects with an identity '
+        'tag such as #a1, and the line that made them) and where their '
+        'classes are. Then act (run_steps) and call state_flow again with '
+        'the same target: the answer is the chain, per cause (a tap): '
+        'which object notified, from which method and file:line, the code '
+        'lines there (a method that sets two fields and calls '
+        'notifyListeners once shows both), which widgets rebuilt because '
+        'they read it, and one hint: "one method set both values" (one '
+        'notify, many readers), "a notifier triggered another" (a notify '
+        'inside a listener), or "two readers of one object" (a dialog and '
+        'its screen share one tag). For a ValueNotifier the value before '
+        'and after is shown; for plain fields read the code lines. A '
+        'setState shows its line too. Costs a stack per setState while '
+        'open, so it closes by itself. rearm: true opens a new window on '
+        'the same widget. Rebuilds need no level 3 from you; causes need '
+        'PinPoint.run.',
+    {
+      'handle': _handle,
+      'target': _target,
+      'wait_ms': _waitMs,
+      'seconds': {
+        'type': 'integer',
+        'description':
+            'Window length for the first call (default 30, at most 30).',
+      },
+      'rearm': {
+        'type': 'boolean',
+        'description':
+            'Open a new window on this widget even if it was armed lately.',
       },
     },
   ),

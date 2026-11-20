@@ -19,4 +19,6 @@ With the pinpoint MCP server connected, use its tools instead: list_notes,
 get_note (it attaches the screenshot), then update_note(id, "resolved",
 message) with one line saying what you changed. The pin in the app
 updates. Leave $dir/drafts/ alone: drafts are not sent yet.
+To learn why two values change together, or what changed a value, call
+state_flow with the widget as target, act, then call it again.
 ''';

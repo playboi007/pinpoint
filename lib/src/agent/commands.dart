@@ -26,6 +26,8 @@ import '../search/source_index.dart';
 import '../search/source_resolver.dart';
 import '../sink/bridge_client.dart';
 import '../sink/http_sink.dart' show HttpSinkException;
+import '../state/build_stacks.dart' show BuildStacks;
+import '../state/state_lens.dart';
 import '../tape/browser_page.dart';
 import '../tape/net_matcher.dart';
 import '../tape/tape_boot.dart';
@@ -354,6 +356,7 @@ class AgentCommands {
       'stop_replay' => await stopReplay(),
       'why' => why(args),
       'caused_by' => causedBy(args),
+      'state_flow' => stateFlow(args),
       _ => throw AgentError('unknown tool: $tool'),
     };
   }
@@ -821,6 +824,55 @@ class AgentCommands {
       widget: target.widget.runtimeType.toString().split('<').first,
       since: since,
     );
+  }
+
+  /// `state_flow`: why a value changed, from the state lens (PLAN-v3
+  /// Milestone 21, step 8). With no window on [target], it opens one and
+  /// answers what the target reads; with one open (or one that ended less
+  /// than [StateLens.recentFor] ago) it answers the chain since arming.
+  Map<String, Object?> stateFlow(Map<String, Object?> args) {
+    final session = _trace();
+    final target = element(args);
+    final lens = session.stateLens;
+    final seconds = args['seconds'];
+    if (seconds != null && (seconds is! num || seconds <= 0)) {
+      throw const AgentError('seconds is a number above 0, at most 30');
+    }
+    final window = seconds is num
+        ? Duration(milliseconds: (seconds * 1000).round())
+        : StateLens.defaultWindow;
+    final armNow = args['rearm'] == true || !lens.wasTarget(target);
+    if (armNow) {
+      lens.arm(target, window: window);
+      if (!lens.armed) {
+        throw const AgentError(
+          'the state lens could not be armed (the widget is not mounted)',
+        );
+      }
+    }
+    final state = lens.value;
+    final summary = lens.stacksSummary;
+    final notes = <String>[
+      ?session.recorder.causeHint,
+      if (!state.rebuildsRecorded)
+        'rebuilds are not recorded (another tool holds the rebuild slot): '
+            'the notifies are listed, the readers that rebuilt are not',
+      if (summary != null && summary.dropped > 0)
+        '${summary.dropped} setState stacks were dropped (cap '
+            '${BuildStacks.defaultMaxPerSecond} a second)',
+      if (summary?.failure != null) 'setState stacks: ${summary!.failure}',
+    ];
+    return {
+      'armedNow': armNow,
+      'armed': lens.armed,
+      'target': {'type': state.targetType, 'source': state.targetSource},
+      'seconds': state.window.inSeconds,
+      'secondsLeft': lens.secondsLeft,
+      'ended': ?state.endedBecause,
+      'readers': lens.readersJson(),
+      ...lens.chain(),
+      if (notes.isNotEmpty) 'notes': notes,
+    };
   }
 
   /// `mark`: a moment the agent points at.

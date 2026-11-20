@@ -20,6 +20,8 @@ import 'note_store.dart';
 import 'png_resize.dart';
 import 'probe_scan.dart';
 import 'run_store.dart';
+import 'source_lookup.dart';
+import 'state_flow_text.dart';
 import 'tape_store.dart';
 
 /// The MCP protocol versions this server speaks, newest first.
@@ -49,14 +51,21 @@ class McpServer {
     this.reloader,
     TapeStore? tapes,
     RunStore? runs,
+    SourceLookup? source,
     this.version = '0.0.1',
     void Function(String line) log = _noLog,
   }) : _tapes = tapes,
        _runs = runs,
+       _source = source,
        _log = log;
 
   final TapeStore? _tapes;
   final RunStore? _runs;
+  final SourceLookup? _source;
+
+  /// The app's source for `state_flow`: the project folder is the one that
+  /// holds the notes folder.
+  late final SourceLookup source = _source ?? SourceLookup(store.root.parent);
 
   /// Replay runs on disk.
   late final RunStore runs = _runs ?? RunStore(store.root);
@@ -151,7 +160,9 @@ class McpServer {
                     'happened over time, call get_trace (trace_detail or '
                     'watch add rebuilds and state). To learn what started '
                     'an event, call why with its seq; to learn what a '
-                    'widget started, caused_by. For a value no '
+                    'widget started, caused_by; to learn why two values '
+                    'change together, or what changed a value, state_flow. '
+                    'For a value no '
                     'diagnostics show, add a PinPoint.probe line, '
                     'hot_reload, read it with get_trace, and remove it '
                     'before you set the note fixed (list_probes). A note '
@@ -593,6 +604,9 @@ class McpServer {
         );
       }
       return _resultContent({...status});
+    }
+    if (tool == 'state_flow' && result is Map<String, Object?>) {
+      return _text(await stateFlowText(result, source));
     }
     if (tool == 'stress_matrix' && result is Map<String, Object?>) {
       return _text(jsonEncode(await _stressThumbnails({...result})));

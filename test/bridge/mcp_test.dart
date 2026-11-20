@@ -120,6 +120,19 @@ void main() {
     }
   }
 
+  test('the instructions say when to use state_flow (Milestone 21)', () async {
+    final init = await rpc('initialize', {'protocolVersion': '2025-06-18'});
+    final text = ((init['result']! as Map)['instructions']! as String)
+        .replaceAll(RegExp(r'\s+'), ' ');
+    expect(
+      text,
+      contains(
+        'to learn why two values change together, or what changed a value, '
+        'state_flow',
+      ),
+    );
+  });
+
   test('a scripted session: initialize, list tools, call each tool', () async {
     final wide = encodePng(
       RawImage(1600, 400, 4, Uint8List(1600 * 400 * 4)..fillRange(0, 4, 255)),

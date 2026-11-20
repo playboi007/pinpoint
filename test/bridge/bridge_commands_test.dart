@@ -104,6 +104,16 @@ void main() {
     final names = [for (final t in tools) (t! as Map)['name']];
     expect(names, containsAll(<String>[...agentToolNames]));
     expect(agentToolNames, containsAll(<String>['get_screen', 'tap']));
+    expect(names, contains('state_flow'));
+    final flow =
+        tools.firstWhere((t) => (t! as Map)['name'] == 'state_flow')!
+            as Map<String, Object?>;
+    expect(flow['description'], contains('why two values change together'));
+    expect(flow['description'], contains('what changed a value'));
+    expect(
+      ((flow['inputSchema']! as Map)['properties']! as Map).keys,
+      containsAll(<String>['target', 'seconds']),
+    );
   });
 
   test('get_screen end to end: queued by the tool, taken by the long poll, '

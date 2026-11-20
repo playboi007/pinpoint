@@ -41,6 +41,13 @@ void main() {
     expect(agentInstructions(dir: 'notes'), contains('notes/open/*.md'));
   });
 
+  test('the section says when to call state_flow', () {
+    final text = agentInstructions();
+    expect(text, contains('why two values change together'));
+    expect(text, contains('what changed a value'));
+    expect(text, contains('state_flow'));
+  });
+
   test('the bridge prints the section when no agent file has it', () async {
     final log = await startOnce();
     expect(log.join('\n'), contains(agentInstructions()));
