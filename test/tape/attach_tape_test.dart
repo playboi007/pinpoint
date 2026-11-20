@@ -142,6 +142,7 @@ void main() {
               accept: (_) {},
               reopen: (_, _) {},
               edit: (_, _) {},
+              undo: (_, _, _, _) {},
               replay: (_) {},
             ),
           ),

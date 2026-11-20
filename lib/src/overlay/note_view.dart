@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../model/annotation.dart';
+import '../model/note_round.dart';
 import '../theme/controls.dart';
+import '../theme/pinpoint_motion.dart';
 import '../theme/pinpoint_tokens.dart';
 import 'pin_marker.dart';
 
@@ -14,6 +16,7 @@ class NoteActions {
     required this.accept,
     required this.reopen,
     required this.edit,
+    required this.undo,
     this.replay,
   });
 
@@ -39,6 +42,17 @@ class NoteActions {
 
   /// The draft's comment was edited.
   final void Function(String id, String comment) edit;
+
+  /// Undoes [changes] (ids like `c1`, or `['*']` for all) of round [round]
+  /// of the note, with the user's reason (null when none was typed)
+  /// (PLAN-v3 Milestone 20).
+  final void Function(
+    String id,
+    int round,
+    List<String> changes,
+    String? reason,
+  )
+  undo;
 }
 
 /// A pinned note in the info panel: its status, comment and the agent's
@@ -62,8 +76,50 @@ class NoteView extends StatefulWidget {
   static const Key reopenKey = ValueKey<String>('pinpoint.note.reopen');
   static const Key replayKey = ValueKey<String>('pinpoint.note.replay');
 
-  /// "What is still wrong?": sent with Reopen.
+  /// "What is still wrong?": sent with Reopen and with Undo.
   static const Key reasonKey = ValueKey<String>('pinpoint.note.reason');
+
+  /// The `Changes · N` button at the top right of the header.
+  static const Key changesKey = ValueKey<String>('pinpoint.note.changes');
+
+  /// The section the button opens.
+  static const Key changesSectionKey = ValueKey<String>(
+    'pinpoint.note.changesSection',
+  );
+  static const Key undoSelectedKey = ValueKey<String>(
+    'pinpoint.note.undoSelected',
+  );
+  static const Key undoAllKey = ValueKey<String>('pinpoint.note.undoAll');
+
+  /// The checkbox of change [id].
+  static Key changeKey(String id) =>
+      ValueKey<String>('pinpoint.note.change.$id');
+
+  /// The cell of round [n] in the round picker.
+  static Key roundKey(int n) => ValueKey<String>('pinpoint.note.round.$n');
+
+  /// The latest round the agent closed, or null. Only a closed round can
+  /// be undone (the bridge refuses an open one).
+  static NoteRound? latestClosedRound(Annotation note) =>
+      closedRounds(note).lastOrNull;
+
+  /// The closed rounds of [note], oldest first.
+  static List<NoteRound> closedRounds(Annotation note) => [
+    for (final r in note.roundViews)
+      if (!r.isOpen) r,
+  ];
+
+  /// Whether the `Changes` button shows: the agent is not working, the
+  /// note is not a draft, and the latest closed round has changes.
+  static bool canUndo(Annotation note) {
+    final status = note.status;
+    if (status == NoteStatus.draft ||
+        status == NoteStatus.submitted ||
+        status == NoteStatus.inProgress) {
+      return false;
+    }
+    return latestClosedRound(note)?.changes.isNotEmpty ?? false;
+  }
 
   /// Whether the user can accept [note]: the agent says it is done, or it
   /// worked the note at least once. The user decides what is done: after a
@@ -106,8 +162,17 @@ class _NoteViewState extends State<NoteView> {
     text: widget.note.comment,
   );
 
-  /// Why the user reopens the note.
+  /// Why the user reopens the note, or undoes some of the agent's work.
   final TextEditingController _reason = TextEditingController();
+
+  /// Whether the changes section is open.
+  bool _changesOpen = false;
+
+  /// The round the section shows; null: the latest closed one.
+  int? _round;
+
+  /// The ticked changes of the shown round.
+  final Set<String> _ticked = <String>{};
 
   @override
   void didUpdateWidget(NoteView oldWidget) {
@@ -117,7 +182,49 @@ class _NoteViewState extends State<NoteView> {
     if (oldWidget.note.id != widget.note.id) {
       _text.text = widget.note.comment;
       _reason.clear();
+      _closeChanges();
+    } else if (!NoteView.canUndo(widget.note)) {
+      // The agent works again (or the note is gone from the fixed state):
+      // the section would be about old work.
+      _closeChanges();
     }
+  }
+
+  void _closeChanges() {
+    _changesOpen = false;
+    _round = null;
+    _ticked.clear();
+  }
+
+  /// The round the section shows.
+  NoteRound? get _shownRound {
+    final rounds = NoteView.closedRounds(widget.note);
+    for (final r in rounds) {
+      if (r.n == _round) return r;
+    }
+    return rounds.lastOrNull;
+  }
+
+  /// Undoes the ticked changes (or all, with [all]) of the shown round.
+  void _undo({required bool all}) {
+    final round = _shownRound;
+    if (round == null) return;
+    final ids = all
+        ? const ['*']
+        : [
+            for (final c in round.changes)
+              if (_ticked.contains(c.id) && !round.isUndone(c.id)) c.id,
+          ];
+    if (ids.isEmpty) return;
+    final reason = _reason.text.trim();
+    _reason.clear();
+    setState(_closeChanges);
+    widget.actions.undo(
+      widget.note.id,
+      round.n,
+      ids,
+      reason.isEmpty ? null : reason,
+    );
   }
 
   @override
@@ -176,8 +283,21 @@ class _NoteViewState extends State<NoteView> {
                 style: tokens.caps.copyWith(color: tokens.ink),
               ),
             ),
+            if (NoteView.canUndo(note)) ...[
+              const SizedBox(width: 8),
+              DraftButton.link(
+                key: NoteView.changesKey,
+                label:
+                    'Changes · ${NoteView.latestClosedRound(note)!.changes.length}',
+                onPressed: () => setState(() {
+                  _changesOpen = !_changesOpen;
+                  if (!_changesOpen) _ticked.clear();
+                }),
+              ),
+            ],
           ],
         ),
+        _changesSection(tokens, note),
         const SizedBox(height: 12),
         if (draft)
           TextField(
@@ -235,6 +355,112 @@ class _NoteViewState extends State<NoteView> {
     );
   }
 
+  /// The section under the header: the shown round, a checkbox for each
+  /// change, and the undo buttons. It grows in and out; with reduced motion
+  /// it does not, because `AnimatedSize` with a zero duration asserts.
+  Widget _changesSection(PinPointTokens tokens, Annotation note) {
+    final round = _shownRound;
+    final open = _changesOpen && round != null && NoteView.canUndo(note);
+    final content = open
+        ? Padding(
+            key: NoteView.changesSectionKey,
+            padding: const EdgeInsets.only(top: 12),
+            child: _changes(tokens, note, round),
+          )
+        : const SizedBox(key: ValueKey<String>('none'), width: double.infinity);
+    final motion = PinPointMotion.of(context);
+    if (motion.reduced) {
+      return Align(
+        alignment: Alignment.topCenter,
+        heightFactor: 1,
+        child: content,
+      );
+    }
+    return AnimatedSize(
+      duration: motion.moderate,
+      curve: PinPointMotion.enter,
+      alignment: Alignment.topCenter,
+      child: content,
+    );
+  }
+
+  Widget _changes(PinPointTokens tokens, Annotation note, NoteRound round) {
+    final rounds = NoteView.closedRounds(note);
+    final git = round.hasCheckpoints;
+    final undoable = [
+      for (final c in round.changes)
+        if (!round.isUndone(c.id)) c,
+    ];
+    final selected = undoable.where((c) => _ticked.contains(c.id)).length;
+    return Container(
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(border: Border.all(color: tokens.rule)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const CapsText('CHANGES'),
+              const SizedBox(width: 8),
+              if (rounds.length > 1)
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: DraftSegmented<int>(
+                        items: [for (final r in rounds) (r.n, 'R${r.n}')],
+                        value: round.n,
+                        cellWidth: 32,
+                        cellKey: NoteView.roundKey,
+                        onChanged: (n) => setState(() {
+                          _round = n;
+                          _ticked.clear();
+                        }),
+                      ),
+                    ),
+                  ),
+                )
+              else
+                Text('Round ${round.n}', style: tokens.micro),
+            ],
+          ),
+          for (final change in round.changes)
+            _ChangeRow(
+              change: change,
+              undone: round.isUndone(change.id),
+              ticked: _ticked.contains(change.id),
+              onChanged: (on) => setState(() {
+                if (on) {
+                  _ticked.add(change.id);
+                } else {
+                  _ticked.remove(change.id);
+                }
+              }),
+            ),
+          const SizedBox(height: 8),
+          Wrap(
+            alignment: WrapAlignment.end,
+            spacing: 8,
+            runSpacing: 4,
+            children: [
+              DraftButton.link(
+                key: NoteView.undoSelectedKey,
+                label: git ? 'Undo selected' : 'Ask agent to undo selected',
+                onPressed: selected == 0 ? null : () => _undo(all: false),
+              ),
+              DraftButton.link(
+                key: NoteView.undoAllKey,
+                label: git ? 'Undo all' : 'Ask agent to undo all',
+                onPressed: undoable.isEmpty ? null : () => _undo(all: true),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _footer(PinPointTokens tokens, Annotation note) {
     final id = note.id;
     final status = note.status;
@@ -253,14 +479,16 @@ class _NoteViewState extends State<NoteView> {
             TextField(
               key: NoteView.reasonKey,
               controller: _reason,
-              maxLines: 1,
-              textInputAction: TextInputAction.send,
-              onSubmitted: (_) => _reopen(),
+              // One line that grows to four. Enter adds a line; Reopen and
+              // Undo send the text.
+              minLines: 1,
+              maxLines: 4,
+              keyboardType: TextInputType.multiline,
               onTapOutside: (_) {},
               style: tokens.body,
               decoration: InputDecoration(
                 isDense: true,
-                hintText: 'What is still wrong? Sent with Reopen',
+                hintText: 'What is still wrong? Sent with Reopen or Undo',
                 hintStyle: tokens.body.copyWith(color: tokens.muted),
                 contentPadding: const EdgeInsets.all(8),
               ),
@@ -318,6 +546,86 @@ class _NoteViewState extends State<NoteView> {
                 ),
             ],
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// One change of a round: a checkbox with the agent's summary, then a line
+/// for each file with its counts. A change that is already undone is struck
+/// through and cannot be ticked.
+class _ChangeRow extends StatelessWidget {
+  const _ChangeRow({
+    required this.change,
+    required this.undone,
+    required this.ticked,
+    required this.onChanged,
+  });
+
+  final RoundChange change;
+  final bool undone;
+  final bool ticked;
+  final ValueChanged<bool> onChanged;
+
+  /// The last two parts of [path], with `…/` before them when it is longer.
+  static String shortPath(String path) {
+    final parts = path.split('/');
+    if (parts.length <= 2) return path;
+    return '…/${parts.sublist(parts.length - 2).join('/')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = PinPointTokens.of(context);
+    final muted = undone ? tokens.faint : tokens.muted;
+    final style = tokens.value.copyWith(
+      fontSize: 11,
+      height: 14 / 11,
+      color: muted,
+      decoration: undone ? TextDecoration.lineThrough : null,
+    );
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: DraftCheckbox(
+                    key: NoteView.changeKey(change.id),
+                    value: ticked && !undone,
+                    onChanged: undone ? null : onChanged,
+                    label: change.summary.isEmpty ? change.id : change.summary,
+                    strike: undone,
+                  ),
+                ),
+              ),
+              if (change.shared) ...[
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: tokens.rule),
+                  ),
+                  child: Text('shared', style: tokens.micro),
+                ),
+              ],
+            ],
+          ),
+          for (final file in change.files)
+            Padding(
+              padding: const EdgeInsets.only(left: 20, top: 2),
+              child: Text(
+                '${shortPath(file.path)}'
+                '${file.added == null ? '' : ' +${file.added}'}'
+                '${file.removed == null ? '' : ' −${file.removed}'}',
+                style: style,
+              ),
+            ),
         ],
       ),
     );
