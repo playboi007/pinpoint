@@ -15,6 +15,7 @@ import 'hot_reload.dart';
 import 'mcp_server.dart';
 import 'note_store.dart';
 import 'run_store.dart';
+import 'source_lookup.dart';
 import 'tape_store.dart';
 
 /// Why the bridge could not start.
@@ -44,6 +45,13 @@ class BridgeStartException implements Exception {
 ///   since a cursor. With `wait` (seconds, at most [changesWait]) the
 ///   answer is held until there is a change. With `client`, the changes
 ///   that client wrote itself are left out. The writes take `client` too.
+/// - `GET /source?file=<path>&line=<n>&before=<n>`: the lines of the method
+///   around a line of a project file, as `{file, start, end, text}`. 400
+///   for bad input, 403 for a path outside the project, 404 for a missing
+///   file.
+/// - `GET /declaration?type=<Name>`: where a class, mixin, enum or
+///   extension type is declared in `lib/`, as `{type, file, line}`; 404
+///   when there is none.
 /// - `GET /health`.
 ///
 /// MCP for the agent: `POST /mcp` (Streamable HTTP with JSON answers; no
@@ -166,6 +174,10 @@ class PinPointBridge {
   /// Replay runs on disk.
   late final RunStore runs = RunStore(store.root);
 
+  /// The app's source for the state lens: the project folder is the one
+  /// that holds the notes folder.
+  late final SourceLookup source = SourceLookup(store.root.parent);
+
   final List<String> _allowedOrigins;
   late final McpServer _mcp = McpServer(
     store,
@@ -211,6 +223,8 @@ class PinPointBridge {
           path == annotationsPath ||
           path == healthPath ||
           path == changesPath ||
+          path == sourcePath ||
+          path == declarationPath ||
           path == mcpPath ||
           path == commandsPath ||
           path.startsWith('$commandsPath/') ||
@@ -341,6 +355,10 @@ class PinPointBridge {
           'cursor': store.cursor,
           'notes': notes,
         });
+      case ('GET', sourcePath):
+        return _source(request);
+      case ('GET', declarationPath):
+        return _declaration(request);
       case ('GET', changesPath):
         final query = request.uri.queryParameters;
         // Ends the hold when the app closes the request (the tab went
@@ -362,10 +380,56 @@ class PinPointBridge {
         return _json(response, HttpStatus.ok, changes.toJson());
     }
     response.headers.set('allow', switch (path) {
-      healthPath || changesPath => 'GET, OPTIONS',
+      healthPath ||
+      changesPath ||
+      sourcePath ||
+      declarationPath => 'GET, OPTIONS',
       _ => 'GET, POST, OPTIONS',
     });
     _error(response, HttpStatus.methodNotAllowed, 'Method not allowed');
+  }
+
+  /// `GET /source?file&line&before`: the lines of a method (Milestone 21).
+  Future<void> _source(HttpRequest request) async {
+    final response = request.response;
+    final query = request.uri.queryParameters;
+    final file = query['file'];
+    final line = int.tryParse(query['line'] ?? '');
+    final before = query['before'] == null
+        ? 15
+        : int.tryParse(query['before']!);
+    if (file == null || file.isEmpty) {
+      return _error(response, HttpStatus.badRequest, 'Give file=<path>');
+    }
+    if (line == null || line < 1) {
+      return _error(response, HttpStatus.badRequest, 'Give line=<n>, 1 or up');
+    }
+    if (before == null || before < 0) {
+      return _error(response, HttpStatus.badRequest, 'before must be 0 or up');
+    }
+    try {
+      final snippet = await source.methodLines(file, line, before: before);
+      _json(response, HttpStatus.ok, snippet.toJson());
+    } on SourceLookupException catch (error) {
+      _error(response, error.status, error.message);
+    }
+  }
+
+  /// `GET /declaration?type=Name`: where a type is declared (Milestone 21).
+  Future<void> _declaration(HttpRequest request) async {
+    final response = request.response;
+    final type = request.uri.queryParameters['type'];
+    if (type == null || type.isEmpty) {
+      return _error(response, HttpStatus.badRequest, 'Give type=<Name>');
+    }
+    try {
+      final found = await source.declaration(type);
+      return found == null
+          ? _error(response, HttpStatus.notFound, 'No declaration of $type')
+          : _json(response, HttpStatus.ok, found.toJson());
+    } on SourceLookupException catch (error) {
+      _error(response, error.status, error.message);
+    }
   }
 
   /// Tapes from the app (PLAN-v2 Milestone 15): `POST /tapes` stores one,

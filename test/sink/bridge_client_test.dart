@@ -125,6 +125,30 @@ void main() {
     expect((await client.changes(start)).deleted, ['pp_a']);
   });
 
+  test('source and declaration: the app asks the bridge for code', () async {
+    File('${root.path}/pubspec.yaml').writeAsStringSync('name: my_app\n');
+    Directory('${root.path}/lib').createSync();
+    File('${root.path}/lib/model.dart').writeAsStringSync(
+      'class Foo {\n'
+      '  void go() {\n'
+      '    notifyListeners();\n'
+      '  }\n'
+      '}\n',
+    );
+
+    final source = await client.source('package:my_app/model.dart', 3);
+    expect(source, isNotNull);
+    expect(source!.file, 'lib/model.dart');
+    expect((source.start, source.end), (2, 3));
+    expect(source.text, '  void go() {\n    notifyListeners();');
+    expect(await client.source('lib/none.dart', 1), isNull);
+    expect(await client.source('../outside.dart', 1), isNull);
+
+    final found = await client.declaration('Foo<T>');
+    expect(found, (file: 'lib/model.dart', line: 1));
+    expect(await client.declaration('Nope'), isNull);
+  });
+
   test('a stopped bridge throws an HttpSinkException', () async {
     await bridge.close();
     await expectLater(client.load(), throwsA(isA<HttpSinkException>()));

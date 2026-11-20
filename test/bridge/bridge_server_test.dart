@@ -438,6 +438,97 @@ void main() {
     });
   });
 
+  group('GET /source and /declaration (Milestone 21)', () {
+    Future<(int, Map<String, Object?>)> get(String path) async {
+      final client = HttpClient();
+      try {
+        final request = await client.getUrl(url(path));
+        final response = await request.close();
+        final body = jsonDecode(await utf8.decodeStream(response));
+        return (response.statusCode, body as Map<String, Object?>);
+      } finally {
+        client.close(force: true);
+      }
+    }
+
+    setUp(() {
+      File('${root.path}/pubspec.yaml').writeAsStringSync('name: my_app\n');
+      Directory('${root.path}/lib').createSync();
+      File('${root.path}/lib/model.dart').writeAsStringSync(
+        'class Foo extends ChangeNotifier {\n'
+        '  void go() {\n'
+        '    _a = true;\n'
+        '    notifyListeners();\n'
+        '  }\n'
+        '}\n'
+        'class _FooState extends State<Foo> {}\n',
+      );
+    });
+
+    test('/source gives the lines of the method', () async {
+      final (status, body) = await get(
+        '$sourcePath?file=lib/model.dart&line=4',
+      );
+      expect(status, 200);
+      expect(body, {
+        'file': 'lib/model.dart',
+        'start': 2,
+        'end': 4,
+        'text': '  void go() {\n    _a = true;\n    notifyListeners();',
+      });
+      final (packageStatus, packageBody) = await get(
+        '$sourcePath?file=${Uri.encodeQueryComponent('package:my_app/model.dart')}'
+        '&line=3&before=1',
+      );
+      expect(packageStatus, 200);
+      expect(packageBody['file'], 'lib/model.dart');
+    });
+
+    test('/source: 400 for bad input, 403 outside the project, 404 for a '
+        'missing file', () async {
+      for (final (query, expected) in [
+        ('', 400),
+        ('file=lib/model.dart', 400),
+        ('file=lib/model.dart&line=x', 400),
+        ('file=lib/model.dart&line=0', 400),
+        ('file=lib/model.dart&line=2&before=-1', 400),
+        ('file=lib/model.dart&line=99', 400),
+        ('file=pubspec.yaml&line=1', 400),
+        ('file=${Uri.encodeQueryComponent('../x.dart')}&line=1', 403),
+        ('file=${Uri.encodeQueryComponent('/etc/hosts.dart')}&line=1', 403),
+        ('file=lib/none.dart&line=1', 404),
+      ]) {
+        final (status, body) = await get('$sourcePath?$query');
+        expect(status, expected, reason: query);
+        expect(body['error'], isA<String>(), reason: query);
+      }
+    });
+
+    test('/declaration finds a class, or answers 404', () async {
+      var (status, body) = await get('$declarationPath?type=Foo');
+      expect(status, 200);
+      expect(body, {'type': 'Foo', 'file': 'lib/model.dart', 'line': 1});
+      (status, body) = await get('$declarationPath?type=_FooState');
+      expect(status, 200);
+      expect(body['line'], 7);
+      expect((await get('$declarationPath?type=Nope')).$1, 404);
+      expect((await get('$declarationPath?type=Fo')).$1, 404);
+      expect((await get(declarationPath)).$1, 400);
+    });
+
+    test('a page from another origin is refused, a preflight passes', () async {
+      final client = HttpClient();
+      addTearDown(() => client.close(force: true));
+      final request = await client.getUrl(url('$declarationPath?type=Foo'));
+      request.headers.set('origin', 'http://evil.example');
+      final response = await request.close();
+      await response.drain<void>();
+      expect(response.statusCode, 403);
+      expect((await send('OPTIONS', sourcePath)).statusCode, 204);
+      expect((await send('POST', sourcePath)).statusCode, 405);
+    });
+  });
+
   test('the folder ignores itself in git', () {
     expect(
       File('${root.path}/.pinpoint/.gitignore').readAsStringSync().trim(),

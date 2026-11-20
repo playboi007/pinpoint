@@ -240,6 +240,50 @@ class BridgeClient {
     }
   }
 
+  /// The lines of the method around [line] of [file], as `{file, start,
+  /// end, text}`, or null when the bridge has no such file or refuses the
+  /// path (PLAN-v3 Milestone 21). [before] is how far up the method start
+  /// is looked for.
+  Future<({String file, int start, int end, String text})?> source(
+    String file,
+    int line, {
+    int before = 15,
+  }) async {
+    final Map<String, Object?> json;
+    try {
+      json = await _send(
+        'GET',
+        _at(sourcePath, {'file': file, 'line': '$line', 'before': '$before'}),
+      );
+    } on HttpSinkException catch (error) {
+      if (const {400, 403, 404}.contains(error.statusCode)) return null;
+      rethrow;
+    }
+    final found = json['file'];
+    final start = json['start'];
+    final end = json['end'];
+    final text = json['text'];
+    if (found is String && start is int && end is int && text is String) {
+      return (file: found, start: start, end: end, text: text);
+    }
+    return null;
+  }
+
+  /// Where the type [type] is declared, as `{file, line}`, or null when the
+  /// bridge finds none (PLAN-v3 Milestone 21).
+  Future<({String file, int line})?> declaration(String type) async {
+    final Map<String, Object?> json;
+    try {
+      json = await _send('GET', _at(declarationPath, {'type': type}));
+    } on HttpSinkException catch (error) {
+      if (error.statusCode == 404 || error.statusCode == 400) return null;
+      rethrow;
+    }
+    final file = json['file'];
+    final line = json['line'];
+    return file is String && line is int ? (file: file, line: line) : null;
+  }
+
   /// Where the replay run [run] is: `{state, step, of, first_difference,
   /// …}` as the player answers. The bridge's `replay` waits for it after a
   /// restart.

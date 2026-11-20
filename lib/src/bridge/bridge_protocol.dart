@@ -21,6 +21,13 @@ const String healthPath = '/health';
 /// What changed since a cursor, for the app's poll.
 const String changesPath = '/changes';
 
+/// The lines of the method around a file and line (`GET /source?file=&line=
+/// &before=`), for the state lens (PLAN-v3 Milestone 21).
+const String sourcePath = '/source';
+
+/// Where a class is declared (`GET /declaration?type=Name`).
+const String declarationPath = '/declaration';
+
 /// The MCP endpoint for the agent (Streamable HTTP, JSON answers).
 const String mcpPath = '/mcp';
 
