@@ -75,6 +75,14 @@ void main() {
         expect(bridgeUsage, contains(flag));
       }
     });
+
+    test('the usage text points to the tool list and has no stale list', () {
+      expect(bridgeUsage, contains('tools.md'));
+      expect(bridgeUsage, contains('docs/agent-tools.md'));
+      expect(bridgeUsage, contains('config.json'));
+      expect(bridgeUsage, isNot(contains('get_note and update_note')));
+      expect(bridgeUsage, isNot(contains('list_notes')));
+    });
   });
 
   test('nothing bin/ imports uses dart:ui or package:flutter', () {

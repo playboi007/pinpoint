@@ -57,7 +57,7 @@ void main() {
         text,
         contains('separate change, so the user can undo one of them'),
       );
-      expect(text, contains('After an undo the note comes back submitted'));
+      expect(text, contains('After an undo the note is submitted again'));
       expect(text, contains('do not make the undone changes again'));
       expect(text, contains('"Undo these changes yourself"'));
       expect(text, contains('get_note_diff gives the patch'));

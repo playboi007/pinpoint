@@ -13,12 +13,14 @@ import '../model/note_round.dart';
 import '../sink/markdown_formatter.dart' show verificationLines;
 import '../trace/trace_format.dart';
 import '../trace/trace_recorder.dart';
+import 'agent_instructions.dart';
 import 'agent_tools.dart';
 import 'command_queue.dart';
 import 'hot_reload.dart';
 import 'note_detail.dart';
 import 'note_rounds.dart';
 import 'note_store.dart';
+import 'package_version.dart';
 import 'png_resize.dart';
 import 'probe_scan.dart';
 import 'run_store.dart';
@@ -58,7 +60,7 @@ class McpServer {
     TapeStore? tapes,
     RunStore? runs,
     SourceLookup? source,
-    this.version = '0.0.1',
+    this.version = pinpointVersion,
     void Function(String line) log = _noLog,
   }) : _tapes = tapes,
        _runs = runs,
@@ -154,35 +156,15 @@ class McpServer {
           'set it inProgress, open the Source file at the line, make the '
           'change, run flutter analyze, then set it resolved (or fixed, or '
           'rejected) with a one-line message saying what you did. The user '
-          'accepts the result in the app. A note the user reopened is '
-          'submitted again, "reopened" in its header, with their reason as '
-          'the last reply: work it again, set it fixed again, and call '
-          'verify_note again if it has checks. Finish every code change for '
-          'a note that way, also when the user asked for it in chat: the pin '
-          'shows only what update_note says. When you set a note fixed, '
-          'give changes: one {summary, files} for each separate change, so '
-          'the user can undo one of them. After an undo the note is '
-          'submitted again: do not make the undone changes again. If the '
-          'last reply says "Undo these changes yourself", revert those '
-          'files (get_note_diff gives the patch), then continue.'
-          '${commands == null ? '' : ' To operate the app, name widgets with '
-                    'target queries and put several actions in one '
-                    'run_steps call; check once at the end. To see what '
-                    'happened over time, call get_trace (trace_detail or '
-                    'watch add rebuilds and state). To learn what started '
-                    'an event, call why with its seq; to learn what a '
-                    'widget started, caused_by; to learn why two values '
-                    'change together, or what changed a value, state_flow. '
-                    'For a value no '
-                    'diagnostics show, add a PinPoint.probe line, '
-                    'hot_reload, read it with get_trace, and remove it '
-                    'before you set the note fixed (list_probes). A note '
-                    'that "has tape" can happen again: replay({tape}) '
-                    'plays what the user did and answers first_difference; '
-                    'until: "mark" holds at the user\'s mark for get_state '
-                    'and screenshot. Read the run with get_trace({run}).'}',
+          'accepts the result in the app. $reopenedLine $finishInNotesLine '
+          '$changeLabelsLine $undoLine'
+          '${commands == null ? '' : ' $operateLine $readTraceLine $probeLine '
+                    '$tapeLine'}',
     };
   }
+
+  /// The definitions of the note and tape tools (they need no app).
+  static List<Map<String, Object?>> get noteTools => _tools;
 
   static final List<Map<String, Object?>> _tools = [
     {

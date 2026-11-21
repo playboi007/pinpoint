@@ -8,7 +8,9 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import '../model/annotation.dart' show NoteStatus, annotationSchema, clipText;
+import 'agent_guide.dart';
 import 'agent_instructions.dart';
+import 'bridge_config.dart';
 import 'bridge_protocol.dart';
 import 'command_queue.dart';
 import 'hot_reload.dart';
@@ -175,13 +177,14 @@ class PinPointBridge {
       );
     }
     _hintInstructions(folder, log);
+    _hintStaleGuide(folder, log);
     if (lan) {
       log(
         'pinpoint: LAN mode. Every device on this network can reach port '
         '${server.port}.',
       );
     }
-    return PinPointBridge._(
+    final bridge = PinPointBridge._(
       server,
       store,
       allowedOrigins,
@@ -189,7 +192,19 @@ class PinPointBridge {
       timing: timing,
       ttl: ttl,
     );
+    bridge._status = runningStatus(
+      port: server.port,
+      root: folder.parent.path,
+      now: DateTime.now(),
+    );
+    if (!await writeBridgeStatus(folder, bridge._status)) {
+      log('pinpoint: could not write ${folder.path}/$bridgeConfigFileName');
+    }
+    return bridge;
   }
+
+  /// What `<dir>/config.json` says while the bridge runs.
+  Map<String, Object?> _status = const <String, Object?>{};
 
   final HttpServer _server;
 
@@ -236,7 +251,8 @@ class PinPointBridge {
   /// The folder an agent reads: `<dir>/open/`.
   Directory get openDir => store.openDir;
 
-  /// Stops listening and drops open connections.
+  /// Stops listening and drops open connections, and marks `config.json`
+  /// as stopped.
   Future<void> close() async {
     _expireTimer?.cancel();
     _tmpTimer?.cancel();
@@ -244,6 +260,7 @@ class PinPointBridge {
     store.close();
     await _subscription.cancel();
     await _server.close(force: true);
+    await markBridgeStopped(store.root, _status, DateTime.now());
   }
 
   Future<void> _handle(HttpRequest request) async {
@@ -877,6 +894,19 @@ class PinPointBridge {
       'to CLAUDE.md (Claude Code) or AGENTS.md in $project:\n\n'
       '${agentInstructions(dir: dir)}',
     );
+  }
+
+  /// Logs one line when the guide files in `<dir>/` are from an older
+  /// package version (`dart run pinpoint:setup --refresh` rewrites them).
+  static void _hintStaleGuide(Directory folder, void Function(String) log) {
+    try {
+      final file = File('${folder.path}/SKILL.md');
+      if (!file.existsSync()) return;
+      final line = staleGuideLine(file.readAsStringSync());
+      if (line != null) log(line);
+    } on FileSystemException {
+      // Unreadable: nothing to say.
+    }
   }
 
   bool _originAllowed(String origin) =>

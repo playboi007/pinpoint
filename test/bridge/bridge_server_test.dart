@@ -242,6 +242,7 @@ void main() {
       expect(names(root), ['.pinpoint'], reason: 'nothing beside the folder');
       expect(names(Directory('${root.path}/.pinpoint')), [
         '.gitignore',
+        'config.json',
         'drafts',
         'open',
         'resolved',

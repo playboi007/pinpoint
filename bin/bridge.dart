@@ -61,11 +61,20 @@ Future<void> main(List<String> args) async {
     )
     ..writeln('pinpoint: Ctrl+C stops it.');
 
-  late final StreamSubscription<ProcessSignal> interrupt;
-  interrupt = ProcessSignal.sigint.watch().listen((_) async {
-    await interrupt.cancel();
+  // Ctrl+C and `kill` stop the bridge cleanly, so config.json says
+  // "stopped". (SIGTERM cannot be watched on Windows.)
+  final subscriptions = <StreamSubscription<ProcessSignal>>[];
+  Future<void> stop() async {
+    for (final subscription in subscriptions) {
+      await subscription.cancel();
+    }
     await bridge.close();
-  });
+  }
+
+  subscriptions.add(ProcessSignal.sigint.watch().listen((_) => stop()));
+  if (!Platform.isWindows) {
+    subscriptions.add(ProcessSignal.sigterm.watch().listen((_) => stop()));
+  }
 }
 
 String _age(Duration ttl) => ttl.inMinutes % (60 * 24) == 0
