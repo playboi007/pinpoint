@@ -108,7 +108,6 @@ class StateLens extends ChangeNotifier
     int maxPerSecond = BuildStacks.defaultMaxPerSecond,
   }) : tags = tags ?? IdentityTags.shared,
        _clock = clock ?? _realClock {
-    _console = consoleFilter ?? createConsoleFilter(hooks);
     _stacks = BuildStacks(
       hooks: hooks,
       recorder: recorder,
@@ -116,6 +115,7 @@ class StateLens extends ChangeNotifier
       watched: _watchedElements,
       content: content,
       projectFiles: _projectFiles,
+      consoleFilter: consoleFilter,
       maxPerSecond: maxPerSecond,
     );
     hooks.onDispose(() => stop(reason: 'disposed'));
@@ -152,7 +152,6 @@ class StateLens extends ChangeNotifier
 
   final IdentityTags tags;
   final int Function() _clock;
-  late final ConsoleFilter _console;
   late final BuildStacks _stacks;
   late final HoverNamer _hover = HoverNamer(
     recorder: recorder,
@@ -216,7 +215,7 @@ class StateLens extends ChangeNotifier
   BuildStacksSummary? get stacksSummary => _summary ?? _stacks.summary;
 
   /// The console filter, for tests and the UI.
-  ConsoleFilter get consoleFilter => _console;
+  ConsoleFilter get consoleFilter => _stacks.consoleFilter;
 
   /// Whether [element] is the target of the open window.
   bool isTarget(Element element) =>
@@ -321,7 +320,6 @@ class StateLens extends ChangeNotifier
         ..attachDependencies(_dependencies)
         ..attachSubtree(element);
       // Part 3: `setState` stacks, and no red lines in the browser console.
-      _console.install();
       _hover.start();
       _stacks.start(length);
       demandDetail();
@@ -360,11 +358,6 @@ class StateLens extends ChangeNotifier
     _hover.stop();
     try {
       _summary = _stacks.stop();
-    } catch (_) {
-      // Nothing left to undo.
-    }
-    try {
-      _console.restore();
     } catch (_) {
       // Nothing left to undo.
     }

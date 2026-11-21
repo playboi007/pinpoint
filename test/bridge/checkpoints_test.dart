@@ -45,6 +45,28 @@ void main() {
     expect(await Checkpoints.open(temp), isNull);
   }, skip: skip);
 
+  test('snapshot detects a same-size edit with the index timestamp', () async {
+    final stamp = DateTime.utc(2020);
+    final source = file('lib/a.dart');
+    write('.gitignore', '.pinpoint/\n');
+    write('lib/a.dart', 'before\n');
+    source.setLastModifiedSync(stamp);
+    initRepo(temp);
+    runGit(temp, ['config', 'core.trustctime', 'false']);
+    runGit(temp, ['config', 'core.checkStat', 'minimal']);
+    final index = file('.git/index')..setLastModifiedSync(stamp);
+    final cp = await open();
+    final start = (await cp.snapshot('pp_one', 'r1-start'))!;
+
+    source
+      ..writeAsStringSync('edited\n')
+      ..setLastModifiedSync(stamp);
+    final end = (await cp.snapshot('pp_one', 'r1-end'))!;
+
+    expect(await cp.patch(start, end), contains('+edited'));
+    expect(index.lastModifiedSync().toUtc(), stamp);
+  }, skip: skip);
+
   test('snapshot, edit two files, add one, snapshot: diff gives three files '
       'with counts', () async {
     seed();

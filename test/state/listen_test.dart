@@ -37,6 +37,26 @@ void main() {
       if (e.kind == TraceKind.stateNotify) e,
   ];
 
+  test('counts nested notifier frames after the move to package:listen', () {
+    expect(
+      StateListen.notifyDepth('''
+#0      ChangeNotifier.notifyListeners (package:listen/src/listen.dart:447:24)
+#1      CartModel.bump (package:shop/cart.dart:6:5)
+#2      ChangeNotifier.notifyListeners (package:listen/src/listen.dart:447:24)
+#3      ProductModel.fetch (package:shop/product.dart:2:5)
+'''),
+      2,
+    );
+    expect(
+      StateListen.notifyDepth('''
+packages/listen/src/listen.dart 447:24   notifyListeners
+package:shop/cart.dart 6:5   bump
+packages/listen/src/listen.dart 447:24   notifyListeners
+'''),
+      2,
+    );
+  });
+
   testWidgets('a ValueNotifier in a ValueListenableBuilder gives before and '
       'after, and this file as the first project frame', (tester) async {
     final notifier = _Counting(1);

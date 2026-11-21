@@ -52,6 +52,7 @@ const Set<String> infrastructurePackages = <String>{
   'flutter_localizations',
   'integration_test',
   'pinpoint',
+  'listen',
   'provider',
   'riverpod',
   'flutter_riverpod',
@@ -366,7 +367,11 @@ final RegExp _packageUrl = RegExp(r'^https?://[^/]+/packages/([^/]+)/(.+)$');
 // A file as the web formats name it, in one form: `package:pkg/path` for any
 // package (a `packages/pkg/path` path and a compiled-module URL too), the
 // text as given for the rest. Null for compiled output that is no package.
-String? _webFile(String file) {
+String? _webFile(String location) {
+  // Older DDC stacks can name the JavaScript module instead of the Dart file.
+  final file = location.endsWith('.dart.js')
+      ? location.substring(0, location.length - '.js'.length)
+      : location;
   final url = _packageUrl.firstMatch(file);
   if (url != null) return 'package:${url.group(1)}/${url.group(2)}';
   if (file.startsWith('packages/')) {

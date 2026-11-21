@@ -275,9 +275,16 @@ class Checkpoints {
         final raw = located.text.trim();
         final real = File(raw.startsWith('/') ? raw : '$top/$raw');
         try {
-          if (real.existsSync()) await real.copy(copy.path);
+          if (real.existsSync()) {
+            final modified = await real.lastModified();
+            await real.copy(copy.path);
+            // A fresh index timestamp can hide same-size edits that share
+            // the cached file timestamp. Keep Git's racy-file check intact.
+            await copy.setLastModified(modified);
+          }
         } on FileSystemException {
           // Start from an empty index: slower, and the tree is the same.
+          if (copy.existsSync()) await copy.delete();
         }
       }
     }

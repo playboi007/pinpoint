@@ -6,11 +6,9 @@ import 'console_filter_stub.dart'
 /// Keeps the browser console free of the `scheduleBuildFor` lines while the
 /// state lens is armed (PLAN-v3 Milestone 21, web).
 ///
-/// On web, Flutter writes the label and the stack of each `scheduleBuildFor`
-/// call to `console.error` before any listener sees them
-/// (`foundation/_error_dumper_web.dart`). `BuildStacks` reads them through
-/// the dump listener, but the console would still fill with red. Armed, this
-/// replaces `console.error` with a filter that drops those lines and
+/// On newer Flutter versions, the label and stack of each `scheduleBuildFor`
+/// call go to `console.error`. Armed, this replaces `console.error` with a
+/// filter that lets `BuildStacks` read those lines, drops them, and
 /// forwards every other call, with all its arguments. [restore] puts the
 /// original back. Outside a browser there is no console: every call does
 /// nothing.
@@ -24,8 +22,9 @@ abstract interface class ConsoleFilter {
   /// Lines dropped since [install].
   int get dropped;
 
-  /// Replaces `console.error`. Does nothing when it is replaced already.
-  void install();
+  /// Replaces `console.error`. [onMessage] observes its string messages
+  /// before filtering. Does nothing when the filter is already installed.
+  void install({void Function(String)? onMessage});
 
   /// Puts the original back. Safe to call when nothing is installed, and
   /// again. When another script replaced `console.error` after us, it is

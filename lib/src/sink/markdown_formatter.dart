@@ -183,9 +183,8 @@ List<String> whatHappenedLines(Map<String, Object?> json) {
   // "rebuilds not recorded" says nothing about the problem (PLAN-v3
   // Milestone 19, step 9): the lines of the run stay, that one goes.
   final lines = [
-    for (final l in _list(trace['lines']))
-      if (_string(l) case final line? when !line.startsWith(traceNotRecorded))
-        line,
+    for (final line in _list(trace['lines']).whereType<String>())
+      if (!line.startsWith(traceNotRecorded)) line,
   ];
   if (lines.isEmpty) return const <String>[];
   final seconds = _number(trace['seconds']);

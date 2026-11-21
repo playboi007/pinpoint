@@ -17,7 +17,7 @@ class _NoConsole implements ConsoleFilter {
   int get dropped => 0;
 
   @override
-  void install() {}
+  void install({void Function(String)? onMessage}) {}
 
   @override
   void restore() {}

@@ -16,7 +16,7 @@ class FakeConsoleFilter implements ConsoleFilter {
   int get dropped => 0;
 
   @override
-  void install() {
+  void install({void Function(String)? onMessage}) {
     installs++;
     _active = true;
   }

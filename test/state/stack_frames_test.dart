@@ -14,8 +14,9 @@ void main() {
       'app package frame is the answer', () {
     final frame = first('''
 #0      ChangeNotifier.notifyListeners (package:flutter/src/foundation/change_notifier.dart:437:24)
-#1      ProductDetailProvider.fetchDialog (package:shop/product_detail_provider.dart:88:5)
-#2      _InkResponseState.handleTap (package:flutter/src/material/ink_well.dart:1:1)
+#1      ChangeNotifier.notifyListeners (package:listen/src/listen.dart:447:24)
+#2      ProductDetailProvider.fetchDialog (package:shop/product_detail_provider.dart:88:5)
+#3      _InkResponseState.handleTap (package:flutter/src/material/ink_well.dart:1:1)
 ''');
     expect(frame!.file, 'package:shop/product_detail_provider.dart');
     expect(frame.line, 88);
@@ -89,6 +90,17 @@ state_web_test.dart 197:5                           toggle
     expect(
       first('http://localhost:1/packages/shop/a.dart 7:2   go', unrooted)!.file,
       'package:shop/a.dart',
+    );
+    final files = ProjectFiles([
+      'org-dartlang-app:///test/state/web/state_web_test.dart',
+    ], unrooted);
+    expect(
+      firstProjectFrameIn(
+        'state_web_test.dart.js 216:12   toggle',
+        unrooted,
+        files: files,
+      )!.file,
+      endsWith('/state_web_test.dart'),
     );
     // No debug info (wasm, profile): no file, so no project frame.
     expect(

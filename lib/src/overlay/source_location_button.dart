@@ -84,12 +84,18 @@ class _SourceLocationButtonState extends State<SourceLocationButton>
   final OverlayPortalController _popover = OverlayPortalController(
     debugLabel: 'pinpoint location popover',
   );
-  late final AnimationController _fade = AnimationController(vsync: this)
-    ..addStatusListener((status) {
-      if (status == AnimationStatus.dismissed) _tip.hide();
-    });
+  late final AnimationController _fade;
   Timer? _timer;
   bool _above = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _fade = AnimationController(vsync: this)
+      ..addStatusListener((status) {
+        if (status == AnimationStatus.dismissed) _tip.hide();
+      });
+  }
 
   @override
   void dispose() {

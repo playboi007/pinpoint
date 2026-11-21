@@ -8,7 +8,7 @@ import '../model/annotation.dart' show clipText;
 import '../model/source_location.dart';
 import '../model/trace_event.dart';
 import '../trace/trace_recorder.dart';
-import 'console_filter.dart' show ConsoleLineFilter;
+import 'console_filter.dart';
 import 'stack_frames.dart';
 
 /// What one window of [BuildStacks] saw.
@@ -66,11 +66,9 @@ class BuildStacksSummary {
 /// label `scheduleBuildFor() called for <element>`, the stack as one
 /// string, then `...the build scope's dirty list is now: [...]`. An element
 /// that is already in the dirty list prints a label `BuildOwner.
-/// scheduleBuildFor() called; ...` and a stack instead. On web the label
-/// and the stack go to `console.error` through `ErrorToConsoleDumper`, not
-/// through `debugPrint` (verified in Chrome, api-notes item 34): the dump
-/// listener reads them there. `ConsoleFilter` keeps them out of the
-/// console while the lens is armed.
+/// scheduleBuildFor() called; ...` and a stack instead. On newer Flutter
+/// versions, web sends the label and stack to `console.error`.
+/// [ConsoleFilter] observes and suppresses them while the window is open.
 class BuildStacks {
   BuildStacks({
     required this.hooks,
@@ -79,9 +77,11 @@ class BuildStacks {
     this.watched,
     this.content,
     this.projectFiles,
+    ConsoleFilter? consoleFilter,
     this.maxPerSecond = defaultMaxPerSecond,
     int Function()? clock,
-  }) : _clock = clock ?? _realClock {
+  }) : consoleFilter = consoleFilter ?? createConsoleFilter(hooks),
+       _clock = clock ?? _realClock {
     hooks.onDispose(() {
       if (armed) stop();
     });
@@ -118,6 +118,7 @@ class BuildStacks {
   /// empty: the deny list of [firstProjectFrameIn] decides.
   final ProjectFiles Function()? projectFiles;
 
+  final ConsoleFilter consoleFilter;
   final int maxPerSecond;
   final int Function() _clock;
 
@@ -163,12 +164,6 @@ class BuildStacks {
     failure: _failure,
   );
 
-  // The web has no `debugPrint` for these lines: the dump listener is the
-  // way in. A listener cannot be removed, so one is added for the whole
-  // process and it forwards to whichever window is open.
-  static bool _dumpListenerAdded = false;
-  static BuildStacks? _open;
-
   /// Opens a window of [duration] (at most [maxWindow]), or restarts the
   /// timer of the open one. The window ends by itself.
   void start(Duration duration) {
@@ -199,11 +194,7 @@ class BuildStacks {
       );
       printSlot.set(_wrapper);
       _forward = printSlot.previous;
-      _open = this;
-      if (!_dumpListenerAdded) {
-        _dumpListenerAdded = true;
-        ErrorToConsoleDumper.addWebDumpListener(_onDump);
-      }
+      consoleFilter.install(onMessage: _onConsoleMessage);
       flagSlot.set(true);
       _armed = true;
       _timer = Timer(length, stop);
@@ -213,12 +204,12 @@ class BuildStacks {
     }
   }
 
-  /// Closes the window: the flag and `debugPrint` are what they were.
+  /// Closes the window and restores the flag, `debugPrint` and the console.
   /// Safe to call when no window is open. Returns what the window saw.
   BuildStacksSummary stop() {
-    final wasArmed = _armed;
+    if (!_armed) return summary;
     _restore();
-    if (wasArmed && _dropped > 0) {
+    if (_dropped > 0) {
       try {
         recorder.add(TraceKind.stateDropped, data: {'n': _dropped});
       } catch (_) {
@@ -236,7 +227,6 @@ class BuildStacks {
     _pendingSubject = null;
     _subjects.clear();
     _expectStack = false;
-    if (identical(_open, this)) _open = null;
     // The flag first: no new line is printed once it is off.
     try {
       _flagSlot?.release();
@@ -245,6 +235,11 @@ class BuildStacks {
     }
     try {
       _printSlot?.release();
+    } catch (_) {
+      // Nothing left to undo.
+    }
+    try {
+      consoleFilter.restore();
     } catch (_) {
       // Nothing left to undo.
     }
@@ -265,13 +260,12 @@ class BuildStacks {
     }
   }
 
-  static void _onDump(String message) {
-    final open = _open;
-    if (open == null || !open._armed) return;
+  void _onConsoleMessage(String message) {
+    if (!_armed) return;
     try {
-      open._consume(message, fromDump: true);
+      _consume(message);
     } catch (error) {
-      open._fail(error);
+      _fail(error);
     }
   }
 
@@ -282,7 +276,7 @@ class BuildStacks {
 
   /// Whether [message] is one of the framework's lines for a
   /// `scheduleBuildFor` call: such a line is not forwarded.
-  bool _consume(String message, {bool fromDump = false}) {
+  bool _consume(String message) {
     if (_expectStack) {
       if (!message.startsWith(_labelPrefix) &&
           !message.startsWith(_resortLabel) &&
@@ -312,7 +306,7 @@ class BuildStacks {
       var subject = _subjects[text];
       if (subject != null && !subject.inContent) {
         _filtered++;
-        return !fromDump;
+        return true;
       }
       final now = _clock();
       if (now - _secondStart >= 1000) {
@@ -323,27 +317,26 @@ class BuildStacks {
         // Whether the stack was worth keeping is not known without a walk
         // of the tree, which is the cost the cap is there to avoid.
         _dropped++;
-        return !fromDump;
+        return true;
       }
       _inSecond++;
       subject ??= _subjectOf(text);
       if (!subject.inContent) {
         _filtered++;
-        return !fromDump;
+        return true;
       }
       _pendingLabel = message;
       _pendingSubject = subject;
-      return !fromDump;
+      return true;
     }
     if (message.startsWith(_resortLabel)) {
       // The element was in the dirty list already: no new setState.
       _expectStack = true;
       _pendingLabel = null;
       _pendingSubject = null;
-      return !fromDump;
+      return true;
     }
-    if (message.startsWith(_dirtyListLine)) return !fromDump;
-    return false;
+    return message.startsWith(_dirtyListLine);
   }
 
   static bool _looksLikeStack(String message) =>

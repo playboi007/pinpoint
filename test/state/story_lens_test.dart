@@ -489,7 +489,7 @@ void main() {
     host.lens.arm(tester.element(find.byType(Column)));
 
     tabs.index = 2;
-    animation.forward();
+    unawaited(animation.forward());
     for (var i = 0; i < 5; i++) {
       await tester.pump(const Duration(milliseconds: 50));
     }

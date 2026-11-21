@@ -329,14 +329,15 @@ class StateListen {
 
   /// How many `ChangeNotifier.notifyListeners` calls are on [stack]: 1 for
   /// a plain notify, 2 or more when a notify runs inside the listener of
-  /// another one (shape 2 of the lens). A line counts when it names
-  /// `notifyListeners` and `change_notifier.dart`, which holds in the VM
-  /// and the web formats.
+  /// another one (shape 2 of the lens). Flutter's notifier frames come
+  /// from `change_notifier.dart` or, on newer SDKs, `package:listen`.
   static int notifyDepth(String stack) {
     var n = 0;
     for (final line in stack.split('\n')) {
       if (line.contains('notifyListeners') &&
-          line.contains('change_notifier.dart')) {
+          (line.contains('change_notifier.dart') ||
+              line.contains('package:listen/src/listen.dart') ||
+              line.contains('packages/listen/src/listen.dart'))) {
         n++;
       }
     }

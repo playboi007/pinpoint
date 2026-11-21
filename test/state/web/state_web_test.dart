@@ -20,11 +20,9 @@ import 'package:pinpoint/src/trace/trace_recorder.dart';
 /// PLAN-v3 Milestone 21, in Chrome: `flutter test --platform chrome
 /// test/state/web` (and with `--wasm`).
 ///
-/// On web, Flutter writes the label and the stack of each `scheduleBuildFor`
-/// call to `console.error` before the dump listeners see them. These tests
-/// check, in a real browser, that the stack is read in the DDC format, that
-/// the first project frame is this file, and that the console filter keeps
-/// those lines out of the console and forwards every other call.
+/// These tests check that the stack is read in the DDC format, that the first
+/// project frame is this file, and that the console filter keeps those lines
+/// out of the console and forwards every other call.
 void main() {
   late HookRegistry hooks;
   late JSObject console;
@@ -63,11 +61,12 @@ void main() {
 
   test('the filter drops the scheduleBuildFor lines and forwards the rest '
       'with all their arguments', () {
+    final observed = <String>[];
     final filter = createConsoleFilter(hooks);
     expect(filter.available, isTrue);
     final original = console['error'];
 
-    filter.install();
+    filter.install(onMessage: observed.add);
     expect(filter.active, isTrue);
     expect(console['error'], isNot(same(original)));
 
@@ -88,6 +87,8 @@ void main() {
       ['some other message'],
     ]);
     expect(filter.dropped, 5);
+    expect(observed, hasLength(8));
+    expect(observed.first, 'scheduleBuildFor() called for Foo(dirty)');
 
     filter.restore();
     expect(filter.active, isFalse);
@@ -96,6 +97,7 @@ void main() {
     reached.clear();
     error('scheduleBuildFor() called for Foo(dirty)');
     expect(reached, hasLength(1));
+    expect(observed, hasLength(8));
   });
 
   test('restore leaves a console.error that another script wrote', () {
@@ -123,10 +125,6 @@ void main() {
     final recorder = TraceRecorder();
     final key = GlobalKey<_SpinnerState>();
     await tester.pumpWidget(MaterialApp(home: _Spinner(key: key)));
-    final seenByListener = <String>[];
-    ErrorToConsoleDumper.addWebDumpListener(seenByListener.add);
-
-    final filter = createConsoleFilter(hooks)..install();
     final stacks = BuildStacks(
       hooks: hooks,
       recorder: recorder,
@@ -138,25 +136,10 @@ void main() {
       await tester.pump();
     } finally {
       stacks.stop();
-      filter.restore();
       // The binding checks debugPrint before any tearDown.
       hooks.dispose();
     }
 
-    // The label and the stack came through the dump listener, in this
-    // platform's format, and the filter kept them out of the console.
-    final stack = seenByListener.firstWhere((m) => m.contains('.dart'));
-    final first = firstProjectFrameIn(stack, const SourcePaths());
-    // For the notes: the frame of this file as the browser reports it.
-    // ignore: avoid_print
-    print(
-      'first project frame: $first\n'
-      '${stack.split('\n').where((l) => l.contains('state_web_test')).take(2).join('\n')}',
-    );
-    expect(first, isNotNull);
-    expect(first!.file, contains('state_web_test.dart'));
-    expect(first.line, greaterThan(0));
-    expect(filter.dropped, greaterThanOrEqualTo(2), reason: 'label and stack');
     expect(
       reached.where((a) => a.first.startsWith('scheduleBuildFor')),
       isEmpty,
@@ -170,8 +153,8 @@ void main() {
     expect(events, hasLength(1), reason: '${recorder.events.toList()}');
     final event = events.single;
     expect(event.data['watched'], isTrue);
-    expect(event.data['file'], contains('state_web_test.dart'));
-    expect(event.data['line'], isA<int>());
+    expect(event.data['file'], endsWith('state_web_test.dart'));
+    expect(event.data['line'], greaterThan(0));
     // dart2wasm inlines `toggle`: the closure that called it is the frame.
     expect(event.data['method'], kIsWasm ? 'main' : 'toggle');
     // ignore: avoid_print
@@ -232,7 +215,7 @@ void main() {
     print('events: ${events.map((e) => e.toJsonLine()).join('\n')}');
     expect(events, hasLength(1), reason: '${stacks.summary}');
     expect(events.single.data['watched'], isFalse);
-    expect(events.single.data['file'], contains('state_web_test.dart'));
+    expect(events.single.data['file'], endsWith('state_web_test.dart'));
     expect(stacks.summary.filtered, greaterThanOrEqualTo(1));
   });
 

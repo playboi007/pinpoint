@@ -15,6 +15,7 @@ class _WebConsoleFilter implements ConsoleFilter {
   final HookRegistry _hooks;
   final ConsoleLineFilter _filter = ConsoleLineFilter();
   GlobalSlot<JSAny?>? _slot;
+  void Function(String)? _onMessage;
 
   @override
   bool get available => true;
@@ -34,7 +35,7 @@ class _WebConsoleFilter implements ConsoleFilter {
   }
 
   @override
-  void install() {
+  void install({void Function(String)? onMessage}) {
     if (active) return;
     final console = _console;
     if (console == null) return;
@@ -56,6 +57,7 @@ class _WebConsoleFilter implements ConsoleFilter {
             a == null || b == null ? a == b : a.strictEquals(b).toDart,
       );
       slot.set(proxy);
+      _onMessage = onMessage;
     } catch (_) {
       // No console that can be written: leave it as it is.
       _slot?.release();
@@ -67,6 +69,7 @@ class _WebConsoleFilter implements ConsoleFilter {
       final list = args.toDart;
       if (list.isNotEmpty && list.first.isA<JSString>()) {
         final text = (list.first! as JSString).toDart;
+        _onMessage?.call(text);
         if (_filter.shouldDrop(text)) return null;
       }
     } catch (_) {
@@ -77,6 +80,7 @@ class _WebConsoleFilter implements ConsoleFilter {
 
   @override
   void restore() {
+    _onMessage = null;
     try {
       _slot?.release();
     } catch (_) {
