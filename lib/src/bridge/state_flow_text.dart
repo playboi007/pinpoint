@@ -1,13 +1,16 @@
 // Plain Dart with `dart:io` (through [SourceLookup]): no `dart:ui` and no
 // `package:flutter`, so `dart run pinpoint:bridge` can run it.
 //
-// The text of the `state_flow` tool (PLAN-v3 Milestone 21, step 8): the
-// app's answer (readers, causes, notifies, rebuilt readers, hints) with the
-// code line under each notify and the declaration of each state type, from
-// the project's source on this side.
+// The text of the `state_flow` tool (PLAN-v3 Milestone 21, step 8, and the
+// story of Milestone 21b): what the widget reads, then the story of changes
+// per cause, with the code line under each row and the declaration of each
+// state type, from the project's source on this side. The story is the same
+// [Story] the watch card shows ([storyLines] in `story_text.dart`).
 
-import '../trace/code_lines.dart';
+import '../trace/story.dart';
+import '../trace/story_names.dart';
 import 'source_lookup.dart';
+import 'story_text.dart';
 
 /// The most characters one answer has (about 4 KB).
 const int stateFlowMaxChars = 4000;
@@ -20,25 +23,6 @@ Future<String> stateFlowText(
   Map<String, Object?> result,
   SourceLookup lookup,
 ) async {
-  final snippets = <String, List<String>?>{};
-
-  Future<List<String>> codeLines(Object? file, Object? line) async {
-    if (file is! String || line is! int || line < 1) return const <String>[];
-    final key = '$file:$line';
-    if (snippets.containsKey(key)) return snippets[key] ?? const <String>[];
-    List<String>? shown;
-    try {
-      final snippet = await lookup.methodLines(file, line);
-      shown = codeLinesAt(snippet.text, snippet.start, line);
-    } on SourceLookupException {
-      shown = null;
-    } on Object {
-      shown = null;
-    }
-    snippets[key] = shown;
-    return shown ?? const <String>[];
-  }
-
   final declarations = <String, SourceDeclaration?>{};
   Future<SourceDeclaration?> declaration(String type) async {
     if (declarations.containsKey(type)) return declarations[type];
@@ -67,10 +51,8 @@ Future<String> stateFlowText(
     for (final r in _list(result['readers']))
       if (r is Map<String, Object?>) r,
   ];
-  final causes = [
-    for (final c in _list(result['causes']))
-      if (c is Map<String, Object?>) c,
-  ];
+  final story = Story.fromJson(result['story']);
+  final hasStory = story.hasChanges;
   if (armedNow) {
     lines.add(
       'Armed for ${window ?? 30} s: act now (run_steps), then call '
@@ -79,10 +61,10 @@ Future<String> stateFlowText(
     lines.add(await _readsText(readers, declaration));
   }
 
-  // ------------------------------------------------------------ the chain
+  // -------------------------------------------------------------- the story
   final chain = <String>[];
-  if (!armedNow || causes.isNotEmpty) {
-    if (causes.isEmpty) {
+  if (!armedNow || hasStory) {
+    if (!hasStory) {
       chain.add(
         armed
             ? 'No state change yet ($secondsLeft s left). Act now '
@@ -94,27 +76,22 @@ Future<String> stateFlowText(
     } else {
       chain.add(
         armed
-            ? 'Chain since arming ($secondsLeft s left):'
-            : 'Chain since arming (window ended: '
+            ? 'Story since arming, oldest first ($secondsLeft s left):'
+            : 'Story since arming, oldest first (window ended: '
                   '${result['ended'] ?? 'ended'}):',
       );
     }
   }
-  final blocks = <String>[];
-  for (final cause in causes) {
-    blocks.add(await _causeText(cause, codeLines));
-  }
-  final earlier = result['earlierCauses'];
 
   // ---------------------------------------------------------------- notes
   final tail = <String>[];
-  if (!armedNow && readers.isNotEmpty && causes.isNotEmpty) {
+  if (!armedNow && readers.isNotEmpty && hasStory) {
     // Where the types are declared, one line.
     final types = <String>{};
-    for (final c in causes) {
-      for (final n in _list(c['notifies'])) {
-        if (n is Map<String, Object?> && n['owner'] is String) {
-          types.add(_baseType(n['owner']! as String));
+    for (final block in story.blocks) {
+      for (final row in block.rows) {
+        if (row.kind == 'notify' && !isFrameworkType(row.base)) {
+          types.add(row.base);
         }
       }
     }
@@ -125,9 +102,9 @@ Future<String> stateFlowText(
     }
     if (found.isNotEmpty) tail.add('Declared: ${found.join('; ')}');
   }
-  if (result['dropped'] is int) {
+  if (story.droppedStacks > 0) {
     tail.add(
-      'Note: ${result['dropped']} setState stacks were dropped (the cap).',
+      'Note: ${story.droppedStacks} setState stacks were dropped (the cap).',
     );
   }
   for (final note in _list(result['notes'])) {
@@ -135,23 +112,12 @@ Future<String> stateFlowText(
   }
 
   // ----------------------------------------------------------- the budget
-  // The newest causes matter most: they are kept, the oldest go.
   final fixed = [...lines, ...chain, ...tail].join('\n').length;
-  var room = stateFlowMaxChars - fixed - 60;
-  final keep = <String>[];
-  for (final block in blocks.reversed) {
-    if (block.length + 1 > room && keep.isNotEmpty) break;
-    keep.insert(0, block);
-    room -= block.length + 1;
-  }
-  final cut = blocks.length - keep.length + (earlier is int ? earlier : 0);
-  final out = [
-    ...lines,
-    ...chain,
-    if (cut > 0) '($cut earlier causes not shown)',
-    ...keep,
-    ...tail,
-  ].join('\n');
+  final room = stateFlowMaxChars - fixed - 60;
+  final body = hasStory
+      ? await storyLines(story, lookup, budget: room < 400 ? 400 : room)
+      : const <String>[];
+  final out = [...lines, ...chain, ...body, ...tail].join('\n');
   return out.length <= stateFlowMaxChars
       ? out
       : '${out.substring(0, stateFlowMaxChars - 20)}\n... (cut)';
@@ -192,124 +158,6 @@ Future<String> _readsText(
     }
   }
   return out.join('\n');
-}
-
-Future<String> _causeText(
-  Map<String, Object?> cause,
-  Future<List<String>> Function(Object? file, Object? line) codeLines,
-) async {
-  final out = <String>[];
-  final id = cause['cause'];
-  final entry = cause['entry'];
-  out.add(
-    id is int
-        ? '${entry is String ? entry : cause['kind'] ?? 'a change'} '
-              '(cause c$id)'
-        : 'a change in frame f${cause['frame']} (no cause recorded)',
-  );
-  for (final raw in _list(cause['notifies'])) {
-    if (raw is! Map<String, Object?>) continue;
-    final method = _methodText(raw['method']);
-    final values = raw.containsKey('after')
-        ? '  ${raw['before']} -> ${raw['after']}'
-        : '';
-    final depth = raw['depth'];
-    final nested = depth is int && depth > 1 ? '  (inside another notify)' : '';
-    final tag = raw['tag'] is String ? ' ${raw['tag']}' : '';
-    out.add(
-      ' └ ${raw['owner']}$tag notified'
-      '${method.isEmpty ? '' : '   $method'}'
-      '${_whereText(raw['file'], raw['line'])}$values$nested',
-    );
-    out.addAll(_codeText(await codeLines(raw['file'], raw['line'])));
-  }
-  if (cause['moreNotifies'] is int) {
-    out.add('   (${cause['moreNotifies']} more notifies)');
-  }
-  for (final raw in _list(cause['setStates'])) {
-    if (raw is! Map<String, Object?>) continue;
-    final method = _methodText(raw['method']);
-    out.add(
-      ' └ ${raw['widget']} setState'
-      '${method.isEmpty ? '' : '   $method'}'
-      '${_whereText(raw['file'], raw['line'])}',
-    );
-    out.addAll(_codeText(await codeLines(raw['file'], raw['line'])));
-  }
-  if (cause['moreSetStates'] is int) {
-    out.add('   (${cause['moreSetStates']} more setStates)');
-  }
-  final rebuilt = [
-    for (final r in _list(cause['rebuilt']))
-      if (r is Map<String, Object?>) r,
-  ];
-  if (rebuilt.isEmpty) {
-    // Only news for a notify: a setState rebuilds its own widget.
-    if (_list(cause['notifies']).isNotEmpty) {
-      out.add(' └ no rebuilt reader seen for it');
-    }
-  } else {
-    out.add(' └ rebuilt because they read it:');
-    final sharedTags = <String, Set<Object?>>{};
-    for (final r in rebuilt) {
-      final tag = r['tag'];
-      if (tag is String && r['via'] != 'setState') {
-        sharedTags.putIfAbsent(tag, () => <Object?>{}).add(r['type']);
-      }
-    }
-    final width = rebuilt.fold<int>(
-      0,
-      (w, r) => '${r['type']}'.length > w ? '${r['type']}'.length : w,
-    );
-    for (final r in rebuilt) {
-      final why = switch (r['via']) {
-        'dependency' => 'dependencies: ${r['owner']} ${r['tag']}',
-        'builder' => 'listens to ${r['owner']} ${r['tag']}',
-        _ => 'its own setState',
-      };
-      final shared =
-          r['tag'] is String && (sharedTags[r['tag']]?.length ?? 0) > 1
-          ? '   <- same object'
-          : '';
-      out.add(
-        '     ${'${r['type']}'.padRight(width)}   '
-        '($why)$shared',
-      );
-    }
-    if (cause['moreRebuilt'] is int) {
-      out.add('     (${cause['moreRebuilt']} more)');
-    }
-  }
-  if (cause['hint'] is String) out.add(' hint: ${cause['hint']}');
-  return out.join('\n');
-}
-
-/// The code lines of a notify, as one line when they are short.
-List<String> _codeText(List<String> lines) {
-  if (lines.isEmpty) return const <String>[];
-  final joined = lines.join(' ');
-  if (joined.length <= 110) return ['     code:  $joined'];
-  return ['     code:', for (final line in lines) '       $line'];
-}
-
-/// `Class.method` as `method()`; a top-level function keeps its name.
-String _methodText(Object? method) {
-  if (method is! String || method.isEmpty) return '';
-  final dot = method.lastIndexOf('.');
-  final name = dot < 0 ? method : method.substring(dot + 1);
-  return name.isEmpty ? '' : '$name()';
-}
-
-/// `  lib/x.dart:88` for a frame's file and line; a `package:app/x.dart` file
-/// shows as `lib/x.dart`.
-String _whereText(Object? file, Object? line) {
-  if (file is! String || file.isEmpty) return '';
-  var shown = file;
-  if (shown.startsWith('package:')) {
-    final slash = shown.indexOf('/');
-    shown = slash < 0 ? shown : 'lib/${shown.substring(slash + 1)}';
-  }
-  return '  $shown${line is int && line > 0 ? ':$line' : ''}';
 }
 
 /// `, lib/x.dart:12` for a `{file, line}` source, or empty.

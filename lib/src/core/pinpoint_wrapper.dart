@@ -404,6 +404,8 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
     // Held elements in the hover and selection can go stale across hot
     // reload.
     _controller.clearSelection();
+    // The state lens goes on across the reload and says so in its story.
+    TraceSession.ownedBy(this)?.stateLensIfAny?.noteReassemble();
   }
 
   @override

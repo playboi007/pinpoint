@@ -10,6 +10,7 @@ import '../../search/pick_result.dart';
 import '../../search/render_search.dart';
 import '../../search/source_index.dart';
 import '../../search/source_resolver.dart';
+import '../../state/element_label.dart';
 import '../trace_recorder.dart';
 import '../trace_source.dart';
 
@@ -225,6 +226,10 @@ class PointerSource extends TraceSource {
     final entry = pick.chain[pick.chainIndex];
     final rect = pick.globalRect;
     event.widget = entry.name;
+    // The words on the widget ("Fetch"), when it is small enough that the
+    // first text is its label: the story names a tap with it.
+    final label = shortTextOf(entry.element, small: true);
+    if (label != null) event.data['label'] = label;
     final location = entry.location;
     if (location != null) {
       event.source =

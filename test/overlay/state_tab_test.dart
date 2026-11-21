@@ -11,12 +11,13 @@ import 'package:pinpoint/pinpoint.dart';
 import 'package:pinpoint/src/core/code_line_cache.dart';
 import 'package:pinpoint/src/overlay/info_panel.dart';
 import 'package:pinpoint/src/overlay/source_location_button.dart';
-import 'package:pinpoint/src/overlay/state_chain.dart';
 import 'package:pinpoint/src/overlay/state_tab.dart';
+import 'package:pinpoint/src/overlay/story_view.dart';
 import 'package:pinpoint/src/overlay/toast_layer.dart';
 import 'package:pinpoint/src/sink/bridge_client.dart';
 import 'package:pinpoint/src/theme/pinpoint_tokens.dart';
 import 'package:pinpoint/src/trace/cause_zone.dart';
+import 'package:pinpoint/src/trace/story.dart';
 import 'package:pinpoint/src/trace/trace_session.dart';
 
 import '../support/fake_bridge.dart';
@@ -234,7 +235,16 @@ void main() {
 
     expect(find.byKey(StateTab.chainKey), findsOneWidget);
     expect(inPanel('Nothing changed yet'), findsNothing);
-    expect(inPanel(RegExp(r'ProductModel #a\d+ notified')), findsOneWidget);
+    expect(inPanel(RegExp(r'^ProductModel')), findsWidgets);
+    // The identity tag is for grouping: the story never shows it.
+    expect(
+      find.descendant(
+        of: find.byKey(StateTab.chainKey),
+        matching: find.textContaining(tag),
+      ),
+      findsNothing,
+    );
+    expect(inPanel('no cause recorded'), findsWidgets);
     expect(inPanel('fetchDialog()'), findsWidgets);
     // The location is behind the folder button, not printed in the row.
     expect(inPanel('test/support/fake_provider.dart'), findsNothing);
@@ -245,16 +255,9 @@ void main() {
       ),
       findsWidgets,
     );
-    // The rebuilt readers, with the object they read.
-    expect(
-      inPanel(RegExp(r'ProductScreen +reads ProductModel #a\d+')),
-      findsOne,
-    );
-    expect(
-      inPanel(RegExp(r'ProductAndCart +reads ProductModel #a\d+')),
-      findsOne,
-    );
-    expect(inPanel('same object'), findsWidgets);
+    // The widgets that rebuilt, by name.
+    expect(inPanel(RegExp(r'Rebuilt \d+: .*ProductScreen')), findsOneWidget);
+    expect(inPanel(RegExp(r'Rebuilt \d+: .*ProductAndCart')), findsOneWidget);
     // The code under the notify came from the bridge, once per line.
     expect(asked, isNotEmpty);
     expect(find.text('dialogLoading = true;'), findsWidgets);
@@ -265,7 +268,10 @@ void main() {
     // The hint is the lens's own line, set apart with the accent colour.
     expect(hints(), findsOneWidget);
     expect(
-      find.descendant(of: hints(), matching: find.textContaining('shape 1')),
+      find.descendant(
+        of: hints(),
+        matching: find.textContaining('widgets read'),
+      ),
       findsOneWidget,
     );
   });
@@ -281,7 +287,16 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    expect(inPanel(RegExp(r'ProductModel #a\d+ notified')), findsOneWidget);
+    expect(inPanel(RegExp(r'^ProductModel')), findsWidgets);
+    // The identity tag is for grouping: the story never shows it.
+    expect(
+      find.descendant(
+        of: find.byKey(StateTab.chainKey),
+        matching: find.textContaining(tag),
+      ),
+      findsNothing,
+    );
+    expect(inPanel('no cause recorded'), findsWidgets);
     expect(find.text('notifyListeners();'), findsNothing);
     expect(tester.takeException(), isNull);
   });
@@ -418,7 +433,16 @@ void main() {
     );
     expect(notify, findsOneWidget);
     // The rest of the row stays.
-    expect(inPanel(RegExp(r'ProductModel #a\d+ notified')), findsOneWidget);
+    expect(inPanel(RegExp(r'^ProductModel')), findsWidgets);
+    // The identity tag is for grouping: the story never shows it.
+    expect(
+      find.descendant(
+        of: find.byKey(StateTab.chainKey),
+        matching: find.textContaining(tag),
+      ),
+      findsNothing,
+    );
+    expect(inPanel('no cause recorded'), findsWidgets);
     expect(inPanel('fetchDialog()'), findsWidgets);
   });
 
@@ -618,22 +642,32 @@ void main() {
 
   // -- The shared chain rows and the /source cache. -------------------------
 
-  Map<String, Object?> chainOf(List<Map<String, Object?>> causes) => {
-    'causes': causes,
-    'events': causes.length,
-  };
+  StoryBlock blockOf(
+    String id,
+    List<StoryRow> rows, {
+    List<String> rebuilt = const <String>[],
+  }) => StoryBlock(
+    id: id,
+    at: 100,
+    cause: StoryCause(kind: StoryKind.tap, label: 'tap Counter', id: 1),
+    rows: rows,
+    rebuilt: rebuilt,
+    rebuiltCount: rebuilt.length,
+  );
 
-  Future<void> pumpChain(
+  Future<void> pumpStory(
     WidgetTester tester,
-    Map<String, Object?> chain, {
+    Story story, {
     CodeLineCache? cache,
     BridgeClient? Function()? bridge,
   }) async {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: StateChainView(
-            chain: chain,
+          body: StoryView(
+            story: story,
+            filter: const StoryFilter(),
+            onFilter: (_) {},
             cache: cache ?? CodeLineCache(),
             bridge: bridge,
           ),
@@ -642,68 +676,71 @@ void main() {
     );
   }
 
-  scenario('"No rebuilt reader seen" shows for a notify row only', (
+  scenario('"No rebuilt widget seen" shows for a notify row only', (
     tester,
   ) async {
-    final noReader = find.text('No rebuilt reader seen for it');
-    Map<String, Object?> notify() => {
-      'owner': 'CartModel',
-      'tag': '#a1',
-      'method': 'CartModel.add',
-      'file': 'lib/cart.dart',
-      'line': 10,
-    };
-    Map<String, Object?> setState() => {
-      'widget': 'Counter',
-      'method': '_CounterState.bump',
-      'file': 'lib/counter.dart',
-      'line': 20,
-    };
+    final noReader = find.text('No rebuilt widget seen for it');
+    const notify = StoryRow(
+      kind: 'notify',
+      owner: 'CartModel',
+      method: 'CartModel.add',
+      file: 'lib/cart.dart',
+      line: 10,
+    );
+    const setState = StoryRow(
+      kind: 'setState',
+      owner: 'Counter',
+      method: '_CounterState.bump',
+      file: 'lib/counter.dart',
+      line: 20,
+    );
 
-    // A notify that no reader answered: the line stays.
-    await pumpChain(
+    // A notify that nothing rebuilt for: the line stays.
+    await pumpStory(
       tester,
-      chainOf([
-        {
-          'cause': 1,
-          'notifies': [notify()],
-          'rebuilt': <Object?>[],
-        },
-      ]),
+      Story(
+        blocks: [
+          blockOf('c1', [notify]),
+        ],
+      ),
     );
     expect(noReader, findsOneWidget);
 
-    // A cause that has only setStates: no line, whatever the rebuilt list.
-    await pumpChain(
+    // A block that has only setStates: no line.
+    await pumpStory(
       tester,
-      chainOf([
-        {
-          'cause': 2,
-          'setStates': [setState()],
-          'rebuilt': <Object?>[],
-        },
-        {
-          'frame': 7,
-          'setStates': [setState()],
-        },
-      ]),
+      Story(
+        blocks: [
+          blockOf('c2', [setState]),
+          blockOf('f7', [setState]),
+        ],
+      ),
     );
     expect(noReader, findsNothing);
     expect(find.textContaining('Counter'), findsWidgets);
 
-    // A notify and a setState in one cause with nothing rebuilt: the notify
+    // A notify and a setState in one block with nothing rebuilt: the notify
     // row earns the line.
-    await pumpChain(
+    await pumpStory(
       tester,
-      chainOf([
-        {
-          'cause': 3,
-          'notifies': [notify()],
-          'setStates': [setState()],
-        },
-      ]),
+      Story(
+        blocks: [
+          blockOf('c3', [notify, setState]),
+        ],
+      ),
     );
     expect(noReader, findsOneWidget);
+    // With no rebuilds recorded the line says nothing, so it is not shown.
+    await pumpStory(
+      tester,
+      Story(
+        rebuildsRecorded: false,
+        blocks: [
+          blockOf('c4', [notify]),
+        ],
+      ),
+    );
+    expect(noReader, findsNothing);
   });
 
   test(
@@ -747,13 +784,13 @@ void main() {
     );
     BridgeClient? bridge() =>
         BridgeClient.find(url: config.bridgeUrl, sinks: config.sinks);
-    Map<String, Object?> row(String file, int line) => {
-      'owner': 'M',
-      'tag': '#a1',
-      'method': 'M.go',
-      'file': file,
-      'line': line,
-    };
+    StoryRow row(String file, int line) => StoryRow(
+      kind: 'notify',
+      owner: 'M',
+      method: 'M.go',
+      file: file,
+      line: line,
+    );
     final skipped = [
       'package:flutter/src/foundation/change_notifier.dart',
       'dart:async',
@@ -761,30 +798,28 @@ void main() {
       'packages/flutter/src/x.dart',
       'lib/notes.txt',
     ];
-    final chain = chainOf([
-      {
-        'cause': 1,
-        'notifies': [
+    final chain = Story(
+      blocks: [
+        blockOf('c1', [
           for (var i = 0; i < skipped.length; i++) row(skipped[i], 10 + i),
           row('lib/missing.dart', 5),
-        ],
-        'rebuilt': <Object?>[],
-      },
-    ]);
+        ]),
+      ],
+    );
     final cache = CodeLineCache();
     addTearDown(cache.dispose);
 
-    await pumpChain(tester, chain, cache: cache, bridge: bridge);
+    await pumpStory(tester, chain, cache: cache, bridge: bridge);
     await tester.pump();
     await tester.pump();
     expect(asked, ['lib/missing.dart:5']);
 
     // Built again, and by a second view of the same session cache (the tab
     // and the card): the 404 is not asked again.
-    await pumpChain(tester, chain, cache: cache, bridge: bridge);
+    await pumpStory(tester, chain, cache: cache, bridge: bridge);
     await tester.pump();
-    await pumpChain(tester, chain, cache: cache, bridge: bridge);
-    await pumpChain(tester, chain, cache: cache, bridge: bridge);
+    await pumpStory(tester, chain, cache: cache, bridge: bridge);
+    await pumpStory(tester, chain, cache: cache, bridge: bridge);
     await tester.pump(const Duration(seconds: 2));
     expect(asked, ['lib/missing.dart:5']);
     expect(cache.requests, 1);

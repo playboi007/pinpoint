@@ -11,6 +11,7 @@ import 'package:pinpoint/src/overlay/info_panel.dart';
 import 'package:pinpoint/src/overlay/inspector_overlay.dart';
 import 'package:pinpoint/src/overlay/source_location_button.dart';
 import 'package:pinpoint/src/overlay/state_tab.dart';
+import 'package:pinpoint/src/overlay/story_view.dart';
 import 'package:pinpoint/src/overlay/toast_layer.dart';
 import 'package:pinpoint/src/overlay/watch_card.dart';
 import 'package:pinpoint/src/sink/bridge_client.dart';
@@ -186,36 +187,25 @@ void main() {
     await notifyInApp(tester);
 
     expect(inCard('Nothing changed yet'), findsNothing);
-    expect(inCard(RegExp(r'ProductModel #a\d+ notified')), findsOneWidget);
+    expect(inCard(RegExp(r'^ProductModel')), findsOneWidget);
+    // The identity tag is for grouping: the card never shows it.
+    expect(inCard(RegExp(r'#a\d+')), findsNothing);
     expect(inCard('fetchDialog()'), findsWidgets);
     expect(
       find.descendant(of: card, matching: find.byType(SourceLocationButton)),
       findsWidgets,
     );
-    // Newest on top: the block of a second notify sits above the first.
+    // A second notify is a second block, below the first (oldest on top).
     await notifyInApp(tester);
-    final blocks = find.ancestor(
-      of: find.textContaining(RegExp(r'ProductModel #a\d+ notified')),
-      matching: find.byWidgetPredicate((w) {
-        final key = w.key;
-        return key is ValueKey<String> &&
-            RegExp(r'^pinpoint\.stateTab\.[cf]\d+$').hasMatch(key.value);
-      }),
+    final rows = find.descendant(
+      of: card,
+      matching: find.textContaining(RegExp(r'^ProductModel')),
     );
-    expect(blocks, findsNWidgets(2));
-    final ids = [
-      for (final w in tester.widgetList(blocks))
-        (w.key! as ValueKey<String>).value.split('.').last,
-    ];
-    expect(ids.map((id) => id[0]).toSet(), hasLength(1), reason: '$ids');
-    final numbers = [for (final id in ids) int.parse(id.substring(1))];
-    final tops = [
-      for (final w in tester.widgetList(blocks))
-        tester.getTopLeft(find.byWidget(w)).dy,
-    ];
-    // Higher cause or frame number = newer = higher on the screen.
-    final newest = numbers.indexOf(numbers.reduce((a, b) => a > b ? a : b));
-    expect(tops[newest], lessThan(tops[1 - newest]));
+    expect(rows, findsNWidgets(2));
+    expect(
+      tester.getTopLeft(rows.first).dy,
+      lessThan(tester.getTopLeft(rows.last).dy),
+    );
   });
 
   scenario('dragging the header moves the card, and it stays in the '
@@ -280,7 +270,7 @@ void main() {
     expect(find.byKey(WatchCard.againKey), findsOneWidget);
     expect(find.byKey(WatchCard.stopKey), findsNothing);
     // The chain of the window stays readable.
-    expect(inCard(RegExp(r'ProductModel #a\d+ notified')), findsOneWidget);
+    expect(inCard(RegExp(r'^ProductModel')), findsOneWidget);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pump();
@@ -334,7 +324,7 @@ void main() {
     // A new window starts with an empty chain.
     expect(inCard('Nothing changed yet'), findsOneWidget);
     await notifyInApp(tester);
-    expect(inCard(RegExp(r'ProductModel #a\d+ notified')), findsOneWidget);
+    expect(inCard(RegExp(r'^ProductModel')), findsOneWidget);
   });
 
   scenario('picking again keeps the lens running and the card open', (
@@ -477,7 +467,8 @@ void main() {
       of: card,
       matching: find.byType(SourceLocationButton),
     );
-    await tester.tap(where.first);
+    // The card follows the bottom, so the newest row is the one in view.
+    await tester.tap(where.last);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     await tester.tap(find.byKey(StateTab.locationCopyKey));
@@ -524,8 +515,85 @@ void main() {
     await tester.pump();
     await notifyInApp(tester);
     expect(asked, hasLength(calls));
-    expect(inCard(RegExp(r'ProductModel #a\d+ notified')), findsOneWidget);
+    expect(inCard(RegExp(r'^ProductModel')), findsOneWidget);
     expect(find.textContaining('notifyListeners'), findsNothing);
+  });
+
+  scenario('the card follows the bottom of the story; scrolled up it says '
+      '"N new ↓" and does not move', (tester) async {
+    await pumpApp(tester);
+    await watchScreen(tester);
+    for (var i = 0; i < 6; i++) {
+      await notifyInApp(tester);
+    }
+    final scrollable = find.descendant(
+      of: find.byKey(WatchCard.bodyKey),
+      matching: find.byType(Scrollable),
+    );
+    ScrollPosition position() =>
+        tester.state<ScrollableState>(scrollable).position;
+    expect(position().maxScrollExtent, greaterThan(0));
+    // At the bottom, and newer rows are in view.
+    expect(position().extentAfter, lessThan(24));
+    expect(find.byKey(WatchCard.newKey), findsNothing);
+
+    // The user reads older blocks: the card stays where it is.
+    await tester.drag(scrollable, const Offset(0, 400));
+    await tester.pump();
+    final reading = position().pixels;
+    expect(position().extentAfter, greaterThan(24));
+    await notifyInApp(tester);
+    await tester.pump();
+    expect(position().pixels, reading);
+    expect(find.byKey(WatchCard.newKey), findsOneWidget);
+    expect(
+      tester
+          .widget<Text>(
+            find.descendant(
+              of: find.byKey(WatchCard.newKey),
+              matching: find.byType(Text),
+            ),
+          )
+          .data,
+      matches(RegExp(r'^\d+ new ↓$')),
+    );
+
+    await tester.tap(find.byKey(WatchCard.newKey));
+    await tester.pump();
+    expect(position().extentAfter, lessThan(24));
+    expect(find.byKey(WatchCard.newKey), findsNothing);
+  });
+
+  scenario('a hot reload goes on: the card says so and the lens stays '
+      'armed', (tester) async {
+    await pumpApp(tester);
+    await watchScreen(tester);
+    await notifyInApp(tester);
+
+    // What a hot reload does to each element, without its slow wait.
+    // What the wrapper's `reassemble` calls (a real `Element.reassemble`
+    // of the whole tree takes seconds in a test).
+    TraceSession.current!.stateLens.noteReassemble();
+    await tester.pump();
+    await tester.pump();
+
+    expect(TraceSession.current!.stateLens.armed, isTrue);
+    expect(inCard('hot reload'), findsOneWidget);
+    await notifyInApp(tester);
+    expect(inCard(RegExp(r'^ProductModel')), findsWidgets);
+  });
+
+  scenario('the filters live in the card: hidden changes are counted and '
+      '"Only my state" is a check box', (tester) async {
+    await pumpApp(tester);
+    await watchScreen(tester);
+    await notifyInApp(tester);
+
+    expect(find.byKey(StoryKeys.onlyMine), findsOneWidget);
+    await tester.tap(find.byKey(StoryKeys.onlyMine));
+    await tester.pump();
+    // The app's own model is the project's state: still there.
+    expect(inCard(RegExp(r'^ProductModel')), findsWidgets);
   });
 
   for (final palette in PinPointPalette.values) {
@@ -547,19 +615,18 @@ void main() {
           tester.widget<Text>(find.byKey(WatchCard.titleKey)).textSpan!
               as TextSpan;
       expect(title.children!.first.style!.color, tokens.accentInk);
-      // The object's tag in a notify row is set apart with the accent ink.
-      final row = tester.widget<Text>(
-        find.descendant(
-          of: card,
-          matching: find.byWidgetPredicate(
-            (w) =>
-                w is Text &&
-                (w.textSpan?.toPlainText() ?? '').contains(' notified'),
-          ),
-        ),
+      // The coupling hint is set apart with the accent colour.
+      final hint = find.descendant(
+        of: card,
+        matching: find.byWidgetPredicate((w) {
+          final key = w.key;
+          return key is ValueKey<String> && key.value.endsWith('.hint');
+        }),
       );
-      final spans = (row.textSpan! as TextSpan).children!.cast<TextSpan>();
-      expect(spans.any((s) => s.style?.color == tokens.accentInk), isTrue);
+      expect(hint, findsWidgets);
+      final box =
+          tester.widget<Container>(hint.first).decoration! as BoxDecoration;
+      expect(box.color, tokens.accentBg);
 
       // The marker takes its colour from the palette too.
       expect(

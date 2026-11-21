@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart' show TabController;
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 
@@ -6,9 +7,20 @@ import '../core/hook_registry.dart';
 import '../model/trace_event.dart';
 import '../search/source_resolver.dart';
 import '../trace/redact.dart';
+import '../trace/story_names.dart';
 import '../trace/trace_recorder.dart';
+import '../trace/value_diff.dart';
 import 'dependencies.dart';
+import 'element_label.dart';
 import 'stack_frames.dart';
+
+/// What the lens masks in a value: the trace's names, and passwords too (a
+/// model that holds one is common state).
+const TraceRedact stateRedact = TraceRedact([
+  ...TraceRedact.defaults,
+  '*password*',
+  '*passwd*',
+]);
 
 /// Pinpoint's own listener on the objects that notify (PLAN-v3 Milestone 21,
 /// step 2): the listenables a state owner reads (step 1) and those that
@@ -32,7 +44,7 @@ class StateListen {
     required this.resolver,
     this.hooks,
     IdentityTags? tags,
-    this.redact = const TraceRedact(),
+    this.redact = stateRedact,
     this.maxAttachments = defaultMaxAttachments,
     this.projectFiles,
   }) : tags = tags ?? IdentityTags.shared {
@@ -77,11 +89,15 @@ class StateListen {
     for (final dependency in dependencies) {
       final listenable = dependency.listenable;
       if (listenable == null) continue;
+      final location = dependency.location;
       if (_attach(
         listenable,
         owner: dependency.type,
         via: dependency.kind,
         element: dependency.element,
+        src: location == null
+            ? null
+            : '${resolver.paths.relativePath(location.uri)}:${location.line}',
       )) {
         added++;
       }
@@ -108,11 +124,17 @@ class StateListen {
       if (found != null &&
           (!resolver.available || resolver.entryOf(element).isLocal)) {
         final (listenable, via) = found;
+        final location = resolver.available
+            ? resolver.entryOf(element).location
+            : null;
         if (_attach(
           listenable,
           owner: listenable.runtimeType.toString(),
           via: via,
           element: element,
+          src: location == null
+              ? null
+              : '${resolver.paths.relativePath(location.uri)}:${location.line}',
         )) {
           added++;
         }
@@ -134,7 +156,8 @@ class StateListen {
     required String owner,
     String via = 'listenable',
     Element? element,
-  }) => _attach(listenable, owner: owner, via: via, element: element);
+    String? src,
+  }) => _attach(listenable, owner: owner, via: via, element: element, src: src);
 
   static (Listenable, String)? _builderListenable(Element element) {
     final Widget widget;
@@ -160,6 +183,7 @@ class StateListen {
     required String owner,
     required String via,
     Element? element,
+    String? src,
   }) {
     if (_stopped) return false;
     final existing = _attached[listenable];
@@ -168,13 +192,23 @@ class StateListen {
       return false;
     }
     if (_attached.length >= maxAttachments) return false;
+    final shownOwner = clipOwner(owner);
+    final verb = controllerVerb(_baseOf(shownOwner));
+    final last = _readValue(listenable);
     final attachment = _Attachment(
       listenable: listenable,
-      owner: clipOwner(owner),
+      owner: shownOwner,
       via: via,
       tag: tags.of(listenable),
-      last: _readValue(listenable),
+      last: last,
       hasValue: listenable is ValueListenable,
+      src: src,
+      verb: verb,
+      // A controller shows a verb, never a value: a text field's text can
+      // be a password.
+      snap: verb == null && listenable is ValueListenable
+          ? snapshotOf(last, owner: shownOwner, redact: redact)
+          : null,
     );
     if (element != null) attachment.elements.add(element);
     attachment.callback = () => _notified(attachment);
@@ -188,6 +222,11 @@ class StateListen {
     _active.add(this);
     _ensureFrameHook();
     return true;
+  }
+
+  static String _baseOf(String type) {
+    final open = type.indexOf('<');
+    return open < 0 ? type : type.substring(0, open);
   }
 
   static String clipOwner(String owner) =>
@@ -232,14 +271,34 @@ class StateListen {
           'line': frame.line,
           'method': frame.method,
         },
+        // For the story: where the listening widget is created (the bridge
+        // reads the name there), which argument to read, and which instance
+        // of a group this is.
+        'src': ?attachment.src,
+        if (attachment.src != null && builderArgument(attachment.via) != null)
+          'srcArg': builderArgument(attachment.via),
+        'instance': ?attachment.instance(),
       };
-      if (attachment.hasValue) {
+      if (attachment.verb != null) {
+        final detail = _detail(attachment.listenable);
+        if (detail != null) data['detail'] = detail;
+      } else if (attachment.hasValue) {
         final before = attachment.last;
         final after = _readValue(attachment.listenable);
         attachment.last = after;
         data['before'] = _shown(before, attachment.owner);
         data['after'] = _shown(after, attachment.owner);
         if (_sameText(data['before'], data['after'])) data['same'] = true;
+        final was = attachment.snap;
+        final now = snapshotOf(after, owner: attachment.owner, redact: redact);
+        attachment.snap = now;
+        if (was != null) {
+          data['change'] = diffValues(
+            was,
+            now,
+            sameObject: identical(before, after),
+          );
+        }
       }
       recorder.add(
         TraceKind.stateNotify,
@@ -253,6 +312,20 @@ class StateListen {
   }
 
   static bool _sameText(Object? a, Object? b) => '$a' == '$b';
+
+  // More about a controller's notify: the tab or page it is on.
+  static String? _detail(Listenable listenable) {
+    try {
+      if (listenable is TabController) return 'index ${listenable.index}';
+      if (listenable is PageController && listenable.hasClients) {
+        final page = listenable.page;
+        if (page != null) return 'page ${page.round()}';
+      }
+    } catch (_) {
+      // A controller that is disposed or has no clients.
+    }
+    return null;
+  }
 
   /// How many `ChangeNotifier.notifyListeners` calls are on [stack]: 1 for
   /// a plain notify, 2 or more when a notify runs inside the listener of
@@ -289,6 +362,15 @@ class StateListen {
   /// everything is clipped ([traceValue]).
   Object? _shown(Object? value, String owner) {
     if (value is String && redact.masks(owner)) return TraceRedact.mask;
+    // An object: its text has secret fields masked ([snapshotOf]).
+    if (value != null &&
+        value is! String &&
+        value is! num &&
+        value is! bool &&
+        value is! Map &&
+        value is! List) {
+      return snapshotOf(value, owner: owner, redact: redact).text;
+    }
     final safe = value is Map || value is List ? redact.json(value) : value;
     return traceValue(safe);
   }
@@ -353,6 +435,9 @@ class _Attachment {
     required this.tag,
     required this.last,
     required this.hasValue,
+    this.src,
+    this.verb,
+    this.snap,
   });
 
   final Listenable listenable;
@@ -360,6 +445,36 @@ class _Attachment {
   final String via;
   final String tag;
   final bool hasValue;
+
+  /// Where the widget that listens or provides is created.
+  final String? src;
+
+  /// The verb of a framework controller, or null.
+  final String? verb;
+
+  /// A snapshot of the value at the last notify, for the next diff.
+  ValueSnap? snap;
+
+  String? _instance;
+  bool _instanceRead = false;
+
+  /// Which instance of a group this is: the nearest `Key`, list index, or
+  /// short text of its widget. Read once, on the first notify.
+  String? instance() {
+    if (_instanceRead) return _instance;
+    _instanceRead = true;
+    for (final element in elements) {
+      if (!element.mounted) continue;
+      try {
+        _instance = instanceLabel(element);
+      } catch (_) {
+        // Diagnostics run code written by widget authors.
+        _instance = null;
+      }
+      break;
+    }
+    return _instance;
+  }
 
   /// The value seen at the last notify (or at attach): "before" for the
   /// next one.

@@ -8,10 +8,12 @@ import '../state/dependencies.dart';
 import '../state/state_lens.dart';
 import '../theme/controls.dart';
 import '../theme/pinpoint_tokens.dart';
+import '../trace/story.dart';
 import '../trace/trace_session.dart';
 import 'panel_parts.dart';
 import 'source_location_button.dart';
 import 'state_chain.dart';
+import 'story_view.dart';
 
 export 'state_chain.dart' show formatClock, methodLabel, whereLabel;
 
@@ -25,10 +27,11 @@ export 'state_chain.dart' show formatClock, methodLabel, whereLabel;
 ///    time, never a countdown: the lens publishes only after frames with
 ///    real rebuilds, and Pinpoint must not draw frames on a timer (an agent
 ///    waits until the app stops drawing).
-/// 3. The chain per cause, newest first: what notified (owner, tag, method,
-///    file:line), the code line from the bridge when there is one, the
-///    values before and after, the readers that rebuilt, and the coupling
-///    hint. All of it comes from [StateLens.chain] (`state_flow.dart`).
+/// 3. The story, oldest first: one block per cause (a tap, a timer, a
+///    network answer, ...) with what changed in plain words, the method and
+///    file:line, the code line from the bridge, the widgets that rebuilt and
+///    the coupling hint. All of it comes from [StateLens.story]
+///    (`story_builder.dart`); the watch card shows the same ([StoryView]).
 class StateTab extends StatefulWidget {
   const StateTab({
     super.key,
@@ -115,6 +118,8 @@ class _StateTabState extends State<StateTab> {
 
   /// When the open window ends, fixed when the tab first sees it armed.
   DateTime? _until;
+
+  StoryFilter _filter = const StoryFilter();
 
   // The readers are read again only when the element or the lens changes.
   Element? _readersOf;
@@ -274,20 +279,22 @@ class _StateTabState extends State<StateTab> {
   }
 
   Widget _chain(PinPointTokens tokens, StateLens lens) {
-    final Map<String, Object?> chain;
+    final Story story;
     try {
-      chain = lens.chain();
+      story = lens.story(_filter);
     } catch (_) {
       return const SizedBox.shrink();
     }
-    final causes = asList(chain['causes']);
+    final changes = story.blocks.fold<int>(0, (n, b) => n + b.repeat);
     return PanelSection(
       key: StateTab.chainKey,
       heading: sectionHeading(3, 'Changes'),
-      detail: causes.isEmpty ? null : '${chain['events']} events',
+      detail: changes == 0 ? null : '$changes changes',
       children: [
-        StateChainView(
-          chain: chain,
+        StoryView(
+          story: story,
+          filter: _filter,
+          onFilter: (filter) => setState(() => _filter = filter),
           cache: _cache,
           bridge: widget.bridge,
           onToast: widget.onToast,

@@ -20,10 +20,11 @@ import 'fake_console_filter.dart';
 /// Level 3 is held by count, as the session does: the rebuild source runs
 /// while the lens holds it.
 class LensHost {
-  LensHost({required Element? Function() content})
+  LensHost({required Element? Function() content, int Function()? clock})
     : resolver = SourceResolver(
         paths: SourcePaths(projectRoot: Directory.current.path),
-      ) {
+      ),
+      recorder = TraceRecorder(clock: clock) {
     rebuilds = RebuildSource(
       hook: RebuildHook(hooks),
       content: content,
@@ -51,7 +52,7 @@ class LensHost {
     _hook();
   }
 
-  final TraceRecorder recorder = TraceRecorder();
+  final TraceRecorder recorder;
   final HookRegistry hooks = HookRegistry();
   final FakeConsoleFilter console = FakeConsoleFilter();
   final SourceResolver resolver;

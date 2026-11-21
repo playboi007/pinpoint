@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 
 import '../core/hook_registry.dart';
@@ -9,10 +10,13 @@ import '../search/source_index.dart';
 import '../search/source_resolver.dart';
 import '../trace/sources/rebuild_source.dart';
 import '../trace/state_flow.dart';
+import '../trace/story.dart';
+import '../trace/story_builder.dart';
 import '../trace/trace_recorder.dart';
 import 'build_stacks.dart';
 import 'console_filter.dart';
 import 'dependencies.dart';
+import 'hover_namer.dart';
 import 'listen.dart';
 import 'stack_frames.dart';
 
@@ -150,6 +154,18 @@ class StateLens extends ChangeNotifier
   final int Function() _clock;
   late final ConsoleFilter _console;
   late final BuildStacks _stacks;
+  late final HoverNamer _hover = HoverNamer(
+    recorder: recorder,
+    resolver: resolver,
+    content: content,
+  );
+
+  // The story's time 0 (recorder time and wall clock), the end of the last
+  // window (recorder time), and the lines that interrupt it.
+  int _startT = 0;
+  int _startWall = 0;
+  int? _endedT;
+  final List<StoryEnd> _reloads = <StoryEnd>[];
 
   // The app's own files, read when a window opens (a walk of the tree) and
   // used for every stack of it.
@@ -264,6 +280,10 @@ class StateLens extends ChangeNotifier
     _endedAt = null;
     _summary = null;
     _fromSeq = _processed = recorder.nextSeq;
+    _startT = recorder.now;
+    _startWall = DateTime.now().millisecondsSinceEpoch;
+    _endedT = null;
+    _reloads.clear();
     _window = length;
     _rebuildsRecorded = false;
     _endsAt = _clock() + length.inMilliseconds;
@@ -302,6 +322,7 @@ class StateLens extends ChangeNotifier
         ..attachSubtree(element);
       // Part 3: `setState` stacks, and no red lines in the browser console.
       _console.install();
+      _hover.start();
       _stacks.start(length);
       demandDetail();
       _demanded = true;
@@ -336,6 +357,7 @@ class StateLens extends ChangeNotifier
       // Keep going: the globals must come back.
     }
     _listen = null;
+    _hover.stop();
     try {
       _summary = _stacks.stop();
     } catch (_) {
@@ -356,6 +378,7 @@ class StateLens extends ChangeNotifier
     }
     _endedBecause = reason;
     _endedAt = _clock();
+    _endedT = recorder.now;
   }
 
   /// A frame in which elements rebuilt (called by the rebuild source after
@@ -530,6 +553,47 @@ class StateLens extends ChangeNotifier
     // Events after the last frame have no join yet: they show with an
     // empty `rebuilt` list.
     return stateFlowChain(recorder, fromSeq: _fromSeq, rebuilds: _rebuilds);
+  }
+
+  /// The story since the window opened (PLAN-v3 Milestone 21b): blocks per
+  /// cause in time order, oldest first, with rows, diffs and what rebuilt.
+  /// [filter] folds hover and controller changes and, for "Only my state",
+  /// owners outside the project. The card and `state_flow` read this.
+  Story story([StoryFilter filter = const StoryFilter()]) => StoryBuilder.build(
+    recorder: recorder,
+    fromSeq: _fromSeq,
+    startT: _startT,
+    startWall: _startWall,
+    rebuilds: _rebuilds,
+    filter: filter,
+    ends: List<StoryEnd>.of(_reloads),
+    endedBecause: _armed ? null : _endedBecause,
+    endedAt: _endedT,
+    rebuildsRecorded: _rebuildsRecorded,
+  );
+
+  /// A hot reload happened (the wrapper's `reassemble`). While a window is
+  /// open the story gets a line, and the listeners are laid again after the
+  /// next frame, so a builder that the reload made is followed too. The
+  /// window goes on.
+  void noteReassemble() {
+    if (!_armed) return;
+    _reloads.add(StoryEnd(recorder.now - _startT, 'hot reload'));
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      final target = _target;
+      final listen = _listen;
+      if (!_armed || listen == null || target == null || !target.mounted) {
+        return;
+      }
+      try {
+        listen
+          ..attachDependencies(_dependencies)
+          ..attachSubtree(target);
+      } catch (_) {
+        // The lens only observes.
+      }
+      _publish();
+    }, debugLabel: 'pinpoint.lensReload');
   }
 
   /// What the target reads, as the note's `stateOwners` shape.

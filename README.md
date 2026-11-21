@@ -99,6 +99,18 @@ A tape is the inputs and network answers of a run, saved so the run can happen a
 
 Limits: replay does not control the clock or random numbers; a token that expired since the recording shows as the first difference. Key events alone are not replayed (the text they made is). WebSockets reach the server during a replay.
 
+## State lens and the story (v3, Milestones 21 and 21b)
+
+Pick a widget, open its State tab and press "Watch state" (or let the agent call `state_flow`). For up to 30 seconds Pinpoint listens to the objects the widget reads and to the builders under it. The live card and the tab show the result as a story.
+
+**Reading the story.** Time runs down the card: the oldest block is at the top, the newest at the bottom, and the card follows the bottom until you scroll up (then it says "3 new ↓"). Each block is one cause: `tap "Fetch"`, `key Enter`, `typing in Email`, `timer or async callback`, `network answer GET /items`, `route change`, `frame callback`, `agent tap` or `replayed tap`. The time is `+1.24 s` from the start of the watch; hover it for the clock. A change after an `await` stays under its tap and says `+420 ms`. Under the cause are the rows that changed: the name of the object, what changed in a few words (`focused false → true`, `length 3 → 4`, `changed in place`, `new object, same value`), the method with a folder button to `file:line`, the code lines, and which widgets rebuilt. Many instances of one notifier (list rows) are one row with `×12`; open it to see each instance by its `Key`, index or text. The name is the app's class when it has one, else the expression in your code (`_focused`, read by the bridge from the builder's line), else a short type; the short type shows first.
+
+- **Without `PinPoint.run`** changes group by frame and say "no cause recorded"; a tap or key in the 300 ms before shows as "maybe after". `PinPoint.run` gives exact causes.
+- **Folded by default:** hover blocks (and blocks that only move focus) and framework controllers (text, scroll, focus, tab, animation) show as "4 hover changes hidden · show". "Only my state" hides owners that live outside your project.
+- **Values** are clipped and run through the redaction names (`token`, `key`, `secret`, `password`). A controller shows its verb ("text changed"), never its text. A value Pinpoint cannot read says nothing instead of guessing; the code lines show what a plain field was set to.
+- **Limits:** the last 60 blocks, 12 rows a block; older blocks and dropped `setState` stacks are counted. A hot reload adds a line and the watch goes on; the target leaving the screen ends it.
+- **Agent.** `state_flow` returns the same blocks as text, with `hover: true` and `controllers: true` to show the folded ones.
+
 ## What it will do
 
 - Inspect mode: hover to outline a widget, click to select it.
@@ -186,6 +198,10 @@ flutter test test/tweak test/info test/model/annotation_test.dart test/sink/mark
 
 # v2 Milestone 13: recorder, sources, probes, watches, marks, Timeline, trace in notes
 flutter test test/trace test/bridge/list_probes_test.dart test/detect/rebuild_tracker_test.dart
+
+# v3 Milestones 21 and 21b: state lens, watch card, story (the last line is the Chrome part)
+flutter test --no-pub test/state test/trace/story_test.dart test/trace/value_diff_test.dart test/bridge/state_flow_text_test.dart test/overlay/story_view_test.dart test/overlay/state_tab_test.dart test/overlay/watch_mode_test.dart
+flutter test --no-pub --platform chrome test/state/web
 
 # after a deliberate change to the note's shape: rewrite the golden, review the diff
 flutter test --update-goldens test/capture/target_test.dart

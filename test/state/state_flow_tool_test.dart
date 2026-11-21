@@ -10,6 +10,7 @@ import 'package:pinpoint/src/bridge/source_lookup.dart';
 import 'package:pinpoint/src/bridge/state_flow_text.dart';
 import 'package:pinpoint/src/state/state_lens.dart';
 import 'package:pinpoint/src/trace/cause_zone.dart';
+import 'package:pinpoint/src/trace/story.dart';
 import 'package:pinpoint/src/trace/trace_session.dart';
 
 import '../support/fake_provider.dart';
@@ -102,7 +103,7 @@ void main() {
         (((readers.first! as Map)['dependencies']! as List).first as Map);
     expect(dependency['type'], 'ProductModel');
     expect(dependency['tag'], matches(RegExp(r'^#a\d+$')));
-    expect(first['causes'], isEmpty);
+    expect(Story.fromJson(first['story']).blocks, isEmpty);
 
     product.fetchDialog();
     await tester.pump();
@@ -111,20 +112,23 @@ void main() {
     expect(second['armedNow'], isFalse);
     expect(second['armed'], isTrue);
     expect(second['secondsLeft'], inInclusiveRange(1, 30));
-    final causes = [
-      for (final c in second['causes']! as List<Object?>)
-        if (((c! as Map)['notifies']! as List).isNotEmpty)
-          c as Map<String, Object?>,
+    final story = Story.fromJson(second['story']);
+    final blocks = [
+      for (final b in story.blocks)
+        if (b.rows.any((r) => r.kind == 'notify')) b,
     ];
-    expect(causes, hasLength(1), reason: '$second');
-    final notify = (causes.single['notifies']! as List).single as Map;
-    expect(notify['owner'], 'ProductModel');
-    expect(notify['method'], 'ProductModel.fetchDialog');
-    final rebuilt = causes.single['rebuilt']! as List;
-    expect([
-      for (final r in rebuilt) (r as Map)['type'],
-    ], containsAll(<String>['ProductScreen', 'ProductAndCart']));
-    expect(causes.single['hint'], contains('shape 1'));
+    expect(blocks, hasLength(1), reason: '$second');
+    final row = blocks.single.rows.firstWhere((r) => r.kind == 'notify');
+    expect(row.owner, 'ProductModel');
+    expect(row.method, 'ProductModel.fetchDialog');
+    expect(
+      blocks.single.rebuilt,
+      containsAll(<String>['ProductScreen', 'ProductAndCart']),
+    );
+    expect(blocks.single.hint, contains('widgets read'));
+    // No cause without PinPoint.run: the block says so, once at the top.
+    expect(blocks.single.cause.label, 'no cause recorded');
+    expect(story.noCauseHint, contains('PinPoint.run'));
     // No PinPoint.run in a test: the answer says why there is no cause.
     expect((second['notes']! as List).join(), contains('no causes'));
 
@@ -135,14 +139,16 @@ void main() {
     );
     // ignore: avoid_print
     if (Platform.environment['PP_PRINT'] != null) print(text);
-    expect(text, contains('ProductModel #a1 notified   fetchDialog()'));
+    expect(text, contains('ProductModel'));
+    expect(text, contains('fetchDialog()'));
+    expect(text, isNot(contains('#a')));
     expect(text, contains('test/support/fake_provider.dart:'));
     expect(
       text,
       contains('dialogLoading = true; loading = true; notifyListeners();'),
     );
-    expect(text, contains('(dependencies: ProductModel #a1)   <- same object'));
-    expect(text, contains('hint: shape 1: ProductModel'));
+    expect(text, contains('rebuilt 2: '));
+    expect(text, contains('hint: ProductModel'));
   });
 
   scenario('another target re-targets: one lens, one window', (tester) async {
@@ -194,9 +200,9 @@ void main() {
     expect(after['armed'], isFalse);
     expect(after['ended'], 'window ended');
     expect(
-      (after['causes']! as List).any(
-        (c) => ((c! as Map)['notifies']! as List).isNotEmpty,
-      ),
+      Story.fromJson(
+        after['story'],
+      ).blocks.any((b) => b.rows.any((r) => r.kind == 'notify')),
       isTrue,
     );
     expect(product.listenerCount, 1);

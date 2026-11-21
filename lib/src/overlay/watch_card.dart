@@ -8,8 +8,10 @@ import '../state/state_lens.dart';
 import '../theme/controls.dart';
 import '../theme/pinpoint_motion.dart';
 import '../theme/pinpoint_tokens.dart';
+import '../trace/story.dart';
 import 'info_panel.dart' show clampPanel, panelMarginX, panelMarginY;
 import 'state_chain.dart';
+import 'story_view.dart';
 
 /// Places [WatchCard] while the watch session is open (watch mode of the
 /// state lens, PLAN-v3 Milestone 21).
@@ -144,10 +146,12 @@ class _CardLayout extends SingleChildLayoutDelegate {
 }
 
 /// The live changes card of watch mode: "WATCHING Widget" with the end
-/// time of the window and Stop, then the chain of changes, newest cause on
-/// top, in the same rows as the State tab ([StateChainView]).
+/// time of the window and Stop, then the story of changes, oldest at the
+/// top, in the same rows as the State tab ([StoryView]). The card follows
+/// the bottom of the story; when the user scrolled up it says "3 new ↓"
+/// instead of moving.
 ///
-/// The chain is read again only when the lens publishes. The end time is
+/// The story is read again only when the lens publishes. The end time is
 /// fixed when the window opens: no countdown (no frames on a timer). After
 /// the window ends the header says "Stopped: reason" and offers "Watch
 /// again" (the same target, when it is still mounted) and Close.
@@ -173,6 +177,10 @@ class WatchCard extends StatefulWidget {
   static const Key closeKey = ValueKey<String>('pinpoint.watchCard.close');
   static const Key bodyKey = ValueKey<String>('pinpoint.watchCard.body');
 
+  /// "3 new ↓": shown when the story grew while the user read older
+  /// blocks.
+  static const Key newKey = ValueKey<String>('pinpoint.watchCard.new');
+
   /// The widest the card gets.
   static const double width = 320;
 
@@ -197,24 +205,89 @@ class WatchCard extends StatefulWidget {
 }
 
 class _WatchCardState extends State<WatchCard> {
-  // The chain of the state the lens last published.
+  // The story of the state the lens last published, and of the filter.
   StateLensState? _at;
+  StoryFilter _filter = const StoryFilter();
+  StoryFilter? _filterAt;
   bool _mineAt = false;
-  Map<String, Object?> _chain = const <String, Object?>{};
+  Story _story = const Story();
 
-  Map<String, Object?> _chainFor(StateLens lens, bool mine) {
+  final ScrollController _scroll = ScrollController();
+
+  // Follows the bottom until the user scrolls up.
+  bool _atBottom = true;
+  int _seen = 0;
+  int _newBelow = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _scroll.addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (!_scroll.hasClients) return;
+    final bottom = _scroll.position.extentAfter < 24;
+    if (bottom == _atBottom) return;
+    _atBottom = bottom;
+    if (bottom && _newBelow > 0) {
+      setState(() => _newBelow = 0);
+    }
+  }
+
+  void _toBottom() {
+    if (_scroll.hasClients) {
+      _scroll.jumpTo(_scroll.position.maxScrollExtent);
+    }
+    setState(() {
+      _atBottom = true;
+      _newBelow = 0;
+    });
+  }
+
+  Story _storyFor(StateLens lens, bool mine) {
     final value = lens.value;
-    if (identical(value, _at) && mine == _mineAt) return _chain;
+    if (identical(value, _at) && mine == _mineAt && _filter == _filterAt) {
+      return _story;
+    }
     _at = value;
     _mineAt = mine;
-    if (!mine) return _chain = const <String, Object?>{};
+    _filterAt = _filter;
+    if (!mine) return _story = const Story();
     try {
-      _chain = lens.chain();
+      _story = lens.story(_filter);
     } catch (_) {
       // Diagnostics run code written by widget authors.
-      _chain = const <String, Object?>{};
+      _story = const Story();
     }
-    return _chain;
+    _follow(_story);
+    return _story;
+  }
+
+  // How much happened: blocks (with their repeats) and end lines. A story
+  // that grew while the user is at the bottom scrolls to it after the
+  // frame; while the user reads older blocks it counts what is new.
+  void _follow(Story story) {
+    final activity =
+        story.blocks.fold<int>(0, (n, b) => n + b.repeat) + story.ends.length;
+    final grew = activity - _seen;
+    _seen = activity;
+    if (grew <= 0) return;
+    if (_atBottom) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _atBottom && _scroll.hasClients) {
+          _scroll.jumpTo(_scroll.position.maxScrollExtent);
+        }
+      });
+    } else {
+      _newBelow += grew;
+    }
   }
 
   @override
@@ -249,7 +322,7 @@ class _WatchCardState extends State<WatchCard> {
     final value = lens.value;
     final mine = identical(value.target, watch.target);
     final armedHere = mine && value.armed;
-    final chain = _chainFor(lens, mine);
+    final story = _storyFor(lens, mine);
     final until = watch.until;
     final status = armedHere
         ? (until == null ? 'watching' : 'until ${formatClock(until)}')
@@ -280,15 +353,35 @@ class _WatchCardState extends State<WatchCard> {
                 ),
               ),
               Flexible(
-                child: SingleChildScrollView(
-                  key: WatchCard.bodyKey,
-                  padding: const EdgeInsets.all(PinPointSizes.panelPadding),
-                  child: StateChainView(
-                    chain: chain,
-                    cache: widget.controller.codeLines,
-                    bridge: widget.bridge,
-                    onToast: widget.onToast,
-                  ),
+                child: Stack(
+                  children: [
+                    SingleChildScrollView(
+                      key: WatchCard.bodyKey,
+                      controller: _scroll,
+                      padding: const EdgeInsets.all(PinPointSizes.panelPadding),
+                      child: StoryView(
+                        story: story,
+                        filter: _filter,
+                        onFilter: (filter) => setState(() => _filter = filter),
+                        cache: widget.controller.codeLines,
+                        bridge: widget.bridge,
+                        onToast: widget.onToast,
+                      ),
+                    ),
+                    if (_newBelow > 0)
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        bottom: 8,
+                        child: Center(
+                          child: DraftButton.primary(
+                            key: WatchCard.newKey,
+                            label: '$_newBelow new ↓',
+                            onPressed: _toBottom,
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               ),
             ],

@@ -232,12 +232,15 @@ class _Group {
 /// One line for one cause: the coupling shapes of PLAN-v3 Milestone 21,
 /// joined with `; `. Null when there is nothing to say.
 ///
-/// - Shape 1, one notify, many readers: "notified once and 2 readers
-///   rebuilt" (the bridge adds the code line: one method set both values).
-/// - Shape 2, a notify inside another notify's listener: the event's
-///   `depth` is 2 or more (`ChangeNotifier.notifyListeners` twice in its
-///   stack).
-/// - Shape 3, two readers of one object: two readers with the same tag.
+/// The user reads this line, so it uses plain words and never the shape
+/// numbers:
+/// - Shape 1, one notify, many readers: "CartModel.add() changed values
+///   that 2 widgets read" (the code line under it shows what was set).
+/// - Shape 2, a notify inside another notify's listener (the event's
+///   `depth` is 2 or more): "B.go() ran while A.add() was being handled:
+///   one change sets off another".
+/// - Shape 3, two readers of one object (same tag): "FetchDialog and
+///   ProductScreen read the same ProductModel".
 String? couplingHint(
   List<TraceEvent> notifies,
   List<TraceEvent> setStates,
@@ -260,15 +263,15 @@ String? couplingHint(
         break;
       }
     }
-    final owner = nested.data['owner'] ?? nested.widget ?? '?';
-    final method = nested.data['method'];
-    final inside = parent == null
-        ? 'the listener of another notify'
-        : 'the listener of ${parent.data['owner'] ?? parent.widget ?? '?'}'
-              '${parent.data['method'] is String ? ' (${parent.data['method']})' : ''}';
+    final who = _who(
+      nested.data['owner'] ?? nested.widget,
+      nested.data['method'],
+    );
+    final outer = parent == null
+        ? 'another change'
+        : _who(parent.data['owner'] ?? parent.widget, parent.data['method']);
     parts.add(
-      'shape 2: $owner${method is String ? ' ($method)' : ''} notified '
-      'inside $inside: one notifier triggers another',
+      '$who ran while $outer was being handled: one change sets off another',
     );
     if (parts.length >= 2) break;
   }
@@ -286,14 +289,12 @@ String? couplingHint(
         if (r.tag == tag && r.via != 'setState') r.key: r,
     };
     if (tagged.length < 2) continue;
-    final owner = events.first.data['owner'] ?? events.first.widget ?? '?';
-    final method = events.first.data['method'];
-    final times = events.length == 1 ? 'once' : '${events.length} times';
-    parts.add(
-      'shape 1: $owner${method is String ? ' ($method)' : ''} notified '
-      '$times and ${tagged.length} readers rebuilt: one method changed the '
-      'values both read',
+    final who = _who(
+      events.first.data['owner'] ?? events.first.widget,
+      events.first.data['method'],
     );
+    final times = events.length == 1 ? '' : ' (${events.length} times)';
+    parts.add('$who changed values that ${tagged.length} widgets read$times');
   }
 
   // Shape 3.
@@ -303,17 +304,29 @@ String? couplingHint(
     if (tag == null || r.via == 'setState') continue;
     readersByTag.putIfAbsent(tag, () => <String, FlowReader>{})[r.key] = r;
   }
-  for (final MapEntry(key: tag, value: group) in readersByTag.entries) {
+  for (final group in readersByTag.values) {
     // Two elements of one widget type (a list item) are not two screens.
     final types = {for (final r in group.values) r.type}.toList()..sort();
     if (types.length < 2) continue;
     final first = group.values.first;
+    // The tag (`#a1`) is for grouping only: it is never shown.
+    final owner = first.owner;
     parts.add(
-      'shape 3: ${types.take(3).join(' and ')} read the same object '
-              '${first.owner ?? ''} $tag'
-          .replaceAll('  ', ' '),
+      '${types.take(3).join(' and ')} read the same '
+      '${owner == null || owner.isEmpty ? 'object' : owner}',
     );
   }
 
   return parts.isEmpty ? null : parts.join('; ');
+}
+
+/// `CartModel.add()` from an owner and a method (`CartModel.add` or `add`);
+/// the owner alone when there is no method. Plain words for the hint line:
+/// the user reads it, so no internal names such as "shape 1".
+String _who(Object? owner, Object? method) {
+  final name = owner?.toString() ?? '?';
+  if (method is! String || method.isEmpty) return name;
+  final dot = method.lastIndexOf('.');
+  final short = dot < 0 ? method : method.substring(dot + 1);
+  return '$name.$short()';
 }

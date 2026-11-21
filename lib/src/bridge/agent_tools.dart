@@ -569,19 +569,26 @@ final List<Map<String, Object?>> agentTools = [
         'the widget reads (provider and inherited objects with an identity '
         'tag such as #a1, and the line that made them) and where their '
         'classes are. Then act (run_steps) and call state_flow again with '
-        'the same target: the answer is the chain, per cause (a tap): '
-        'which object notified, from which method and file:line, the code '
+        'the same target: the answer is a story, oldest first, one block '
+        'per cause (a tap, a timer, a network answer, a key, an agent '
+        'command; a change after an await shows as "+420 ms" under its '
+        'tap). A block lists what changed: the name of the object (its '
+        'class, else the field it is held in), the fields that changed '
+        '("focused false -> true"), the method and file:line, and the code '
         'lines there (a method that sets two fields and calls '
-        'notifyListeners once shows both), which widgets rebuilt because '
-        'they read it, and one hint: "one method set both values" (one '
-        'notify, many readers), "a notifier triggered another" (a notify '
-        'inside a listener), or "two readers of one object" (a dialog and '
-        'its screen share one tag). For a ValueNotifier the value before '
-        'and after is shown; for plain fields read the code lines. A '
-        'setState shows its line too. Costs a stack per setState while '
-        'open, so it closes by itself. rearm: true opens a new window on '
-        'the same widget. Rebuilds need no level 3 from you; causes need '
-        'PinPoint.run.',
+        'notifyListeners once shows both). Then the widgets that rebuilt, '
+        'and one hint: "one method set both values" (one notify, many '
+        'readers), "a notifier triggered another" (a notify inside a '
+        'listener), or "two readers of one object" (a dialog and its '
+        'screen read the same object). Many instances of one notifier (list '
+        'rows) are one row with a count and their keys or indexes. A '
+        'setState shows its line too. Hover blocks and framework '
+        'controllers (text, scroll, focus, tab, animation) are folded and '
+        'counted: hover: true and controllers: true show them. Costs a '
+        'stack per setState while open, so it closes by itself. rearm: true '
+        'opens a new window on the same widget. Rebuilds need no level 3 '
+        'from you; exact causes need PinPoint.run, without it blocks say '
+        '"no cause recorded".',
     {
       'handle': _handle,
       'target': _target,
@@ -595,6 +602,16 @@ final List<Map<String, Object?>> agentTools = [
         'type': 'boolean',
         'description':
             'Open a new window on this widget even if it was armed lately.',
+      },
+      'hover': {
+        'type': 'boolean',
+        'description': 'Show the hover and focus blocks (folded by default).',
+      },
+      'controllers': {
+        'type': 'boolean',
+        'description':
+            'Show framework controller changes: text, scroll, focus, tab, '
+            'animation (folded by default).',
       },
     },
   ),

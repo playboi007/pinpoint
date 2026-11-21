@@ -35,6 +35,7 @@ import '../tape/tape_player.dart';
 import '../tape/tape_recorder.dart' show TapeSince;
 import '../trace/cause_zone.dart';
 import '../trace/note_trace.dart';
+import '../trace/story.dart' show StoryFilter;
 import '../trace/trace_causes.dart';
 import '../trace/trace_format.dart';
 import '../trace/trace_session.dart';
@@ -870,7 +871,16 @@ class AgentCommands {
       'secondsLeft': lens.secondsLeft,
       'ended': ?state.endedBecause,
       'readers': lens.readersJson(),
-      ...lens.chain(),
+      // The story of changes per cause (PLAN-v3 Milestone 21b): the
+      // bridge writes it as text; the card shows the same blocks.
+      'story': lens
+          .story(
+            StoryFilter(
+              showHover: args['hover'] == true,
+              showControllers: args['controllers'] == true,
+            ),
+          )
+          .toJson(),
       if (notes.isNotEmpty) 'notes': notes,
     };
   }

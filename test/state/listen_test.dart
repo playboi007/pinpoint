@@ -223,6 +223,91 @@ void main() {
     );
   });
 
+  testWidgets('for the story: the creating line, the instance, and the diff '
+      'of the value (a changed field, a list changed in place)', (
+    tester,
+  ) async {
+    final record = ValueNotifier<({bool focused, bool open})>((
+      focused: false,
+      open: false,
+    ));
+    final list = _ListHolder();
+    addTearDown(record.dispose);
+    addTearDown(list.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Column(
+          children: [
+            ValueListenableBuilder<({bool focused, bool open})>(
+              key: const ValueKey('filters'),
+              valueListenable: record,
+              builder: (_, v, _) => Text('$v'),
+            ),
+            ValueListenableBuilder<List<int>>(
+              valueListenable: list,
+              builder: (_, v, _) => Text('${v.length}'),
+            ),
+          ],
+        ),
+      ),
+    );
+    expect(listen.attachSubtree(tester.element(find.byType(Column))), 2);
+
+    record.value = (focused: true, open: false);
+    list.add(3);
+    await tester.pump();
+
+    final events = notifies();
+    final a = events.firstWhere(
+      (e) => e.data['owner']!.toString().startsWith('ValueNotifier<('),
+    );
+    expect(a.data['change'], 'focused false → true');
+    expect(a.data['instance'], 'key filters');
+    expect(a.data['src'], startsWith('$_thisFile:'));
+    expect(a.data['srcArg'], 'valueListenable');
+    final b = events.firstWhere((e) => e.data['owner'] == '_ListHolder');
+    expect(b.data['change'], 'changed in place: length 2 → 3');
+  });
+
+  testWidgets('a controller notifies with no value in the event: a text '
+      'field\'s text can be a password', (tester) async {
+    final controller = TextEditingController();
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ListenableBuilder(
+          listenable: controller,
+          builder: (_, _) => Text(controller.text),
+        ),
+      ),
+    );
+    expect(listen.attachSubtree(tester.element(find.byType(MaterialApp))), 1);
+
+    controller.text = 'hunter2';
+
+    final event = notifies().single;
+    expect(event.data['owner'], 'TextEditingController');
+    for (final key in ['before', 'after', 'change']) {
+      expect(event.data.containsKey(key), isFalse, reason: key);
+    }
+    expect(event.toJsonLine(), isNot(contains('hunter2')));
+  });
+
+  testWidgets('an object value is shown as text with secret fields masked', (
+    tester,
+  ) async {
+    final login = ValueNotifier<_Login>(_Login('bob', 'a'));
+    addTearDown(login.dispose);
+    listen.attach(login, owner: 'ValueNotifier<_Login>');
+
+    login.value = _Login('bob', 'hunter2');
+
+    final event = notifies().single;
+    expect(event.toJsonLine(), isNot(contains('hunter2')));
+    expect(event.data['after'], contains('password: ***'));
+    expect(event.data['change'], 'password *** → ***');
+  });
+
   testWidgets('the attachments are capped', (tester) async {
     final small = StateListen(
       recorder: recorder,
@@ -302,4 +387,22 @@ class _Reader extends StatelessWidget {
         .dependOnInheritedWidgetOfExactType<_InheritedProviderScope<_Model?>>();
     return const SizedBox();
   }
+}
+
+class _ListHolder extends ValueNotifier<List<int>> {
+  _ListHolder() : super(<int>[1, 2]);
+
+  void add(int v) {
+    value.add(v);
+    notifyListeners();
+  }
+}
+
+class _Login {
+  _Login(this.user, this.password);
+  final String user;
+  final String password;
+
+  @override
+  String toString() => '_Login(user: $user, password: $password)';
 }

@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import '../sink/bridge_client.dart';
 import '../trace/code_lines.dart';
+import '../trace/story_names.dart';
 
 /// The source lines under the chain rows of the state lens, asked from the
 /// bridge (`GET /source`) once per `file:line` for the whole Pinpoint
@@ -87,6 +88,53 @@ class CodeLineCache extends ChangeNotifier {
     }
     _lines[key] = lines;
     notifyListeners();
+  }
+
+  // Names read from the code (rung 2 of the story's name ladder), by
+  // `file:line|argument`. A null value is a lookup that found nothing.
+  final Map<String, String?> _names = <String, String?>{};
+  final Set<String> _askedNames = <String>{};
+
+  /// The expression found at [src] (`lib/x.dart:40`) for the builder
+  /// argument [arg] (`valueListenable`), or null when there is none (yet).
+  String? nameAt(String? src, String? arg) => _names['$src|$arg'];
+
+  /// Asks the bridge for the statement at [src] and reads the expression of
+  /// [arg] from it ([expressionFromSource]), once. Never waits: the story
+  /// shows the short type first and swaps the name in when it arrives
+  /// (this cache notifies). The bridge answers `GET /source?before=0`.
+  void needName(String? src, String? arg, BridgeClient? Function()? bridge) {
+    if (src == null || arg == null) return;
+    final colon = src.lastIndexOf(':');
+    final line = colon < 0 ? null : int.tryParse(src.substring(colon + 1));
+    if (line == null || line < 1) return;
+    final file = src.substring(0, colon);
+    if (!askable(file)) return;
+    final key = '$src|$arg';
+    if (_askedNames.contains(key)) return;
+    final client = bridge?.call();
+    if (client == null) return;
+    _askedNames.add(key);
+    unawaited(_fetchName(key, client, file, line, arg));
+  }
+
+  Future<void> _fetchName(
+    String key,
+    BridgeClient client,
+    String file,
+    int line,
+    String arg,
+  ) async {
+    String? name;
+    try {
+      final snippet = await client.source(file, line, before: 0);
+      if (snippet != null) name = expressionFromSource(snippet.text, arg);
+    } catch (_) {
+      name = null;
+    }
+    if (_disposed) return;
+    _names[key] = name;
+    if (name != null) notifyListeners();
   }
 
   @override

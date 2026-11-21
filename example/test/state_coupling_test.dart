@@ -122,8 +122,8 @@ void lensTests() {
       await tester.pump();
       await tester.pump();
       final all = hints(lens);
-      expect(all, contains('shape 1'), reason: '${lens.chain()}');
-      expect(all, contains('shape 3'), reason: '${lens.chain()}');
+      expect(all, contains('widgets read'), reason: '${lens.chain()}');
+      expect(all, contains('read the same'), reason: '${lens.chain()}');
       // One tag on both readers: the same object.
       final rebuilt = [
         for (final c in causes(lens)) ...c['rebuilt']! as List<Object?>,
@@ -147,7 +147,11 @@ void lensTests() {
       await tester.tap(find.text('Add to cart'));
       await tester.pump();
       await tester.pump();
-      expect(hints(lens), contains('shape 2'), reason: '${lens.chain()}');
+      expect(
+        hints(lens),
+        contains('sets off another'),
+        reason: '${lens.chain()}',
+      );
     } finally {
       lens.stop();
     }

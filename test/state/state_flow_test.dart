@@ -85,11 +85,14 @@ void main() {
     expect(readers.first['via'], 'dependency');
     expect(readers.first['owner'], 'ProductModel');
     final hint = cause['hint']! as String;
-    expect(hint, startsWith('shape 1:'));
-    expect(hint, contains('ProductModel (ProductModel.fetchDialog)'));
-    expect(hint, contains('notified once and 2 readers rebuilt'));
-    expect(hint, isNot(contains('shape 2')));
-    expect(hint, isNot(contains('shape 3')));
+    expect(hint, contains('widgets read'));
+    expect(
+      hint,
+      contains('ProductModel.fetchDialog() changed values that 2 widgets read'),
+    );
+    expect(hint, isNot(contains('times')));
+    expect(hint, isNot(contains('sets off another')));
+    expect(hint, isNot(contains('read the same')));
   });
 
   scenario('shape 2: a notify inside another notify\'s listener', (
@@ -128,12 +131,15 @@ void main() {
     expect(outer.containsKey('depth'), isFalse);
     expect(nested['method'], 'CartModel.bump');
     final hint = cause['hint']! as String;
-    expect(hint, contains('shape 2: CartModel (CartModel.bump) notified'));
-    expect(hint, contains('the listener of ProductModel'));
-    expect(hint, contains('one notifier triggers another'));
+    expect(hint, contains('CartModel.bump() ran while'));
+    expect(
+      hint,
+      contains('while ProductModel.fetchDialog() was being handled'),
+    );
+    expect(hint, contains('one change sets off another'));
     // One reader reads both objects: not shape 1 or 3.
-    expect(hint, isNot(contains('shape 1')));
-    expect(hint, isNot(contains('shape 3')));
+    expect(hint, isNot(contains('widgets read')));
+    expect(hint, isNot(contains('read the same')));
   });
 
   scenario('shape 3: a dialog route and its screen read one object', (
@@ -177,8 +183,10 @@ void main() {
     });
     expect(readers.map((r) => r['tag']).toSet(), hasLength(1));
     final hint = cause['hint']! as String;
-    expect(hint, contains('shape 3: FetchDialog and ProductScreen read the '));
-    expect(hint, contains('same object ProductModel #a1'));
+    expect(hint, contains('FetchDialog and ProductScreen read the '));
+    expect(hint, contains('read the same ProductModel'));
+    // The identity tag is for grouping: it is never shown.
+    expect(hint, isNot(contains('#a')));
   });
 
   scenario('a ValueNotifier in a builder: the builder is the reader, with '
@@ -299,7 +307,7 @@ void main() {
         const [],
         const [],
       );
-      expect(hint, contains('shape 2: B (M.go) notified inside the listener'));
+      expect(hint, contains('B.go() ran while'));
     });
 
     test('shapes join in one line', () {
@@ -308,8 +316,8 @@ void main() {
         const [],
         [reader('X', '#a1'), reader('Y', '#a1')],
       );
-      expect(hint, contains('shape 1'));
-      expect(hint, contains('; shape 3: X and Y read the same object'));
+      expect(hint, contains('widgets read'));
+      expect(hint, contains('; X and Y read the same'));
       expect(hint, isNot(contains('\n')));
     });
 
