@@ -12,7 +12,7 @@ void main() {
     String comment = 'Label truncates',
     int properties = 20,
     int subtreeLines = 40,
-    int chain = 40,
+    int owners = 4,
     int ancestors = 12,
     String text = 'Save changes',
   }) => Annotation(
@@ -42,7 +42,14 @@ void main() {
           source: SourceRef(file: 'lib/widgets/a_$i.dart', line: i, column: 1),
         ),
     ],
-    frameworkChain: [for (var i = 0; i < chain; i++) '_FrameworkWidget$i'],
+    stateOwners: [
+      for (var i = 0; i < owners; i++)
+        StateOwnerInfo(
+          kind: 'state',
+          type: '_Owner${i}State',
+          source: SourceRef(file: 'lib/widgets/o_$i.dart', line: i, column: 1),
+        ),
+    ],
     siblings: SiblingsInfo(
       parent: 'Column',
       index: 6,
@@ -57,7 +64,7 @@ void main() {
   );
 
   test('a note under the budget is unchanged', () {
-    final small = note(properties: 2, subtreeLines: 3, chain: 4);
+    final small = note(properties: 2, subtreeLines: 3, owners: 1);
     final fitted = small.fitToBudget();
     expect(bytes(fitted), bytes(small));
     expect(fitted.truncated, isEmpty);
@@ -100,6 +107,40 @@ void main() {
     expect(bytes(fitted), lessThanOrEqualTo(3000));
   });
 
+  test('dependencies of the state owners go before the owners do', () {
+    const dep = DependencyInfo(kind: 'provider', type: 'Cart', tag: '#a1');
+    final owned = note(properties: 0, subtreeLines: 0, ancestors: 1).copyWith(
+      stateOwners: [
+        for (var i = 0; i < 4; i++)
+          StateOwnerInfo(
+            kind: 'state',
+            type: '_Owner${i}State',
+            dependencies: [
+              for (var j = 0; j < 4; j++)
+                DependencyInfo(
+                  kind: 'provider',
+                  type: 'Model${'x' * 120}$j',
+                  tag: dep.tag,
+                ),
+            ],
+          ),
+      ],
+    );
+    final without = bytes(
+      owned.copyWith(
+        stateOwners: [
+          for (final o in owned.stateOwners) o.withoutDependencies(),
+        ],
+      ),
+    );
+    // A budget that fits the owners but not what they read.
+    final fitted = owned.fitToBudget(maxBytes: without + 50);
+    expect(fitted.truncated, contains('stateOwners.dependencies'));
+    expect(fitted.truncated, isNot(contains('stateOwners')));
+    expect(fitted.stateOwners, hasLength(4));
+    expect(fitted.stateOwners.every((o) => o.dependencies.isEmpty), isTrue);
+  });
+
   test('a huge comment is cut only as the last resort', () {
     final long = note(comment: 'c' * 20000).fitToBudget();
     expect(bytes(long), lessThanOrEqualTo(maxPayloadBytes));
@@ -114,7 +155,7 @@ void main() {
       comment: '漢' * 3000,
       properties: 0,
       subtreeLines: 1,
-      chain: 1,
+      owners: 1,
       ancestors: 1,
     ).fitToBudget();
     expect(bytes(wide), lessThanOrEqualTo(maxPayloadBytes));

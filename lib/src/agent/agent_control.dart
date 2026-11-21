@@ -90,6 +90,8 @@ class AgentControl extends ChangeNotifier {
     'stop_replay',
     'why',
     'caused_by',
+    // Listens and reads stacks for a short window; does not drive the app.
+    'state_flow',
   };
 
   /// How long a tap dot stays.

@@ -11,6 +11,7 @@ import '../agent/agent_control.dart' show AgentCancel;
 import '../agent/command_channel.dart';
 import '../agent/commands.dart';
 import '../agent/reload_counter.dart';
+import '../bridge/bridge_protocol.dart' show annotationsPath;
 import '../capture/context_collector.dart';
 import '../capture/screenshot.dart';
 import '../core/note_sync.dart';
@@ -65,6 +66,8 @@ import 'timeline_panel.dart';
 import 'toast_layer.dart';
 import 'toolbar.dart';
 import 'tweak_panel.dart';
+import 'watch_card.dart';
+import 'watch_marker.dart';
 
 /// Pinpoint's own UI layer, painted above the app.
 ///
@@ -94,6 +97,9 @@ class InspectorOverlay extends StatefulWidget {
 
   /// Key of the `CustomPaint` that outlines tweaked widgets.
   static const Key tweakOutlineKey = ValueKey<String>('pinpoint.tweakOutline');
+
+  /// The dashed outline and tag of the widget the state lens watches.
+  static const Key watchMarkerKey = ValueKey<String>('pinpoint.watchMarker');
 
   final PinPointController controller;
 
@@ -263,7 +269,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
       sinks: widget.config.sinks,
     );
     if (client == null) return null;
-    return NoteSync(
+    final sync = NoteSync(
       client: client,
       notes: widget.controller.notes,
       // Two tabs of different apps can poll one bridge. Each loads only
@@ -281,6 +287,13 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
         if (mounted) _toasts.show(_short(message), error: true);
       },
     );
+    // A note sent through the bridge sink is this tab's own write too.
+    for (final sink in widget.config.sinks) {
+      if (sink is HttpSink && sink.url.path == annotationsPath) {
+        sink.clientId = sync.clientId;
+      }
+    }
+    return sync;
   }
 
   late final NoteActions _noteActions = NoteActions(
@@ -292,6 +305,8 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     accept: (id) => _setStatus(id, NoteStatus.verified),
     reopen: _reopen,
     edit: _editNote,
+    undo: (id, round, changes, reason) =>
+        unawaited(_undoChanges(id, round, changes, reason)),
     replay: (id) => unawaited(_replayNote(id)),
   );
 
@@ -961,6 +976,39 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     unawaited(_sync?.update(id, status: NoteStatus.submitted, message: text));
   }
 
+  /// Undoes [changes] of [round] of the note [id] through the bridge
+  /// (PLAN-v3 Milestone 20). The bridge sends the note back to the agent;
+  /// the note it answers with lands in the book. A toast says how it went.
+  /// A failure shows no toast here: [NoteSync] reports it.
+  Future<void> _undoChanges(
+    String id,
+    int round,
+    List<String> changes,
+    String? reason,
+  ) async {
+    final sync = _sync;
+    if (sync == null) {
+      _toasts.show('Undo needs the bridge', error: true);
+      return;
+    }
+    final result = await sync.undo(
+      id,
+      round: round,
+      changes: changes,
+      reason: reason,
+    );
+    if (result == null || !mounted) return;
+    if (result.isDone) {
+      _toasts.show(
+        result.reloaded ? 'Undone, reloaded' : 'Undone, press r to reload',
+      );
+    } else if (result.conflicts.isNotEmpty) {
+      _toasts.show('Asked the agent: files changed since');
+    } else {
+      _toasts.show('Asked the agent to undo');
+    }
+  }
+
   void _editNote(String id, String comment) {
     final notes = widget.controller.notes;
     final note = notes.byId(id);
@@ -1404,6 +1452,17 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
                                   tokens: PinPointTokens.of(paintContext),
                                 ),
                               ),
+                              // Watch mode: the dashed outline of the widget
+                              // the state lens watches. Moved only after
+                              // frames the app draws.
+                              CustomPaint(
+                                key: InspectorOverlay.watchMarkerKey,
+                                painter: WatchMarkerPainter(
+                                  rect: widget.controller.watch.markerRect,
+                                  origin: () => _originOf(paintContext),
+                                  tokens: PinPointTokens.of(paintContext),
+                                ),
+                              ),
                               // "Scan this screen": a line sweeps the app
                               // once and each finding pops in as it passes.
                               ScanSweep(
@@ -1431,8 +1490,24 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
                         onCopy: _copy,
                         noteActions: _noteActions,
                         onTweak: _applyTweak,
+                        bridge: () => BridgeClient.find(
+                          url: widget.config.bridgeUrl,
+                          sinks: widget.config.sinks,
+                        ),
+                        onToast: _toasts.show,
                         // Keeps the panel clear of the rail, which is drawn
                         // above it so the launcher can always stop picking.
+                        rightInset: RailPlacement.inset + RailPlacement.width,
+                      ),
+                      // The live changes card of watch mode. It shows in
+                      // idle too: the app has its events, the card its own.
+                      WatchCardLayer(
+                        controller: widget.controller,
+                        bridge: () => BridgeClient.find(
+                          url: widget.config.bridgeUrl,
+                          sinks: widget.config.sinks,
+                        ),
+                        onToast: _toasts.show,
                         rightInset: RailPlacement.inset + RailPlacement.width,
                       ),
                       // Above the trap, so clicks on it never pick.

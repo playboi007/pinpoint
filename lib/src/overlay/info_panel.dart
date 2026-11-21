@@ -6,17 +6,20 @@ import '../core/pinpoint_controller.dart';
 import '../info/widget_info.dart';
 import '../model/annotation.dart';
 import '../search/pick_result.dart';
+import '../sink/bridge_client.dart';
 import '../theme/controls.dart';
 import '../theme/pinpoint_tokens.dart';
 import '../trace/note_trace.dart';
 import '../trace/trace_causes.dart';
 import '../trace/trace_format.dart';
 import '../trace/trace_session.dart';
+import 'candidate_dial.dart';
 import 'comment_form.dart';
 import 'highlight_painter.dart';
 import 'note_view.dart';
 import 'panel_keys.dart';
 import 'panel_parts.dart';
+import 'state_tab.dart';
 import 'tweak_panel.dart';
 
 /// Space kept between the panel and the left and right edges of the viewport.
@@ -125,7 +128,7 @@ class _SendAction extends Action<_SendIntent> {
 }
 
 /// Which tab of the [InfoPanel] shows.
-enum PanelTab { info, tweak, comment }
+enum PanelTab { info, tweak, state, comment }
 
 /// The crumbs to show for [pick]: the selected entry of its chain with up
 /// to [around] local entries above and below it, outermost first, and
@@ -172,6 +175,8 @@ class InfoPanelLayer extends StatelessWidget {
     required this.onCopy,
     required this.noteActions,
     required this.onTweak,
+    this.bridge,
+    this.onToast,
     this.rightInset = 0,
   });
 
@@ -183,6 +188,14 @@ class InfoPanelLayer extends StatelessWidget {
   final VoidCallback onCopy;
   final NoteActions noteActions;
   final TweakApply onTweak;
+
+  /// The bridge the State tab reads source lines from; null, or a bridge
+  /// that answers null, shows no code line.
+  final BridgeClient? Function()? bridge;
+
+  /// Shows a toast, for example "Copied lib/main.dart:12" after the State
+  /// tab's folder button copied.
+  final ValueChanged<String>? onToast;
 
   /// Space at the right edge the panel never covers: the rail sits there,
   /// drawn above the panel. The panel is placed and dragged in the rest.
@@ -226,6 +239,8 @@ class InfoPanelLayer extends StatelessWidget {
                   : controller.notes.numberOf(note.id),
               drafts: controller.notes.drafts.length,
               noteActions: noteActions,
+              bridge: bridge,
+              onToast: onToast,
               // A tweak can move the widget; the panel stays where it is.
               onTweak: (target, property, value) {
                 keepPlace();
@@ -355,8 +370,8 @@ class _PanelLayout extends SingleChildLayoutDelegate {
 }
 
 /// A card for the selected widget: header, breadcrumb, tabs, then the Info
-/// tab (its [WidgetInfo]), the Tweak tab ([TweakTab]) or the Comment tab
-/// ([CommentForm]). The Tweak and Comment tabs keep their footer under the
+/// tab (its [WidgetInfo]), the Tweak tab ([TweakTab]), the State tab
+/// ([StateTab]) or the Comment tab ([CommentForm]). The Tweak and Comment tabs keep their footer under the
 /// scrolling body.
 class InfoPanel extends StatelessWidget {
   const InfoPanel({
@@ -376,6 +391,8 @@ class InfoPanel extends StatelessWidget {
     this.drafts = 0,
     this.noteActions,
     this.onTweak,
+    this.bridge,
+    this.onToast,
   });
 
   static const Key panelKey = ValueKey<String>('pinpoint.infoPanel');
@@ -387,10 +404,13 @@ class InfoPanel extends StatelessWidget {
   );
   static const Key tweakTabKey = ValueKey<String>('pinpoint.infoPanel.tweak');
 
+  /// The State tab (PLAN-v3 Milestone 21, step 7).
+  static const Key stateTabKey = ValueKey<String>('pinpoint.infoPanel.state');
+
   /// The Info tab's "Caused" section (PLAN-v2 Milestone 14, step 17).
   static const Key causedKey = ValueKey<String>('pinpoint.infoPanel.caused');
 
-  /// The `unfold_more` button in the header: the next widget under the spot.
+  /// The dial in the header ([CandidateDial]): the widgets under the spot.
   static const Key nextCandidateKey = ValueKey<String>(
     'pinpoint.infoPanel.nextCandidate',
   );
@@ -427,6 +447,40 @@ class InfoPanel extends StatelessWidget {
   /// Applies a tweak. Without it the Tweak tab edits through the
   /// controller's session directly.
   final TweakApply? onTweak;
+
+  /// The bridge the State tab reads source lines from.
+  final BridgeClient? Function()? bridge;
+
+  /// Shows a toast. The State tab's folder button reports its Copy through
+  /// it; without it the popover stays open and says "Copied".
+  final ValueChanged<String>? onToast;
+
+  /// The State tab's "Watch state": the lens is armed on the selection, so
+  /// Pinpoint leaves picking, which closes this panel, and opens the watch
+  /// card.
+  void _watch() {
+    final lens = TraceSession.current?.stateLens;
+    final element = selection.element;
+    if (lens == null || !lens.isTarget(element)) return;
+    controller.startWatching(
+      lens: lens,
+      target: element,
+      name: selection.entry.name,
+      window: lens.value.window,
+    );
+  }
+
+  /// The dial's tooltip: the outer widget above, the inner one below.
+  String _neighbours() {
+    final here = selection.index;
+    final outer = controller.candidateName(here + 1);
+    final inner = controller.candidateName(here - 1);
+    final parts = [
+      if (outer != null) '↑ $outer',
+      if (inner != null) '↓ $inner',
+    ];
+    return parts.isEmpty ? 'Widgets under the pointer' : parts.join('  ');
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -481,7 +535,8 @@ class InfoPanel extends StatelessWidget {
               child: _Header(
                 selection: selection,
                 onClose: onClose,
-                onNextCandidate: controller.selectNextCandidate,
+                onSelectCandidate: controller.selectCandidate,
+                describeNeighbours: _neighbours,
               ),
             ),
             _Crumbs(
@@ -515,6 +570,14 @@ class InfoPanel extends StatelessWidget {
                           selection: selection,
                           session: controller.tweaks,
                           onApply: onTweak ?? controller.tweaks.apply,
+                        ),
+                        PanelTab.state => StateTab(
+                          selection: selection,
+                          session: TraceSession.current,
+                          bridge: bridge,
+                          onToast: onToast,
+                          codeLines: controller.codeLines,
+                          onWatch: _watch,
                         ),
                         PanelTab.comment => CommentForm(
                           controller: controller,
@@ -563,17 +626,19 @@ class InfoPanel extends StatelessWidget {
 }
 
 /// 40 px: the widget's name over its source path, then the hit-candidate
-/// count, the button for the next candidate, and close.
+/// count, the dial for the candidates, and close.
 class _Header extends StatelessWidget {
   const _Header({
     required this.selection,
     required this.onClose,
-    required this.onNextCandidate,
+    required this.onSelectCandidate,
+    required this.describeNeighbours,
   });
 
   final PickResult selection;
   final VoidCallback onClose;
-  final bool Function() onNextCandidate;
+  final bool Function(int index) onSelectCandidate;
+  final String Function() describeNeighbours;
 
   @override
   Widget build(BuildContext context) {
@@ -620,12 +685,14 @@ class _Header extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 4),
-            DraftIconButton(
+            CandidateDial(
               key: InfoPanel.nextCandidateKey,
-              icon: PinPointIcons.unfoldMore,
-              tooltip: 'Next widget under the pointer',
-              onPressed: candidates > 1 ? onNextCandidate : null,
+              count: candidates,
+              index: selection.index,
+              onSelect: onSelectCandidate,
+              describeNeighbours: describeNeighbours,
             ),
+            const SizedBox(width: 2),
             DraftIconButton(
               icon: PinPointIcons.close,
               tooltip: 'Close panel',
@@ -797,7 +864,7 @@ class _CrumbState extends State<_Crumb> {
   }
 }
 
-/// 30 px: three equal cells, caps labels, the active one in ink.
+/// 30 px: four equal cells, caps labels, the active one in ink.
 class _Tabs extends StatelessWidget {
   const _Tabs({
     required this.tab,
@@ -830,6 +897,12 @@ class _Tabs extends StatelessWidget {
             label: 'TWEAK',
             selected: tab == PanelTab.tweak,
             onTap: () => onTab(PanelTab.tweak),
+          ),
+          _TabCell(
+            key: InfoPanel.stateTabKey,
+            label: 'STATE',
+            selected: tab == PanelTab.state,
+            onTap: () => onTab(PanelTab.state),
           ),
           _TabCell(
             key: InfoPanel.commentTabKey,

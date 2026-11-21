@@ -25,6 +25,7 @@ void main() {
     PinPointShortcut shortcut = PinPointShortcut.altShiftC,
     bool editingText = false,
     bool composing = false,
+    bool watching = false,
   }) => keyActionFor(
     event,
     mode: mode,
@@ -32,6 +33,7 @@ void main() {
     modifiers: modifiers,
     editingText: editingText,
     composing: composing,
+    watching: watching,
   );
 
   group('shortcut', () {
@@ -129,6 +131,26 @@ void main() {
 
     test('is left to the app in idle', () {
       expect(action(escape, PinPointMode.idle), isNull);
+    });
+
+    test('is Pinpoint\'s in idle while the watch card is open', () {
+      expect(action(escape, PinPointMode.idle, watching: true), KeyAction.back);
+      // Only a plain Esc, and not while an input method composes.
+      expect(
+        action(
+          escape,
+          PinPointMode.idle,
+          watching: true,
+          modifiers: (alt: true, shift: false, control: false, meta: false),
+        ),
+        isNull,
+      );
+      expect(
+        action(escape, PinPointMode.idle, watching: true, composing: true),
+        isNull,
+      );
+      // Other keys stay the app's.
+      expect(action(keyP, PinPointMode.idle, watching: true), isNull);
     });
   });
 

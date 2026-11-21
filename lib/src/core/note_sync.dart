@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
 
 import '../bridge/bridge_protocol.dart';
 import '../model/annotation.dart';
@@ -10,8 +12,9 @@ import 'note_book.dart';
 /// Keeps [notes] and the bridge in step.
 ///
 /// - [load] once at start: a restarted app gets its pins back.
-/// - While the overlay is active ([active]), asks the bridge every
-///   [pollInterval] what the agent changed. Never while idle.
+/// - While the overlay is active ([active]), asks the bridge what the
+///   agent changed, and the bridge holds each request until there is
+///   something to say (a long poll of [changesWait]). Never while idle.
 /// - [save], [update] and [delete] write the app's own changes through.
 ///
 /// A bridge that does not answer is not an error the user must act on: the
@@ -23,7 +26,25 @@ class NoteSync {
     this.origin,
     this.onAgentChange,
     this.onError,
-  });
+    String? clientId,
+  }) : clientId = clientId ?? _newClientId();
+
+  /// Tells this tab from another on the bridge: it is sent with every
+  /// write and every `/changes` request, so the bridge leaves out the
+  /// changes this tab made itself. A change by the agent has no id, so
+  /// every tab gets it.
+  final String clientId;
+
+  static String _newClientId() {
+    final random = math.Random();
+    return 'c${random.nextInt(1 << 31).toRadixString(36)}'
+        '${random.nextInt(1 << 31).toRadixString(36)}';
+  }
+
+  /// A held request that answers empty in less than this came from a
+  /// bridge that does not hold requests (an older one): the next call
+  /// waits [pollInterval], so such a bridge is asked as before, every 2 s.
+  static const Duration minHold = Duration(seconds: 1);
 
   final BridgeClient client;
   final NoteBook notes;
@@ -46,10 +67,18 @@ class NoteSync {
   }
 
   String? _cursor;
-  Timer? _timer;
   bool _active = false;
-  bool _busy = false;
   bool _disposed = false;
+
+  /// Bumped by every change of [active], so that when the overlay goes off
+  /// and on again fast, only the newest loop runs.
+  int _generation = 0;
+
+  /// The request the loop holds open. Closing it ends it at once (on web,
+  /// it aborts the XHR).
+  http.Client? _held;
+  Timer? _retryTimer;
+  Completer<void>? _retryWait;
 
   /// Statuses the agent sets. A change to one of them is news for the user.
   static const Set<NoteStatus> _agentStatuses = {
@@ -82,46 +111,86 @@ class NoteSync {
   set active(bool value) {
     if (value == _active || _disposed) return;
     _active = value;
-    _timer?.cancel();
-    _timer = null;
-    if (!value) return;
-    unawaited(poll());
-    _timer = Timer.periodic(pollInterval, (_) => unawaited(poll()));
+    _generation++;
+    _endLoop();
+    if (value) unawaited(_loop(_generation));
   }
 
-  /// Asks once what changed. Loads everything when there is no cursor yet
-  /// or the bridge restarted.
-  Future<void> poll() async {
-    if (_busy || _disposed) return;
-    _busy = true;
-    try {
-      final cursor = _cursor;
-      if (cursor == null) {
-        await load();
-        return;
+  /// Ends the request in flight and the pause between two, so a stopped
+  /// loop does not outlive the call that stopped it.
+  void _endLoop() {
+    _held?.close();
+    _held = null;
+    _retryTimer?.cancel();
+    _retryTimer = null;
+    final pause = _retryWait;
+    _retryWait = null;
+    if (pause != null && !pause.isCompleted) pause.complete();
+  }
+
+  /// Asks, and asks again after each answer, while [generation] is the
+  /// newest and the overlay is active.
+  Future<void> _loop(int generation) async {
+    bool live() => _active && !_disposed && generation == _generation;
+    while (live()) {
+      // A client of its own per request, so it can be closed (see
+      // [_held]). Tests that fake the HTTP client cannot abort.
+      final held = BridgeClient.debugClient == null ? http.Client() : null;
+      _held = held;
+      final asked = Stopwatch()..start();
+      try {
+        final news = await _step(held, live);
+        if (!live()) return;
+        if (!news && asked.elapsed < minHold) await _pause();
+      } on Object {
+        // Offline: try again after a pause. The badge says so already.
+        if (!live()) return;
+        await _pause();
+      } finally {
+        if (identical(_held, held)) _held = null;
+        held?.close();
       }
-      final changes = await client.changes(cursor, origin: origin);
-      if (_disposed) return;
-      if (changes.reset) {
-        _cursor = null;
-        await load();
-        return;
-      }
-      _cursor = changes.cursor;
-      for (final id in changes.deleted) {
-        notes.remove(id);
-      }
-      _merge(changes.notes, announce: true);
-    } on Object {
-      // Offline: the next tick tries again. The badge says so already.
-    } finally {
-      _busy = false;
     }
   }
 
+  /// One request. Loads everything when there is no cursor yet or the
+  /// bridge restarted. Returns whether the bridge had news.
+  Future<bool> _step(http.Client? held, bool Function() live) async {
+    final cursor = _cursor;
+    if (cursor == null) return load();
+    final changes = await client.changes(
+      cursor,
+      origin: origin,
+      wait: changesWait,
+      client: clientId,
+      connection: held,
+    );
+    if (!live()) return false;
+    if (changes.reset) {
+      _cursor = null;
+      return true;
+    }
+    _cursor = changes.cursor;
+    for (final id in changes.deleted) {
+      notes.remove(id);
+    }
+    _merge(changes.notes, announce: true);
+    return changes.deleted.isNotEmpty || changes.notes.isNotEmpty;
+  }
+
+  Future<void> _pause() {
+    final done = _retryWait = Completer<void>();
+    _retryTimer = Timer(pollInterval, () {
+      if (!done.isCompleted) done.complete();
+    });
+    return done.future;
+  }
+
   /// Stores [note] (a draft) on the bridge. Returns whether it took it.
-  Future<bool> save(Annotation note) =>
-      _write(() => client.save(note), 'Draft kept in this tab only');
+  Future<bool> save(Annotation note) => _write(
+    () => client.save(note, client: clientId),
+    'Draft kept in this tab only',
+  );
 
   /// Changes the note [id] on the bridge.
   Future<bool> update(
@@ -130,13 +199,50 @@ class NoteSync {
     String? comment,
     String? message,
   }) => _write(
-    () => client.update(id, status: status, comment: comment, message: message),
+    () => client.update(
+      id,
+      status: status,
+      comment: comment,
+      message: message,
+      client: clientId,
+    ),
     'Change kept in this tab only',
   );
 
+  /// Undoes [changes] of round [round] of note [id] on the bridge (see
+  /// [BridgeClient.undo]), and puts the note it answers with in the book:
+  /// this tab's own write is left out of its `/changes`, so the answer is
+  /// how the pin learns that the note is submitted again. Returns null when
+  /// the call failed ([onError] says why).
+  Future<UndoResult?> undo(
+    String id, {
+    required int round,
+    required List<String> changes,
+    String? reason,
+  }) async {
+    try {
+      final result = await client.undo(
+        id,
+        round,
+        changes,
+        reason: reason,
+        client: clientId,
+      );
+      if (!_disposed && result.note != null) {
+        _merge([result.note!], announce: false);
+      }
+      return result;
+    } on Object catch (error) {
+      if (!_disposed) onError?.call('Undo failed: $error');
+      return null;
+    }
+  }
+
   /// Deletes the note [id] on the bridge.
-  Future<bool> delete(String id) =>
-      _write(() => client.delete(id), 'Deleted in this tab only');
+  Future<bool> delete(String id) => _write(
+    () => client.delete(id, client: clientId),
+    'Deleted in this tab only',
+  );
 
   Future<bool> _write(Future<void> Function() call, String fallback) async {
     try {
@@ -176,6 +282,7 @@ class NoteSync {
 
   void dispose() {
     _disposed = true;
-    _timer?.cancel();
+    _generation++;
+    _endLoop();
   }
 }

@@ -85,6 +85,9 @@ void main() {
     // tester.tap hits the center.
     expect(down.data['fx'], closeTo(0.5, 0.01));
     expect(down.data['fy'], closeTo(0.5, 0.01));
+    // The words on a small widget name the tap in the story: here the
+    // picked widget is the `Text` itself.
+    expect(down.data['label'], '+');
   });
 
   testWidgets('acceptance: a password field\'s input.text is masked, and so '

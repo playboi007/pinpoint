@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pinpoint/pinpoint.dart';
 import 'package:pinpoint/src/bridge/bridge_protocol.dart';
+import 'package:pinpoint/src/core/note_book.dart';
+import 'package:pinpoint/src/core/note_sync.dart';
+import 'package:pinpoint/src/model/annotation.dart' show annotationSchema;
 import 'package:pinpoint/src/overlay/comment_form.dart';
 import 'package:pinpoint/src/overlay/note_view.dart';
 import 'package:pinpoint/src/overlay/pin_marker.dart';
@@ -139,6 +142,20 @@ void main() {
 
   // PLAN.md, Milestone 8, watch out: polling must stop when the overlay is
   // idle, or it keeps the network panel noisy and the tab awake.
+  testWidgets('a note sent through the bridge sink is posted with the tab\'s '
+      'client id', (tester) async {
+    await tester.pumpWidget(host());
+    final id = await writeNote(tester, 'Title', button: CommentForm.sendKey);
+    final posts = [
+      for (var i = 0; i < bridge.urls.length; i++)
+        if (bridge.requests[i] == 'POST /annotations') bridge.urls[i],
+    ];
+    expect(posts, isNotEmpty, reason: 'the sink or the sync posted $id');
+    final ids = {for (final url in posts) url.queryParameters['client']};
+    expect(ids, hasLength(1), reason: 'one id for the whole tab');
+    expect(ids.single, isNotEmpty);
+  });
+
   testWidgets('the poll runs only while the overlay is active', (tester) async {
     await tester.pumpWidget(host());
     await tester.pump(const Duration(seconds: 10));
@@ -295,5 +312,244 @@ void main() {
     await settle(tester);
     expect(controller.notes.byId(id), isNull);
     expect(pins(), findsNothing);
+  });
+
+  // PLAN-v3 Milestone 20, step 7: the undo goes through the sync with the
+  // tab's client id, and the note it answers with lands in the book.
+  testWidgets('undo sends the tab\'s client id and puts the answer in the '
+      'book', (tester) async {
+    bridge.notes['pp_a'] = {
+      'schema': annotationSchema,
+      'id': 'pp_a',
+      'createdAt': '2026-11-20T09:00:00Z',
+      'status': 'fixed',
+      'intent': 'bug',
+      'comment': 'Fix pp_a',
+      'app': {'buildMode': 'debug', 'platform': 'web'},
+      'page': <String, Object?>{},
+      'target': {'widget': 'Text', 'sourceUnavailable': true},
+    };
+    final errors = <String>[];
+    final sync = NoteSync(
+      client: BridgeClient(Uri.parse('http://127.0.0.1:4747')),
+      notes: NoteBook(),
+      onError: errors.add,
+    );
+    await sync.load();
+    expect(sync.notes.byId('pp_a')!.status, NoteStatus.fixed);
+
+    final result = await sync.undo(
+      'pp_a',
+      round: 2,
+      changes: ['c1', 'c3'],
+      reason: 'Too tight',
+    );
+    expect(result!.undo, 'done');
+    expect(result.isDone, isTrue);
+    expect(result.reverted, ['lib/a.dart']);
+    expect(result.reloaded, isTrue);
+    expect(bridge.undos.single, {
+      'round': 2,
+      'changes': ['c1', 'c3'],
+      'reason': 'Too tight',
+    });
+    final url = bridge.urls.lastWhere(
+      (u) => u.path == '/annotations/pp_a/undo',
+    );
+    expect(url.queryParameters['client'], sync.clientId);
+    // This tab's own write is left out of its /changes, so the book got the
+    // note from the answer.
+    final seen = sync.notes.byId('pp_a')!;
+    expect(seen.status, NoteStatus.submitted);
+    expect(seen.messages.last.from, 'user');
+    expect(errors, isEmpty);
+
+    // A refusal comes back as null, and the error is reported once.
+    expect(await sync.undo('pp_none', round: 1, changes: ['*']), isNull);
+    expect(errors.single, contains('Undo failed'));
+    sync.dispose();
+  });
+
+  // PLAN-v3 Milestone 19, steps 1 and 2: the long poll.
+  group('the long poll', () {
+    Annotation sample(String id, {NoteStatus status = NoteStatus.submitted}) =>
+        Annotation(
+          id: id,
+          createdAt: DateTime.utc(2026, 11, 20, 9),
+          intent: AnnotationIntent.bug,
+          comment: 'Fix $id',
+          app: const AppInfo(buildMode: 'debug', platform: 'web'),
+          page: const PageInfo(),
+          target: const TargetInfo(widget: 'Text', sourceUnavailable: true),
+          status: status,
+        );
+
+    late List<NoteSync> syncs;
+
+    /// A sync with its own book, loaded, as another tab would be.
+    Future<NoteSync> tab(
+      WidgetTester tester, {
+      void Function(Annotation)? onAgentChange,
+      void Function(String)? onError,
+    }) async {
+      final sync = NoteSync(
+        client: BridgeClient(Uri.parse('http://127.0.0.1:4747')),
+        notes: NoteBook(),
+        onAgentChange: onAgentChange,
+        onError: onError,
+      );
+      syncs.add(sync);
+      await sync.load();
+      return sync;
+    }
+
+    int changesCalls() => bridge.count('GET /changes');
+
+    setUp(() {
+      syncs = [];
+      bridge.longPoll = true;
+    });
+
+    /// Stops every tab and answers what they hold, so no request timer
+    /// outlives the test.
+    Future<void> finish(WidgetTester tester) async {
+      for (final sync in syncs) {
+        sync.dispose();
+      }
+      bridge.releasePolls();
+      await tester.pump();
+    }
+
+    testWidgets('with nothing to say, one request per 25 seconds, each '
+        'asking for the wait', (tester) async {
+      final sync = await tab(tester);
+      sync.active = true;
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 24));
+      expect(changesCalls(), 1, reason: 'held open, not asked every 2 s');
+
+      bridge.releasePolls(); // the 25 s ended on the bridge
+      await tester.pump(pollInterval * 2);
+      expect(changesCalls(), 2);
+      for (final url in bridge.urls.where((u) => u.path == '/changes')) {
+        expect(url.queryParameters['wait'], '25');
+        expect(url.queryParameters['client'], sync.clientId);
+      }
+      await finish(tester);
+    });
+
+    testWidgets('a change answers the held request at once', (tester) async {
+      final seen = <String>[];
+      final sync = await tab(tester, onAgentChange: (n) => seen.add(n.id));
+      bridge.notes['pp_a'] = sample('pp_a').toJson();
+      sync.notes.put(sample('pp_a'));
+      sync.active = true;
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 5));
+      expect(seen, isEmpty);
+
+      bridge.agentUpdate('pp_a', 'resolved');
+      await tester.pump();
+      await tester.pump();
+      expect(seen, ['pp_a']);
+      expect(sync.notes.byId('pp_a')!.status, NoteStatus.resolved);
+      await finish(tester);
+    });
+
+    testWidgets('on, off and on again fast leaves one loop', (tester) async {
+      final sync = await tab(tester);
+      sync
+        ..active = true
+        ..active = false
+        ..active = true;
+      await tester.pump();
+      expect(changesCalls(), 2, reason: 'the first and the last start');
+
+      bridge.releasePolls();
+      await tester.pump(pollInterval * 2);
+      // One loop asks again; a second one would make it 4.
+      expect(changesCalls(), 3);
+      bridge.releasePolls();
+      await tester.pump(pollInterval * 2);
+      expect(changesCalls(), 4);
+      await finish(tester);
+    });
+
+    testWidgets('off stops the loop after the answer', (tester) async {
+      final sync = await tab(tester);
+      sync.active = true;
+      await tester.pump();
+      sync.active = false;
+      bridge.releasePolls();
+      await tester.pump(const Duration(seconds: 10));
+      expect(changesCalls(), 1);
+      await finish(tester);
+    });
+
+    testWidgets('after an error the next call waits 2 seconds', (tester) async {
+      final sync = await tab(tester);
+      bridge.offline = true;
+      sync.active = true;
+      await tester.pump();
+      expect(changesCalls(), 1);
+      await tester.pump(pollInterval - const Duration(milliseconds: 100));
+      expect(changesCalls(), 1, reason: 'still in the pause');
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(changesCalls(), 2);
+      await finish(tester);
+    });
+
+    testWidgets('an empty quick answer (a bridge that does not hold '
+        'requests) is followed by a pause', (tester) async {
+      bridge.longPoll = false;
+      final sync = await tab(tester);
+      sync.active = true;
+      await tester.pump(const Duration(seconds: 7));
+      expect(changesCalls(), inInclusiveRange(3, 4), reason: 'every 2 s');
+      await finish(tester);
+    });
+
+    testWidgets('the tab\'s own write does not come back; the agent\'s '
+        'does', (tester) async {
+      final seen = <String, List<String>>{'a': [], 'b': []};
+      final a = await tab(tester, onAgentChange: (n) => seen['a']!.add(n.id));
+      final b = await tab(tester, onAgentChange: (n) => seen['b']!.add(n.id));
+      a.active = true;
+      b.active = true;
+      await tester.pump();
+      int callsOf(NoteSync sync) => bridge.urls
+          .where(
+            (u) =>
+                u.path == '/changes' &&
+                u.queryParameters['client'] == sync.clientId,
+          )
+          .length;
+      expect(callsOf(a), 1);
+      expect(callsOf(b), 1);
+
+      // Tab a writes a note: b hears of it, a's own request stays held.
+      expect(await a.save(sample('pp_a')), isTrue);
+      await tester.pump();
+      await tester.pump();
+      expect(b.notes.byId('pp_a'), isNotNull, reason: 'another tab sees it');
+      expect(callsOf(b), 2);
+      expect(callsOf(a), 1, reason: 'no answer to a: it is still held');
+
+      // The same for a change of status the user makes in tab a.
+      a.notes.put(sample('pp_a'));
+      expect(await a.update('pp_a', status: NoteStatus.resolved), isTrue);
+      await tester.pump();
+      await tester.pump();
+      expect(seen['a'], isEmpty, reason: 'no echo of its own write');
+      expect(seen['b'], ['pp_a']);
+      expect(callsOf(a), 1);
+
+      // The agent (no client id) moves it on: every tab hears of it.
+      bridge.agentUpdate('pp_a', 'fixed');
+      await tester.pump();
+      await tester.pump();
+      expect(seen['a'], ['pp_a']);
+      await finish(tester);
+    });
   });
 }

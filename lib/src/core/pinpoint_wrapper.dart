@@ -178,6 +178,7 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
       recorder: TraceSession.current?.recorder,
       tapes: TraceSession.current?.tapes,
       pageStart: _pageStart,
+      hooks: hooks,
       adapters: () => widget.config.stateAdapters,
       builtIn: [
         PointerSource(
@@ -342,6 +343,7 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
       modifiers: modifiersOf(HardwareKeyboard.instance),
       editingText: editingText,
       composing: editingText && _controller.draft.composing,
+      watching: _controller.watching,
     );
     // The key source shares this one handler (no second one). Pinpoint's
     // own keys, and keys typed into its fields, are not recorded.
@@ -402,6 +404,8 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
     // Held elements in the hover and selection can go stale across hot
     // reload.
     _controller.clearSelection();
+    // The state lens goes on across the reload and says so in its story.
+    TraceSession.ownedBy(this)?.stateLensIfAny?.noteReassemble();
   }
 
   @override

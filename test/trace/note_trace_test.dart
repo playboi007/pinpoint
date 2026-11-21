@@ -98,10 +98,13 @@ void main() {
     final note = await noteAfterTap(tester);
     final markdown = note.toMarkdown();
     expect(markdown, contains('What happened (10 s before the pick):'));
-    expect(markdown, contains('  $traceNotRecorded'));
+    // The note keeps that line in its JSON; the text says nothing about
+    // it (PLAN-v3 Milestone 19, step 9).
+    expect(markdown, isNot(contains(traceNotRecorded)));
     expect(markdown, contains('input.pointer  down Text'));
     final standard = noteText(note.toJson(), NoteDetail.standard);
     expect(standard, contains('What happened (10 s before the pick):'));
+    expect(standard, isNot(contains(traceNotRecorded)));
     expect(
       noteText(note.toJson(), NoteDetail.compact),
       isNot(contains('What')),

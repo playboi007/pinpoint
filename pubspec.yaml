@@ -1,6 +1,7 @@
 name: pinpoint
 description: "Debug-only widget comment overlay: click any widget, comment, and hand a coding agent its source location, layout context and screenshot."
 version: 0.0.1
+publish_to: none
 repository: https://github.com/playboi007/pinpoint
 
 environment:

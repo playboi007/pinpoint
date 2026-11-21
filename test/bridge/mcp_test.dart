@@ -120,6 +120,73 @@ void main() {
     }
   }
 
+  test('the instructions say when to use state_flow (Milestone 21)', () async {
+    final init = await rpc('initialize', {'protocolVersion': '2025-06-18'});
+    final text = ((init['result']! as Map)['instructions']! as String)
+        .replaceAll(RegExp(r'\s+'), ' ');
+    expect(
+      text,
+      contains(
+        'to learn why two values change together, or what changed a value, '
+        'state_flow',
+      ),
+    );
+  });
+
+  test('the instructions and tool texts name changes, undo and '
+      'get_note_diff (Milestone 20)', () async {
+    final init = await rpc('initialize', {'protocolVersion': '2025-06-18'});
+    final text = ((init['result']! as Map)['instructions']! as String)
+        .replaceAll(RegExp(r'\s+'), ' ');
+    expect(
+      text,
+      contains(
+        'When you set a note fixed, give changes: one {summary, files} for '
+        'each separate change, so the user can undo one of them.',
+      ),
+    );
+    expect(
+      text,
+      contains(
+        'After an undo the note is submitted again: do not make the '
+        'undone changes again.',
+      ),
+    );
+    expect(
+      text,
+      contains(
+        'If the last reply says "Undo these changes yourself", revert those '
+        'files (get_note_diff gives the patch), then continue.',
+      ),
+    );
+
+    final tools = [
+      for (final t
+          in ((await rpc('tools/list'))['result']! as Map)['tools']!
+              as List<Object?>)
+        t! as Map<String, Object?>,
+    ];
+    final byName = {for (final t in tools) t['name']: t};
+    final update = byName['update_note']!;
+    expect(update['description'], contains('give changes'));
+    final props =
+        (update['inputSchema']! as Map)['properties']! as Map<String, Object?>;
+    final changes = props['changes']! as Map<String, Object?>;
+    expect(changes['type'], 'array');
+    expect(
+      (((changes['items']! as Map)['properties']! as Map).keys),
+      containsAll(['summary', 'files']),
+    );
+    final diff = byName['get_note_diff']!;
+    expect(diff['description'], contains('Undo these changes yourself'));
+    expect(diff['description'], contains('40 KB'));
+    expect(
+      ((diff['inputSchema']! as Map)['properties']! as Map).keys,
+      containsAll(['id', 'round', 'change']),
+    );
+    expect((diff['inputSchema']! as Map)['required'], ['id']);
+  });
+
   test('a scripted session: initialize, list tools, call each tool', () async {
     final wide = encodePng(
       RawImage(1600, 400, 4, Uint8List(1600 * 400 * 4)..fillRange(0, 4, 255)),
@@ -149,8 +216,8 @@ void main() {
     expect(
       [
         for (final t in tools['tools']! as List<Object?>) (t! as Map)['name'],
-      ].take(3),
-      ['list_notes', 'get_note', 'update_note'],
+      ].take(4),
+      ['list_notes', 'get_note', 'update_note', 'get_note_diff'],
     );
 
     // Acceptance: draft notes never appear in list_notes.
@@ -198,8 +265,8 @@ void main() {
     expect(names('open'), isEmpty);
     expect(names('resolved'), ['pp_sent.json', 'pp_sent.md', 'pp_sent.png']);
     final md = File('${folder('resolved').path}/pp_sent.md').readAsStringSync();
-    expect(md, contains('Status: resolved'));
-    expect(md, contains('- agent ('));
+    expect(md, contains('pp_sent (bug, resolved)'));
+    expect(md, contains('- agent: Gave the label room.'));
     expect(md, contains('Gave the label room.'));
     final changes = await bridge.store.changes(since);
     expect(changes.changes.single['status'], 'resolved');
@@ -279,7 +346,6 @@ Map<String, Object?> note(
   },
   'messages': const <Object?>[],
   'ancestors': const <Object?>[],
-  'frameworkChain': const <Object?>[],
   if (png != null)
     'screenshot': {
       'file': '$id.png',

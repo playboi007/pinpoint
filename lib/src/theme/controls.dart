@@ -757,11 +757,15 @@ class DraftCheckbox extends StatefulWidget {
     required this.value,
     required this.onChanged,
     required this.label,
+    this.strike = false,
   });
 
   final bool value;
   final ValueChanged<bool>? onChanged;
   final String label;
+
+  /// Draws the label struck through, for a choice that is already taken.
+  final bool strike;
 
   @override
   State<DraftCheckbox> createState() => _DraftCheckboxState();
@@ -825,6 +829,9 @@ class _DraftCheckboxState extends State<DraftCheckbox> {
                     widget.label,
                     style: tokens.body.copyWith(
                       color: enabled ? tokens.ink : tokens.faint,
+                      decoration: widget.strike
+                          ? TextDecoration.lineThrough
+                          : null,
                     ),
                   ),
                 ),

@@ -36,6 +36,7 @@ const List<String> agentToolNames = [
   'stop_replay',
   'why',
   'caused_by',
+  'state_flow',
 ];
 
 /// How long the bridge waits for the app's answer to [tool].
@@ -556,6 +557,61 @@ final List<Map<String, Object?>> agentTools = [
         'description':
             'A seq (412), seconds back ("30s", the default is "10s") or '
             '"mark".',
+      },
+    },
+  ),
+  _tool(
+    'state_flow',
+    'Why a value changed',
+    'Use it to learn why two values change together, or what changed a '
+        'value. For a widget (usually a screen or a dialog): first call '
+        'opens a window of seconds (default and most 30) and answers what '
+        'the widget reads (provider and inherited objects with an identity '
+        'tag such as #a1, and the line that made them) and where their '
+        'classes are. Then act (run_steps) and call state_flow again with '
+        'the same target: the answer is a story, oldest first, one block '
+        'per cause (a tap, a timer, a network answer, a key, an agent '
+        'command; a change after an await shows as "+420 ms" under its '
+        'tap). A block lists what changed: the name of the object (its '
+        'class, else the field it is held in), the fields that changed '
+        '("focused false -> true"), the method and file:line, and the code '
+        'lines there (a method that sets two fields and calls '
+        'notifyListeners once shows both). Then the widgets that rebuilt, '
+        'and one hint: "one method set both values" (one notify, many '
+        'readers), "a notifier triggered another" (a notify inside a '
+        'listener), or "two readers of one object" (a dialog and its '
+        'screen read the same object). Many instances of one notifier (list '
+        'rows) are one row with a count and their keys or indexes. A '
+        'setState shows its line too. Hover blocks and framework '
+        'controllers (text, scroll, focus, tab, animation) are folded and '
+        'counted: hover: true and controllers: true show them. Costs a '
+        'stack per setState while open, so it closes by itself. rearm: true '
+        'opens a new window on the same widget. Rebuilds need no level 3 '
+        'from you; exact causes need PinPoint.run, without it blocks say '
+        '"no cause recorded".',
+    {
+      'handle': _handle,
+      'target': _target,
+      'wait_ms': _waitMs,
+      'seconds': {
+        'type': 'integer',
+        'description':
+            'Window length for the first call (default 30, at most 30).',
+      },
+      'rearm': {
+        'type': 'boolean',
+        'description':
+            'Open a new window on this widget even if it was armed lately.',
+      },
+      'hover': {
+        'type': 'boolean',
+        'description': 'Show the hover and focus blocks (folded by default).',
+      },
+      'controllers': {
+        'type': 'boolean',
+        'description':
+            'Show framework controller changes: text, scroll, focus, tab, '
+            'animation (folded by default).',
       },
     },
   ),

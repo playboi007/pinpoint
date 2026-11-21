@@ -8,6 +8,9 @@ import '../model/annotation.dart';
 import '../model/source_location.dart';
 import '../search/pick_result.dart';
 import '../search/source_index.dart';
+import '../state/dependencies.dart';
+import '../trace/redact.dart';
+import 'lean_text.dart';
 import 'subtree_outline.dart';
 
 /// Builds the [Annotation] for a selection: everything an agent needs to
@@ -37,11 +40,40 @@ class ContextCollector {
 
   static Uri? _browserUrl() => kIsWeb ? Uri.base : null;
 
-  /// Local widgets above the target in [Annotation.ancestors].
-  static const int maxAncestors = 12;
+  /// Widgets above the target in [Annotation.ancestors], after the
+  /// wrappers in [skippedAncestors] are left out.
+  static const int maxAncestors = 8;
 
-  /// Type names in [Annotation.frameworkChain].
-  static const int maxFrameworkChain = 40;
+  /// State owners in [Annotation.stateOwners].
+  static const int maxStateOwners = 4;
+
+  /// Wrappers that never explain a layout or the code: they hold no
+  /// layout of their own and the agent has nothing to change in them.
+  /// Left out of [Annotation.ancestors] by type name (a generic one by its
+  /// name before the `<`), even when the project made them (an app's own
+  /// `Semantics` call is a local widget to the inspector).
+  static const Set<String> skippedAncestors = {
+    'Semantics',
+    'MergeSemantics',
+    'ExcludeSemantics',
+    'BlockSemantics',
+    'Builder',
+    'StatefulBuilder',
+    'KeyedSubtree',
+    'Directionality',
+    'MediaQuery',
+    'DefaultTextStyle',
+    'IconTheme',
+    'Theme',
+    'Actions',
+    'Shortcuts',
+    'Focus',
+    'FocusScope',
+    'FocusTraversalGroup',
+    'NotificationListener',
+    'RepaintBoundary',
+    'Material',
+  };
 
   /// Children named in [SiblingsInfo.children].
   static const int maxSiblings = 12;
@@ -109,9 +141,9 @@ class ContextCollector {
       ancestors:
           field('ancestors', () => _ancestors(selection, paths)) ??
           const <AncestorInfo>[],
-      frameworkChain:
-          field('frameworkChain', () => _frameworkChain(selection)) ??
-          const <String>[],
+      stateOwners:
+          field('stateOwners', () => _stateOwners(selection, paths)) ??
+          const <StateOwnerInfo>[],
       siblings: field('siblings', () => _siblings(selection)),
       subtree: field(
         'subtree',
@@ -180,7 +212,11 @@ class ContextCollector {
     final locale = context.findAncestorWidgetOfExactType<Localizations>();
     final url = _pageUrl();
     return PageInfo(
-      url: url == null ? null : clipText(url.toString(), maxShortText),
+      // Every query value is masked: the page URL often carries a session
+      // token (engineering rule 9: no secret leaves the app).
+      url: url == null
+          ? null
+          : clipText(const TraceRedact().pageUrl(url.toString()), maxShortText),
       // A widget above the Navigator, or in an overlay entry, has no
       // ModalRoute; the URL is then the best guess.
       route: _clip(_routeOf(selection) ?? routeFromUrl(url)),
@@ -305,7 +341,8 @@ class ContextCollector {
                     for (final section in info.sections)
                       section.title: {
                         for (final p in section.properties)
-                          p.name: mask(clipText(p.label, maxPropertyText)),
+                          if (leanText(p.label) case final label?)
+                            p.name: mask(clipText(label, maxPropertyText)),
                       },
                   },
                 ) ??
@@ -367,7 +404,10 @@ class ContextCollector {
       final value = property.value;
       if (value == null) return null;
       if (value is Color) return formatColor(value);
-      return clipText(property.toDescription(), maxPropertyText);
+      // A framework default has level `fine` and is dropped above. What is
+      // left is cleaned of hash codes and of parts that have no value.
+      final lean = leanText(property.toDescription());
+      return lean == null ? null : clipText(lean, maxPropertyText);
     } catch (_) {
       return null;
     }
@@ -385,7 +425,9 @@ class ContextCollector {
       i++
     ) {
       final entry = chain[i];
-      if (!entry.isLocal) continue;
+      if (!entry.isLocal || skippedAncestors.contains(_baseName(entry.name))) {
+        continue;
+      }
       ancestors.add(
         AncestorInfo(widget: entry.name, source: _ref(entry.location, paths)),
       );
@@ -393,12 +435,73 @@ class ContextCollector {
     return ancestors;
   }
 
-  static List<String> _frameworkChain(PickResult selection) {
-    final elements = selection.chain.elements;
-    return [
-      for (var i = 0; i < elements.length && i < maxFrameworkChain; i++)
-        typeName(elements[i]),
-    ];
+  /// A type name without its type arguments: `Foo<Bar>` is `Foo`.
+  static String _baseName(String name) {
+    final open = name.indexOf('<');
+    return open < 0 ? name : name.substring(0, open);
+  }
+
+  /// The objects that hold state for the target, nearest first (PLAN-v3
+  /// Milestone 19, step 4), at most [maxStateOwners]:
+  ///
+  /// - a `StatefulElement` whose widget the project made, and whose `State`
+  ///   the project wrote: `state`, typed by its `State` class. The first
+  ///   is not enough: a `Scaffold` or a `ListView` in the app's `build` is
+  ///   made by the project too, but its `State` is the framework's. What
+  ///   tells them apart is what `State.build` returns: widgets created in
+  ///   the project's source for an app `State` (and for `StatefulBuilder`,
+  ///   which holds app state), widgets created in the framework for a
+  ///   framework one;
+  /// - a provider-like scope: `_InheritedProviderScope<Foo?>` (the
+  ///   `provider` package) is `provider` of `Foo`, and an `InheritedNotifier`
+  ///   is `notifier`, of its generic argument. An `InheritedModel` is a
+  ///   `provider`, named by its argument.
+  ///
+  /// The scope's source is the nearest local widget at or just above it:
+  /// the scope itself is made inside the package, by the app's
+  /// `ChangeNotifierProvider(...)` call.
+  static List<StateOwnerInfo> _stateOwners(
+    PickResult selection,
+    SourcePaths paths,
+  ) {
+    final chain = selection.chain;
+    final resolver = chain.resolver;
+    final owners = <StateOwnerInfo>[];
+    for (
+      var i = selection.chainIndex;
+      i < chain.length && owners.length < maxStateOwners;
+      i++
+    ) {
+      final element = chain.elements[i];
+      if (element is StatefulElement || element is StatelessElement) {
+        // A `State` the project wrote (`state`), or a stateless widget the
+        // project wrote that reads a state object (`reader`), with what
+        // it reads (Milestone 21, step 1).
+        final entry = chain[i];
+        if (!entry.isLocal) continue;
+        final reader = readerOf(element, resolver);
+        if (reader != null) owners.add(reader.toInfo(paths));
+      } else if (element is InheritedElement) {
+        final scope = scopeOf(element.widget.runtimeType.toString());
+        if (scope == null) continue;
+        final (kind, type) = scope;
+        SourceLocation? where;
+        for (var j = i; j < chain.length && j <= i + 3; j++) {
+          if (chain[j].isLocal) {
+            where = chain[j].location;
+            break;
+          }
+        }
+        owners.add(
+          StateOwnerInfo(
+            kind: kind,
+            type: clipText(type, maxLabel),
+            source: _ref(where, paths),
+          ),
+        );
+      }
+    }
+    return owners;
   }
 
   /// The nearest ancestor of the target with more than one child, inside

@@ -33,6 +33,40 @@ class BridgeChanges {
   final bool reset;
 }
 
+/// What the bridge answered to [BridgeClient.undo].
+class UndoResult {
+  const UndoResult({
+    required this.undo,
+    this.reverted = const <String>[],
+    this.conflicts = const <String>[],
+    this.reloaded = false,
+    this.note,
+  });
+
+  /// `done`: the bridge put the files back. `requested`: it asked the
+  /// agent to (no git, or a file changed since). `failed`: git failed, and
+  /// it asked the agent as for `requested`.
+  final String undo;
+
+  /// The files that went back, relative to the git top level.
+  final List<String> reverted;
+
+  /// The files that no longer fit the patch (a `requested` answer).
+  final List<String> conflicts;
+
+  /// Whether the bridge hot reloaded the app after a `done` undo.
+  final bool reloaded;
+
+  /// The note as the bridge has it now: submitted again, with the user's
+  /// message and the round marked.
+  final Annotation? note;
+
+  bool get isDone => undo == 'done';
+
+  /// Whether the agent was asked to undo the changes.
+  bool get isRequested => !isDone;
+}
+
 /// The app's side of the bridge, beside the [HttpSink] that posts notes:
 /// it loads the pins, stores drafts and edits, and asks what changed.
 ///
@@ -103,11 +137,12 @@ class BridgeClient {
     );
   }
 
-  /// Stores [note] (a draft, or any note) with its image.
-  Future<void> save(Annotation note) async {
+  /// Stores [note] (a draft, or any note) with its image. [client] is the
+  /// writing tab's id: its own `/changes` leaves this write out.
+  Future<void> save(Annotation note, {String? client}) async {
     await _send(
       'POST',
-      _at(annotationsPath),
+      _at(annotationsPath, {'client': ?client}),
       body: note.toJson(includeScreenshotData: true),
     );
   }
@@ -118,29 +153,83 @@ class BridgeClient {
     NoteStatus? status,
     String? comment,
     String? message,
+    String? client,
   }) async {
     final json = await _send(
       'PATCH',
-      _at('$annotationsPath/$id'),
+      _at('$annotationsPath/$id', {'client': ?client}),
       body: {'status': ?status?.name, 'comment': ?comment, 'message': ?message},
     );
     return Annotation.fromJson(json);
   }
 
+  /// Undoes the changes [changes] (ids such as `c1`, or `['*']` for all) of
+  /// round [round] of note [id] (PLAN-v3 Milestone 20), with the user's
+  /// [reason]. The bridge puts the files back when it can, hot reloads the
+  /// app, and opens the note again; without git, or when a file changed
+  /// since, it asks the agent instead. Waits for the reload, so it may take
+  /// some seconds. Throws an [HttpSinkException] for a refusal (404, 409).
+  Future<UndoResult> undo(
+    String id,
+    int round,
+    List<String> changes, {
+    String? reason,
+    String? client,
+  }) async {
+    final json = await _send(
+      'POST',
+      _at('$annotationsPath/$id/$undoSegment', {'client': ?client}),
+      body: {'round': round, 'changes': changes, 'reason': ?reason},
+      timeout: const Duration(seconds: 60),
+    );
+    List<String> strings(Object? list) => [
+      if (list is List<Object?>)
+        for (final item in list)
+          if (item is String) item,
+    ];
+    return UndoResult(
+      undo: json['undo'] is String ? json['undo']! as String : 'requested',
+      reverted: strings(json['reverted']),
+      conflicts: strings(json['conflicts']),
+      reloaded: json['reloaded'] == true,
+      note: json['note'] is Map<String, Object?>
+          ? Annotation.fromJson(json['note']! as Map<String, Object?>)
+          : null,
+    );
+  }
+
   /// Deletes the note [id]. A note the bridge does not have is fine.
-  Future<void> delete(String id) async {
+  Future<void> delete(String id, {String? client}) async {
     try {
-      await _send('DELETE', _at('$annotationsPath/$id'));
+      await _send('DELETE', _at('$annotationsPath/$id', {'client': ?client}));
     } on HttpSinkException catch (error) {
       if (error.statusCode != 404) rethrow;
     }
   }
 
   /// What changed since [cursor], for notes of [origin] when given.
-  Future<BridgeChanges> changes(String cursor, {String? origin}) async {
+  ///
+  /// With [wait], the bridge holds the answer until there is a change, for
+  /// at most [wait] (an older bridge answers at once). With [client], the
+  /// bridge leaves out the changes that tab wrote itself. An [http.Client]
+  /// passed in stays open: the caller closes it to end a held request.
+  Future<BridgeChanges> changes(
+    String cursor, {
+    String? origin,
+    Duration? wait,
+    String? client,
+    http.Client? connection,
+  }) async {
     final json = await _send(
       'GET',
-      _at(changesPath, {'since': cursor, 'origin': ?origin}),
+      _at(changesPath, {
+        'since': cursor,
+        'origin': ?origin,
+        if (wait != null) 'wait': '${wait.inSeconds}',
+        'client': ?client,
+      }),
+      client: connection,
+      timeout: wait == null ? null : wait + const Duration(seconds: 10),
     );
     final notes = <Annotation>[];
     final deleted = <String>[];
@@ -218,6 +307,50 @@ class BridgeClient {
       if (error.statusCode == 404) return null;
       rethrow;
     }
+  }
+
+  /// The lines of the method around [line] of [file], as `{file, start,
+  /// end, text}`, or null when the bridge has no such file or refuses the
+  /// path (PLAN-v3 Milestone 21). [before] is how far up the method start
+  /// is looked for.
+  Future<({String file, int start, int end, String text})?> source(
+    String file,
+    int line, {
+    int before = 15,
+  }) async {
+    final Map<String, Object?> json;
+    try {
+      json = await _send(
+        'GET',
+        _at(sourcePath, {'file': file, 'line': '$line', 'before': '$before'}),
+      );
+    } on HttpSinkException catch (error) {
+      if (const {400, 403, 404}.contains(error.statusCode)) return null;
+      rethrow;
+    }
+    final found = json['file'];
+    final start = json['start'];
+    final end = json['end'];
+    final text = json['text'];
+    if (found is String && start is int && end is int && text is String) {
+      return (file: found, start: start, end: end, text: text);
+    }
+    return null;
+  }
+
+  /// Where the type [type] is declared, as `{file, line}`, or null when the
+  /// bridge finds none (PLAN-v3 Milestone 21).
+  Future<({String file, int line})?> declaration(String type) async {
+    final Map<String, Object?> json;
+    try {
+      json = await _send('GET', _at(declarationPath, {'type': type}));
+    } on HttpSinkException catch (error) {
+      if (error.statusCode == 404 || error.statusCode == 400) return null;
+      rethrow;
+    }
+    final file = json['file'];
+    final line = json['line'];
+    return file is String && line is int ? (file: file, line: line) : null;
   }
 
   /// Where the replay run [run] is: `{state, step, of, first_difference,

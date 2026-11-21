@@ -191,6 +191,26 @@ void main() {
       }),
       '_ParentState count: 1 → 2',
     );
+    expect(
+      line(TraceKind.stateNotify, {
+        'owner': 'Cart',
+        'tag': '#a1',
+        'method': 'Cart.add',
+        'before': 1,
+        'after': 2,
+      }),
+      'Cart #a1 1 → 2 in Cart.add',
+    );
+    expect(
+      line(TraceKind.stateSetState, {
+        'method': '_HomeState.load',
+      }, widget: 'Home'),
+      'Home setState in _HomeState.load',
+    );
+    expect(
+      line(TraceKind.stateDropped, {'n': 4}),
+      '4 setState stacks dropped (cap)',
+    );
     expect(line(TraceKind.mark, {'text': 'here'}), '"here"');
     expect(
       line(TraceKind.detailOn, {
@@ -286,7 +306,7 @@ void main() {
 
       final back = Annotation.fromJson(fitted.toJson())!;
       expect(back.trace, fitted.trace);
-      expect(fitted.toJson()['schema'], 8);
+      expect(fitted.toJson()['schema'], annotationSchema);
     });
   });
 }

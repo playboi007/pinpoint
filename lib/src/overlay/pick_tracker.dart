@@ -36,6 +36,8 @@ class PickTracker {
   }) {
     _frameHook.tracker = this;
     controller.candidateCycler = cycleCandidate;
+    controller.candidateSelector = selectCandidate;
+    controller.candidateNamer = candidateName;
     // There is no way to remove a persistent frame callback
     // (docs/api-notes.md, item 7). The hook drops its tracker on dispose, so
     // a disposed tracker is neither called nor kept alive.
@@ -111,6 +113,43 @@ class PickTracker {
     controller.closeNote();
     controller.updateSelection(next);
     return true;
+  }
+
+  /// Chooses candidate [index] under the spot the selection was picked at:
+  /// exactly that one, as the dial in the info panel asks. Like
+  /// [cycleCandidate], a typed comment stays in the draft and an open note
+  /// closes. Returns whether the selection changed.
+  bool selectCandidate(int index) {
+    if (_disposed) return false;
+    final current = controller.selection.value;
+    if (current == null) return false;
+    final next = _candidateAt(current, index);
+    if (next == null) return false;
+    controller.closeNote();
+    controller.updateSelection(next);
+    return true;
+  }
+
+  /// The name of the widget candidate [index] would select, for the dial's
+  /// tooltip. Null when there is none.
+  String? candidateName(int index) {
+    if (_disposed) return null;
+    final current = controller.selection.value;
+    if (current == null) return null;
+    return _candidateAt(current, index)?.entry.name;
+  }
+
+  PickResult? _candidateAt(PickResult current, int index) {
+    final context = appKey.currentContext;
+    if (context is! Element) return null;
+    final boundary = contentKey.currentContext;
+    return PickResult.atCandidate(
+      current,
+      index,
+      rootElement: context,
+      chainBoundary: boundary is Element ? boundary : null,
+      resolver: resolver,
+    );
   }
 
   /// Forwards a wheel [event] over the trap to the scrollable under the
@@ -220,6 +259,12 @@ class PickTracker {
     _frameHook.tracker = null;
     if (controller.candidateCycler == cycleCandidate) {
       controller.candidateCycler = null;
+    }
+    if (controller.candidateSelector == selectCandidate) {
+      controller.candidateSelector = null;
+    }
+    if (controller.candidateNamer == candidateName) {
+      controller.candidateNamer = null;
     }
     _disposed = true;
   }

@@ -5,8 +5,8 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pinpoint/src/bridge/bridge_protocol.dart';
 import 'package:pinpoint/src/bridge/bridge_server.dart';
+import 'package:pinpoint/src/bridge/note_detail.dart';
 import 'package:pinpoint/src/model/annotation.dart' show annotationSchema;
-import 'package:pinpoint/src/sink/markdown_formatter.dart';
 
 /// Milestone 7, build step 2: the bridge as a plain Dart program, tested
 /// over real loopback sockets before any Flutter code calls it.
@@ -126,11 +126,23 @@ void main() {
       expect(shot.containsKey('data'), isFalse);
       expect(shot['file'], '$sampleId.png');
       expect(File('${open().path}/$sampleId.png').readAsBytesSync(), tinyPng);
+      // The bridge knows its project folder: it fills in what the app
+      // did not send, so the text can print short paths.
+      expect((json['app']! as Map<String, Object?>)['projectRoot'], root.path);
+      final md = File('${open().path}/$sampleId.md').readAsStringSync();
       expect(
-        File('${open().path}/$sampleId.md').readAsStringSync(),
-        markdownFromJson(json),
-        reason: 'the .md is the formatter run on the stored JSON',
+        md,
+        noteMarkdown(json),
+        reason: 'the .md is the standard text of the stored JSON',
       );
+      expect(md, startsWith('$sampleId (improve, submitted)\n'));
+      expect(md, contains('Root: ${root.path}\n'));
+      expect(
+        md,
+        endsWith('More: get_note detail full, or $sampleId.json\n'),
+        reason: 'one last line says where the rest is',
+      );
+      expect(md, isNot(contains('Subtree')));
     });
 
     test(
@@ -230,6 +242,7 @@ void main() {
       expect(names(root), ['.pinpoint'], reason: 'nothing beside the folder');
       expect(names(Directory('${root.path}/.pinpoint')), [
         '.gitignore',
+        'config.json',
         'drafts',
         'open',
         'resolved',
@@ -426,6 +439,167 @@ void main() {
     });
   });
 
+  group('GET /source and /declaration (Milestone 21)', () {
+    Future<(int, Map<String, Object?>)> get(String path) async {
+      final client = HttpClient();
+      try {
+        final request = await client.getUrl(url(path));
+        final response = await request.close();
+        final body = jsonDecode(await utf8.decodeStream(response));
+        return (response.statusCode, body as Map<String, Object?>);
+      } finally {
+        client.close(force: true);
+      }
+    }
+
+    setUp(() {
+      File('${root.path}/pubspec.yaml').writeAsStringSync('name: my_app\n');
+      Directory('${root.path}/lib').createSync();
+      File('${root.path}/lib/model.dart').writeAsStringSync(
+        'class Foo extends ChangeNotifier {\n'
+        '  void go() {\n'
+        '    _a = true;\n'
+        '    notifyListeners();\n'
+        '  }\n'
+        '}\n'
+        'class _FooState extends State<Foo> {}\n',
+      );
+    });
+
+    test('/source gives the lines of the method', () async {
+      final (status, body) = await get(
+        '$sourcePath?file=lib/model.dart&line=4',
+      );
+      expect(status, 200);
+      expect(body, {
+        'file': 'lib/model.dart',
+        'start': 2,
+        'end': 4,
+        'text': '  void go() {\n    _a = true;\n    notifyListeners();',
+      });
+      final (packageStatus, packageBody) = await get(
+        '$sourcePath?file=${Uri.encodeQueryComponent('package:my_app/model.dart')}'
+        '&line=3&before=1',
+      );
+      expect(packageStatus, 200);
+      expect(packageBody['file'], 'lib/model.dart');
+    });
+
+    test('/source: 400 for bad input, 403 outside the project, 404 for a '
+        'missing file', () async {
+      for (final (query, expected) in [
+        ('', 400),
+        ('file=lib/model.dart', 400),
+        ('file=lib/model.dart&line=x', 400),
+        ('file=lib/model.dart&line=0', 400),
+        ('file=lib/model.dart&line=2&before=-1', 400),
+        ('file=lib/model.dart&line=99', 400),
+        ('file=pubspec.yaml&line=1', 400),
+        ('file=${Uri.encodeQueryComponent('../x.dart')}&line=1', 403),
+        ('file=${Uri.encodeQueryComponent('/etc/hosts.dart')}&line=1', 403),
+        ('file=lib/none.dart&line=1', 404),
+      ]) {
+        final (status, body) = await get('$sourcePath?$query');
+        expect(status, expected, reason: query);
+        expect(body['error'], isA<String>(), reason: query);
+      }
+    });
+
+    test('/declaration finds a class, or answers 404', () async {
+      var (status, body) = await get('$declarationPath?type=Foo');
+      expect(status, 200);
+      expect(body, {'type': 'Foo', 'file': 'lib/model.dart', 'line': 1});
+      (status, body) = await get('$declarationPath?type=_FooState');
+      expect(status, 200);
+      expect(body['line'], 7);
+      expect((await get('$declarationPath?type=Nope')).$1, 404);
+      expect((await get('$declarationPath?type=Fo')).$1, 404);
+      expect((await get(declarationPath)).$1, 400);
+    });
+
+    test('a page from another origin is refused, a preflight passes', () async {
+      final client = HttpClient();
+      addTearDown(() => client.close(force: true));
+      final request = await client.getUrl(url('$declarationPath?type=Foo'));
+      request.headers.set('origin', 'http://evil.example');
+      final response = await request.close();
+      await response.drain<void>();
+      expect(response.statusCode, 403);
+      expect((await send('OPTIONS', sourcePath)).statusCode, 204);
+      expect((await send('POST', sourcePath)).statusCode, 405);
+    });
+  });
+
+  group('POST /annotations/<id>/undo (Milestone 20)', () {
+    Future<(int, String)> undo(String id, Object? body) async {
+      final (status, text, _) = await post(
+        body,
+        path: '$annotationsPath/$id/$undoSegment',
+      );
+      return (status, text);
+    }
+
+    test('answers the preflight, refuses a page from another origin, and '
+        'allows only POST', () async {
+      expect(
+        (await send('OPTIONS', '$annotationsPath/pp_a/undo')).statusCode,
+        204,
+      );
+      final (refused, _, _) = await post(
+        {
+          'round': 1,
+          'changes': ['c1'],
+        },
+        path: '$annotationsPath/pp_a/undo',
+        origin: 'http://evil.example',
+      );
+      expect(refused, 403);
+      final get = await send('GET', '$annotationsPath/pp_a/undo');
+      expect(get.statusCode, 405);
+      expect(get.headers.value('allow'), 'POST, OPTIONS');
+    });
+
+    test('a note with no round, an unknown note and a bad body', () async {
+      final (sent, _, _) = await post({
+        'schema': annotationSchema,
+        'id': 'pp_a',
+        'status': 'fixed',
+        'intent': 'bug',
+        'comment': 'x',
+      });
+      expect(sent, 201);
+      expect(
+        (await undo('pp_a', {
+          'round': 1,
+          'changes': ['c1'],
+        })).$1,
+        404,
+      );
+      expect(
+        (await undo('pp_zzz', {
+          'round': 1,
+          'changes': ['c1'],
+        })).$1,
+        404,
+      );
+      expect(
+        (await undo('pp_a', {
+          'changes': ['c1'],
+        })).$1,
+        400,
+      );
+      expect((await undo('pp_a', {'round': 1})).$1, 400);
+      expect((await undo('pp_a', [1])).$1, 400);
+      expect(
+        (await undo('pp_a', {
+          'round': 1,
+          'changes': ['c1'],
+        })).$2,
+        contains('No round 1'),
+      );
+    });
+  });
+
   test('the folder ignores itself in git', () {
     expect(
       File('${root.path}/.pinpoint/.gitignore').readAsStringSync().trim(),
@@ -458,7 +632,6 @@ Map<String, Object?> sampleNote({Object? id = sampleId, Uint8List? png}) => {
     'sourceUnavailable': false,
   },
   'ancestors': const <Object?>[],
-  'frameworkChain': const <Object?>[],
   'siblings': null,
   'subtree': null,
   'inherited': null,

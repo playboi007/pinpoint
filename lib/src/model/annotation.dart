@@ -6,6 +6,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import '../sink/markdown_formatter.dart';
+import 'note_round.dart';
 
 /// The payload version. The receiver rejects any other value, so a change
 /// to the shape below needs a new number.
@@ -19,7 +20,14 @@ import '../sink/markdown_formatter.dart';
 /// 7 (PLAN-v2 Milestone 13): `trace`, what happened in the seconds before
 /// the pick.
 /// 8 (PLAN-v2 Milestone 15): `tape`, the tape attached to the note.
-const int annotationSchema = 8;
+/// 9 (PLAN-v3 Milestone 19): `stateOwners`; `frameworkChain` is gone (an
+/// older note that has it still reads, and the field is ignored), and
+/// `page.url` has its query values masked.
+/// 10 (PLAN-v3 Milestone 21): `stateOwners[].dependencies`, the state
+/// objects an owner reads, and the new owner kind `reader`.
+/// 11 (PLAN-v3 Milestone 20): `rounds`, what the agent changed in each pass
+/// on the note, written by the bridge. A note without it reads as before.
+const int annotationSchema = 11;
 
 /// The start of the first line of a note's trace when rebuilds were not
 /// recorded in all or part of its window (PLAN-v2 Milestone 13, step 12).
@@ -113,8 +121,9 @@ class NoteMessage {
 /// has one, [environment], which appears only while a what-if override
 /// is active, [finding] and [checks], which appear only on a note made
 /// from a finding, [tweaks], which appear only while a tweak is active,
-/// [verification], which appears once `verify_note` ran, and [trace],
-/// which appears when the flight recorder ran.
+/// [verification], which appears once `verify_note` ran, [trace], which
+/// appears when the flight recorder ran, and [rounds], which appear once the
+/// agent worked the note.
 /// `test/goldens/annotation_schema.json` fixes it.
 class Annotation {
   const Annotation({
@@ -129,7 +138,8 @@ class Annotation {
     this.anchor,
     this.messages = const <NoteMessage>[],
     this.ancestors = const <AncestorInfo>[],
-    this.frameworkChain = const <String>[],
+    this.stateOwners = const <StateOwnerInfo>[],
+    this.rounds = const <Map<String, Object?>>[],
     this.siblings,
     this.subtree,
     this.inherited,
@@ -167,8 +177,22 @@ class Annotation {
   /// Local widgets above the target, nearest first.
   final List<AncestorInfo> ancestors;
 
-  /// Type names from the picked widget up, framework widgets included.
-  final List<String> frameworkChain;
+  /// The objects that hold state for the target, nearest first, at most 4
+  /// (PLAN-v3 Milestone 19, step 4): a local `State`, or a provider-like
+  /// scope. Input for the state lens.
+  final List<StateOwnerInfo> stateOwners;
+
+  /// The agent's passes on this note, oldest first, written by the bridge
+  /// (PLAN-v3 Milestone 20); empty for a note it has not worked. Each round
+  /// is `{n, startedAt, endedAt, start, end, changes, undone, undo}`; read
+  /// it with [roundViews]. The app never writes them: the bridge keeps its
+  /// own copy when a note is sent again.
+  final List<Map<String, Object?>> rounds;
+
+  /// [rounds] as typed values, oldest first.
+  List<NoteRound> get roundViews => [
+    for (final r in rounds) ?NoteRound.fromJson(r),
+  ];
 
   final SiblingsInfo? siblings;
 
@@ -240,7 +264,8 @@ class Annotation {
     List<NoteMessage>? messages,
     TargetInfo? target,
     List<AncestorInfo>? ancestors,
-    List<String>? frameworkChain,
+    List<StateOwnerInfo>? stateOwners,
+    List<Map<String, Object?>>? rounds,
     SiblingsInfo? Function()? siblings,
     String? Function()? subtree,
     ScreenshotInfo? Function()? screenshot,
@@ -265,7 +290,8 @@ class Annotation {
     anchor: anchor == null ? this.anchor : anchor(),
     messages: messages ?? this.messages,
     ancestors: ancestors ?? this.ancestors,
-    frameworkChain: frameworkChain ?? this.frameworkChain,
+    stateOwners: stateOwners ?? this.stateOwners,
+    rounds: rounds ?? this.rounds,
     siblings: siblings == null ? this.siblings : siblings(),
     subtree: subtree == null ? this.subtree : subtree(),
     inherited: inherited,
@@ -296,7 +322,7 @@ class Annotation {
   ///
   /// Each step runs only while the note is still too large, least useful
   /// part first: the subtree, then long property values, then the sibling
-  /// and framework lists. The comment, the source and the rect are what the
+  /// and state owner lists. The comment, the source and the rect are what the
   /// agent acts on; the comment is cut only as the last resort. Each part
   /// cut is named once in [truncated].
   Annotation fitToBudget({int maxBytes = maxPayloadBytes}) {
@@ -338,6 +364,9 @@ class Annotation {
   /// The budget steps, in order. A step returns null when it has nothing
   /// to cut.
   static final List<(String, Annotation? Function(Annotation))> _budgetSteps = [
+    // The bridge keeps the rounds and puts them back (PLAN-v3 Milestone 20),
+    // so a note that is too large loses its copy first.
+    ('rounds', (a) => a.rounds.isEmpty ? null : a.copyWith(rounds: const [])),
     // The trace goes first (PLAN-v2 Milestone 13, step 12): the agent can
     // read the whole run with get_trace.
     ('trace', (a) => a._traceLines(20)),
@@ -345,10 +374,20 @@ class Annotation {
     ('target.properties', (a) => a._target(a.target._clipProperties(60))),
     ('siblings', (a) => a._siblingWindow(5)),
     (
-      'frameworkChain',
-      (a) => a.frameworkChain.length <= 12
+      'stateOwners.dependencies',
+      (a) => a.stateOwners.every((o) => o.dependencies.isEmpty)
           ? null
-          : a.copyWith(frameworkChain: a.frameworkChain.take(12).toList()),
+          : a.copyWith(
+              stateOwners: [
+                for (final o in a.stateOwners) o.withoutDependencies(),
+              ],
+            ),
+    ),
+    (
+      'stateOwners',
+      (a) => a.stateOwners.length <= 2
+          ? null
+          : a.copyWith(stateOwners: a.stateOwners.take(2).toList()),
     ),
     (
       'ancestors',
@@ -365,10 +404,10 @@ class Annotation {
     ),
     ('target.properties', (a) => a._target(a.target._firstProperties(8))),
     (
-      'frameworkChain',
-      (a) => a.frameworkChain.isEmpty
+      'stateOwners',
+      (a) => a.stateOwners.isEmpty
           ? null
-          : a.copyWith(frameworkChain: const <String>[]),
+          : a.copyWith(stateOwners: const <StateOwnerInfo>[]),
     ),
     (
       'siblings',
@@ -506,9 +545,15 @@ class Annotation {
               source: SourceRef._fromJson(a['source']),
             ),
       ],
-      frameworkChain: [
-        for (final n in _listOrEmpty(json['frameworkChain']))
-          if (n is String) n,
+      // An older note's `frameworkChain` is ignored.
+      stateOwners: [
+        for (final o in _listOrEmpty(json['stateOwners']))
+          ?StateOwnerInfo._fromJson(o),
+      ],
+      // A schema 10 note has no `rounds`.
+      rounds: [
+        for (final r in _listOrEmpty(json['rounds']))
+          if (r is Map<String, Object?> && r['n'] is int) r,
       ],
       siblings: SiblingsInfo._fromJson(json['siblings']),
       subtree: _stringOrNull(json['subtree']),
@@ -549,7 +594,9 @@ class Annotation {
     'anchor': anchor?.toJson(),
     'messages': [for (final m in messages) m.toJson()],
     'ancestors': [for (final a in ancestors) a.toJson()],
-    'frameworkChain': frameworkChain,
+    if (stateOwners.isNotEmpty)
+      'stateOwners': [for (final o in stateOwners) o.toJson()],
+    if (rounds.isNotEmpty) 'rounds': rounds,
     'siblings': siblings?.toJson(),
     'subtree': subtree,
     'inherited': inherited?.toJson(),
@@ -619,7 +666,8 @@ class PageInfo {
     locale: _stringOrNull(json['locale']),
   );
 
-  /// The browser's URL on web; null elsewhere.
+  /// The browser's URL on web; null elsewhere. Every query value is masked
+  /// (`?token=***`): a page URL can carry a session token.
   final String? url;
 
   /// The route name of the target's route, else from the URL.
@@ -846,6 +894,113 @@ class AncestorInfo {
 
   Map<String, Object?> toJson() => {
     'widget': widget,
+    'source': source?.toJson(),
+  };
+}
+
+/// An object that holds state for the target widget (PLAN-v3 Milestone
+/// 19, step 4).
+class StateOwnerInfo {
+  const StateOwnerInfo({
+    required this.kind,
+    required this.type,
+    this.source,
+    this.dependencies = const <DependencyInfo>[],
+  });
+
+  static StateOwnerInfo? _fromJson(Object? json) {
+    if (json is! Map<String, Object?>) return null;
+    final kind = json['kind'];
+    final type = json['type'];
+    if (kind is! String || type is! String) return null;
+    return StateOwnerInfo(
+      kind: kind,
+      type: type,
+      source: SourceRef._fromJson(json['source']),
+      dependencies: [
+        // Schema 9 notes have no `dependencies`.
+        for (final d in _listOrEmpty(json['dependencies']))
+          ?DependencyInfo._fromJson(d),
+      ],
+    );
+  }
+
+  /// `state` (a `State` of a widget made in the project), `provider` (a
+  /// provider-like scope), `notifier` (an `InheritedNotifier`) or `reader`
+  /// (a stateless widget made in the project that reads a state object).
+  final String kind;
+
+  /// For example `ProductDetailProvider`: the `State`'s type, or the value
+  /// type of the scope.
+  final String type;
+
+  /// The creating widget's file and line, when it is local.
+  final SourceRef? source;
+
+  /// The state objects this owner reads (PLAN-v3 Milestone 21, step 1), at
+  /// most [maxDependencies]: what its `build` asked for with `watch`, `of`
+  /// or `dependOnInheritedWidgetOfExactType`. Framework scopes such as
+  /// `MediaQuery` are left out. Empty for a provider-like scope.
+  final List<DependencyInfo> dependencies;
+
+  /// Most dependencies kept for one owner.
+  static const int maxDependencies = 4;
+
+  StateOwnerInfo withoutDependencies() =>
+      StateOwnerInfo(kind: kind, type: type, source: source);
+
+  Map<String, Object?> toJson() => {
+    'kind': kind,
+    'type': type,
+    'source': source?.toJson(),
+    if (dependencies.isNotEmpty)
+      'dependencies': [for (final d in dependencies) d.toJson()],
+  };
+}
+
+/// One object a state owner reads (PLAN-v3 Milestone 21, step 1).
+class DependencyInfo {
+  const DependencyInfo({
+    required this.kind,
+    required this.type,
+    required this.tag,
+    this.source,
+  });
+
+  static DependencyInfo? _fromJson(Object? json) {
+    if (json is! Map<String, Object?>) return null;
+    final kind = json['kind'];
+    final type = json['type'];
+    final tag = json['tag'];
+    if (kind is! String || type is! String || tag is! String) return null;
+    return DependencyInfo(
+      kind: kind,
+      type: type,
+      tag: tag,
+      source: SourceRef._fromJson(json['source']),
+    );
+  }
+
+  /// `provider` (a provider-like scope), `notifier` (an `InheritedNotifier`)
+  /// or `inherited` (any other inherited widget that is not the
+  /// framework's).
+  final String kind;
+
+  /// The provided value's type (`ProductDetailProvider`), or the inherited
+  /// widget's own type.
+  final String type;
+
+  /// A short name for the object, for example `#a1`. Two owners that show
+  /// the same tag read the same object. Stable while the lens runs.
+  final String tag;
+
+  /// Where the scope was created, when that is in the project.
+  final SourceRef? source;
+
+  Map<String, Object?> toJson() => {
+    'kind': kind,
+    'type': type,
+    'tag': tag,
     'source': source?.toJson(),
   };
 }

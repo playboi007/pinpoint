@@ -62,6 +62,10 @@ class HttpSink extends PinPointSink {
   /// Null: a new client per request, closed after it.
   final http.Client? _client;
 
+  /// The id of the tab that posts, set by the overlay (`NoteSync`). The
+  /// bridge leaves this tab's own writes out of its `/changes` answers.
+  String? clientId;
+
   /// The bridge's health check, beside [url]: `.../health`.
   Uri get healthUrl => url.resolve(healthPath.substring(1));
 
@@ -74,7 +78,14 @@ class HttpSink extends PinPointSink {
     try {
       response = await _use(
         (client) => client.post(
-          url,
+          clientId == null
+              ? url
+              : url.replace(
+                  queryParameters: {
+                    ...url.queryParameters,
+                    clientQuery: clientId,
+                  },
+                ),
           headers: const {'content-type': 'application/json'},
           body: body,
         ),

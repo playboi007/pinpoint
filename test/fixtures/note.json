@@ -1,5 +1,5 @@
 {
-  "schema": 8,
+  "schema": 11,
   "id": "pp_20261110_143205_a1f3",
   "createdAt": "2026-11-10T14:32:05Z",
   "status": "submitted",
@@ -77,12 +77,6 @@
         "column": 22
       }
     }
-  ],
-  "frameworkChain": [
-    "RichText",
-    "Text",
-    "DefaultTextStyle",
-    "ElevatedButton"
   ],
   "siblings": {
     "parent": "Row",

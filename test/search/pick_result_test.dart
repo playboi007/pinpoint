@@ -128,6 +128,31 @@ void main() {
       expect(pick.index, 0, reason: 'wraps around');
     });
 
+    testWidgets('atCandidate: exactly that candidate, no wrap', (tester) async {
+      final root = await pumpFixture(tester, const Center(child: Text('hi')));
+      final at = tester.getCenter(find.text('hi'));
+      final first = pickAt(root, at)!;
+      final last = first.candidates.length - 1;
+
+      final outer = PickResult.atCandidate(first, last, rootElement: root)!;
+      expect(outer.index, last);
+      expect(outer.position, first.position);
+      expect(outer.candidates, same(first.candidates));
+      expect(
+        outer.pickedRenderObject,
+        same(first.candidates[last].renderObject),
+      );
+
+      final back = PickResult.atCandidate(outer, 0, rootElement: root)!;
+      expect(back.index, 0);
+      expect(PickResult.atCandidate(first, 0, rootElement: root), isNull);
+      expect(PickResult.atCandidate(first, -1, rootElement: root), isNull);
+      expect(
+        PickResult.atCandidate(first, last + 1, rootElement: root),
+        isNull,
+      );
+    });
+
     testWidgets('a different spot starts again at the smallest', (
       tester,
     ) async {

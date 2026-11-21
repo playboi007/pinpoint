@@ -427,7 +427,6 @@ abstract final class PinPointSizes {
 /// these are the Material Icons equivalents, which ship with Flutter.
 abstract final class PinPointIcons {
   static const IconData dragIndicator = Icons.drag_indicator;
-  static const IconData unfoldMore = Icons.unfold_more;
   static const IconData close = Icons.close;
   static const IconData restartAlt = Icons.restart_alt;
   static const IconData linkOff = Icons.link_off;
@@ -442,6 +441,9 @@ abstract final class PinPointIcons {
   static const IconData visibilityOff = Icons.visibility_off;
   static const IconData smartToy = Icons.smart_toy;
   static const IconData palette = Icons.palette;
+
+  /// "Show location in code": the folder that holds a source file.
+  static const IconData folderOpen = Icons.folder_open;
 
   /// The launcher. Symbols has `point_scan` (corner brackets around a dot),
   /// which Material Icons lacks; `filter_center_focus` is the same shape.

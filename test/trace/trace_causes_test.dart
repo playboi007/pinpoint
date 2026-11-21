@@ -116,6 +116,38 @@ void main() {
       expect(answer['loop'], isFalse);
     });
 
+    test('state.notify and state.setState are notable events of a cause, '
+        'and make the next frame dirty (PLAN-v3 Milestone 21)', () async {
+      final recorder = TraceRecorder();
+      final engine = _Engine();
+      // The first tap only logs a probe; the second one sets state.
+      engine.onPointer = () => recorder.add(TraceKind.probe);
+      engine.pointer();
+      engine.onPointer = () {
+        recorder.add(
+          TraceKind.stateNotify,
+          widget: 'ProductDetailProvider',
+          data: const {
+            'owner': 'ProductDetailProvider',
+            'tag': '#a1',
+            'method': 'ProductDetailProvider.fetchDialog',
+          },
+        );
+      };
+      engine.pointer();
+      final notify = recorder.events.last;
+      engine.onFrame = () => recorder.add(TraceKind.build, widget: 'Screen');
+      engine.frame();
+
+      final answer = whyAnswer(recorder, recorder.events.last.seq);
+      final chain = (answer['chain']! as List<Object?>).join('\n');
+      // The frame was made dirty by the tap that notified, not the probe.
+      expect(chain, contains('made dirty by c${notify.cause} (pointer)'));
+      // And that cause lists the notify as what it did.
+      expect(chain, contains('state.notify  ProductDetailProvider #a1'));
+      expect(chain, contains('in ProductDetailProvider.fetchDialog'));
+    });
+
     test('without causes it says so, and it never fails', () {
       final recorder = TraceRecorder()..add(TraceKind.probe);
       final answer = whyAnswer(recorder, 1);

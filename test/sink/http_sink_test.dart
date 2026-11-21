@@ -52,6 +52,25 @@ void main() {
     );
   });
 
+  test('with a clientId the URL carries it, so the bridge leaves this tab\'s '
+      'own write out of its /changes answer', () async {
+    late Uri seen;
+    final sink = HttpSink(
+      url,
+      client: MockClient((request) async {
+        seen = request.url;
+        return http.Response('{"id":"x"}', 201);
+      }),
+    );
+    await sink.send(note);
+    expect(seen, url, reason: 'no id, no query');
+
+    sink.clientId = 'tab_a';
+    await sink.send(note);
+    expect(seen.path, '/annotations');
+    expect(seen.queryParameters, {'client': 'tab_a'});
+  });
+
   test('any 2xx status is a success', () async {
     for (final status in [200, 201, 204]) {
       final sink = HttpSink(

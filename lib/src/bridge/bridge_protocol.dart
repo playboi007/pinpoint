@@ -21,6 +21,20 @@ const String healthPath = '/health';
 /// What changed since a cursor, for the app's poll.
 const String changesPath = '/changes';
 
+/// The lines of the method around a file and line (`GET /source?file=&line=
+/// &before=`), for the state lens (PLAN-v3 Milestone 21).
+const String sourcePath = '/source';
+
+/// Where a class is declared (`GET /declaration?type=Name`).
+const String declarationPath = '/declaration';
+
+/// How long a deleted note stays in `.pinpoint/tmp/` before a flush may
+/// remove it.
+const Duration tmpKeep = Duration(hours: 1);
+
+/// How often the bridge flushes `.pinpoint/tmp/` after the start.
+const Duration tmpFlushEvery = Duration(hours: 1);
+
 /// The MCP endpoint for the agent (Streamable HTTP, JSON answers).
 const String mcpPath = '/mcp';
 
@@ -53,8 +67,27 @@ const String vmServiceFileName = 'vm-service.txt';
 /// How long the app holds a command poll open.
 const Duration commandWait = Duration(seconds: 25);
 
-/// How often the app asks [changesPath], only while the overlay is active.
+/// How often the app asks [changesPath] again after an error, or after an
+/// answer from a bridge that does not hold the request. Only while the
+/// overlay is active.
 const Duration pollInterval = Duration(seconds: 2);
+
+/// The longest the bridge holds a `GET /changes?wait=<seconds>` request
+/// when nothing changed. The app asks for this long.
+const Duration changesWait = Duration(seconds: 25);
+
+/// The hold time asked for by the `wait` query value [raw] (whole
+/// seconds): zero for none or a bad value, and at most [changesWait].
+Duration changesWaitOf(String? raw) {
+  final seconds = int.tryParse(raw ?? '');
+  if (seconds == null || seconds <= 0) return Duration.zero;
+  return Duration(seconds: seconds.clamp(1, changesWait.inSeconds));
+}
+
+/// The query name of the id that tells the bridge which tab wrote: on
+/// writes (`POST /annotations`, `PATCH`, `DELETE`) and on `/changes`, so a
+/// tab is not told about its own writes.
+const String clientQuery = 'client';
 
 /// The largest request body the bridge reads. Base64 makes the screenshot a
 /// third larger than its PNG.
@@ -76,3 +109,10 @@ bool isLoopbackOrigin(String origin) {
       host == '::1' ||
       RegExp(r'^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$').hasMatch(host);
 }
+
+/// The last part of `POST /annotations/<id>/undo`: the user undoes some or
+/// all of the changes of one round of the agent (PLAN-v3 Milestone 20).
+const String undoSegment = 'undo';
+
+/// The longest the bridge waits for the hot reload after an undo.
+const Duration undoReloadWait = Duration(seconds: 45);

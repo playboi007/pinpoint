@@ -156,7 +156,7 @@ class RebuildSource extends TraceSource with FrameWork {
     // A frame with a gap has no known total.
     _lastTotal = _gapFrom == null ? total : null;
     if (rebuilt.isNotEmpty) {
-      for (final listener in rebuiltListeners) {
+      for (final listener in rebuiltListeners.toList()) {
         listener(rebuilt);
       }
     }

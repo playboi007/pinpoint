@@ -225,10 +225,48 @@ void main() {
         url: Uri.parse('http://localhost:5000/orders/12?tab=2'),
       );
       expect(path.page.route, '/orders/12');
+      expect(path.page.url, 'http://localhost:5000/orders/12?tab=***');
 
       expect(collect(tester, pick).page.route, isNull);
       expect(collect(tester, pick).errors, isEmpty);
     });
+  });
+
+  // PLAN-v3 Milestone 19, step 3: a page URL often holds a session token.
+  testWidgets('page.url has every query value masked, names kept', (
+    tester,
+  ) async {
+    await tester.pumpWidget(host(around: (_, child) => keyed(child!)));
+    final pick = await select(tester, 'Save changes');
+    String? urlOf(String url) =>
+        collect(tester, pick, url: Uri.parse(url)).page.url;
+
+    expect(
+      urlOf('http://localhost:5000/orders?token=eyJfaketoken.part2&tab=2'),
+      'http://localhost:5000/orders?token=***&tab=***',
+    );
+    // Hash routing: the query inside the fragment.
+    expect(
+      urlOf('http://localhost:5000/#/orders/12?token=eyJfake&view=full'),
+      'http://localhost:5000/#/orders/12?token=***&view=***',
+    );
+    // A fragment that is only a query (an implicit OAuth answer).
+    expect(
+      urlOf('http://localhost:5000/#access_token=eyJfake&state=abc'),
+      'http://localhost:5000/#access_token=***&state=***',
+    );
+    // Nothing to mask: unchanged.
+    expect(
+      urlOf('http://localhost:5000/#/orders/12'),
+      'http://localhost:5000/#/orders/12',
+    );
+    // The route is still read from the real URL.
+    expect(
+      ContextCollector.routeFromUrl(
+        Uri.parse('http://localhost:5000/#/orders/12?token=eyJfake'),
+      ),
+      '/orders/12',
+    );
   });
 
   testWidgets('the route is read safely for any element, the route\'s own '
@@ -328,40 +366,205 @@ void main() {
       );
     });
 
-    testWidgets('frameworkChain holds plain type names from the picked '
-        'widget up', (tester) async {
-      await tester.pumpWidget(host(around: (_, child) => keyed(child!)));
-      final note = collect(tester, await select(tester, 'Save changes'));
-
-      final chain = note.frameworkChain;
-      expect(chain.first, 'RichText');
-      expect(chain[1], 'Text');
-      // A button's own widgets fill the 40 names before SaveChangesBar.
-      expect(chain, hasLength(ContextCollector.maxFrameworkChain));
-      for (final name in chain) {
-        expect(name, matches(RegExp(r'^[A-Za-z0-9_<>, ]+$')), reason: name);
-      }
-      // Never past the app's own widgets into Pinpoint's.
-      expect(chain, isNot(contains('PinPointWrapper')));
-      expect(chain, isNot(contains('RepaintBoundary')));
-    });
-
-    testWidgets('ancestors stop at 12 and frameworkChain at 40', (
-      tester,
-    ) async {
-      Widget nest(int depth, Widget child) => depth == 0
-          ? child
-          : Padding(padding: EdgeInsets.zero, child: nest(depth - 1, child));
+    // PLAN-v3 Milestone 19, step 5.
+    testWidgets('wrappers that explain nothing are skipped, layout widgets '
+        'and the others kept', (tester) async {
       await tester.pumpWidget(
         host(
-          home: Scaffold(body: nest(60, const Text('deep'))),
+          home: Scaffold(
+            body: Semantics(
+              container: true,
+              child: Builder(
+                builder: (_) => Padding(
+                  padding: EdgeInsets.zero,
+                  child: MergeSemantics(
+                    child: Container(
+                      color: Colors.transparent,
+                      child: Directionality(
+                        textDirection: TextDirection.ltr,
+                        child: RepaintBoundary(
+                          child: _Marker(child: Text('wrapped')),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          around: (_, child) => keyed(child!),
+        ),
+      );
+      final note = collect(tester, await select(tester, 'wrapped'));
+
+      final names = [for (final a in note.ancestors) a.widget];
+      expect(names.take(3), ['_Marker', 'Container', 'Padding']);
+      for (final skipped in ContextCollector.skippedAncestors) {
+        expect(names, isNot(contains(skipped)));
+      }
+      expect(
+        names,
+        isNot(contains('NotificationListener<ScrollNotification>')),
+      );
+    });
+
+    testWidgets('ancestors stop at 8, after the skip', (tester) async {
+      Widget nest(int depth, Widget child) => depth == 0
+          ? child
+          : Semantics(
+              child: Padding(
+                padding: EdgeInsets.zero,
+                child: nest(depth - 1, child),
+              ),
+            );
+      await tester.pumpWidget(
+        host(
+          home: Scaffold(body: nest(30, const Text('deep'))),
           around: (_, child) => keyed(child!),
         ),
       );
       final note = collect(tester, await select(tester, 'deep'));
 
-      expect(note.ancestors, hasLength(12));
-      expect(note.frameworkChain, hasLength(40));
+      expect(ContextCollector.maxAncestors, 8);
+      expect(note.ancestors, hasLength(8));
+      expect(
+        [for (final a in note.ancestors) a.widget],
+        everyElement('Padding'),
+        reason: 'the Semantics between them were skipped',
+      );
+    });
+
+    // PLAN-v3 Milestone 19, step 4.
+    testWidgets('frameworkChain is gone from the note', (tester) async {
+      await tester.pumpWidget(host(around: (_, child) => keyed(child!)));
+      final note = collect(tester, await select(tester, 'Save changes'));
+      expect(note.toJson().containsKey('frameworkChain'), isFalse);
+    });
+
+    testWidgets('stateOwners: a local State and a provider-like scope, '
+        'nearest first', (tester) async {
+      await tester.pumpWidget(
+        host(
+          home: const Scaffold(
+            body: _InheritedProviderScope<_Model?>(
+              child: _Counter(child: Text('owned')),
+            ),
+          ),
+          around: (_, child) => keyed(child!),
+        ),
+      );
+      final note = collect(tester, await select(tester, 'owned'));
+
+      expect(
+        [for (final o in note.stateOwners) (o.kind, o.type)],
+        [('state', '_CounterState'), ('provider', '_Model')],
+      );
+      expect(
+        note.stateOwners.first.source!.file,
+        contains('context_collector_test.dart'),
+      );
+      expect(note.stateOwners.last.source, isNotNull);
+      // Framework State objects (Scaffold, MaterialApp...) are not listed.
+      expect([
+        for (final o in note.stateOwners) o.type,
+      ], isNot(contains('ScaffoldState')));
+      expect(note.toJson()['stateOwners'], hasLength(2));
+    });
+
+    testWidgets('stateOwners: a local widget that reads a scope is a reader '
+        'with its dependencies; a State with none has none', (tester) async {
+      await tester.pumpWidget(
+        host(
+          home: const Scaffold(
+            body: _InheritedProviderScope<_Model?>(
+              child: _Counter(child: _Reads(child: Text('reads'))),
+            ),
+          ),
+          around: (_, child) => keyed(child!),
+        ),
+      );
+      final note = collect(tester, await select(tester, 'reads'));
+
+      expect(
+        [for (final o in note.stateOwners) (o.kind, o.type)],
+        [
+          ('reader', '_Reads'),
+          ('state', '_CounterState'),
+          ('provider', '_Model'),
+        ],
+      );
+      final reads = note.stateOwners.first.dependencies.single;
+      expect((reads.kind, reads.type), ('provider', '_Model'));
+      expect(reads.tag, matches(RegExp(r'^#a\d+$')));
+      expect(reads.source!.file, contains('context_collector_test.dart'));
+      // MediaQuery and Theme are read by the same widget, and left out.
+      expect(note.stateOwners[1].dependencies, isEmpty);
+      final json = note.toJson()['stateOwners']! as List<Object?>;
+      expect((json.first! as Map)['dependencies'], hasLength(1));
+      expect((json[1]! as Map).containsKey('dependencies'), isFalse);
+    });
+
+    testWidgets('stateOwners stop at 4', (tester) async {
+      await tester.pumpWidget(
+        host(
+          home: const Scaffold(
+            body: _Counter(
+              child: _Counter(
+                child: _Counter(
+                  child: _Counter(
+                    child: _Counter(child: _Counter(child: Text('many'))),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          around: (_, child) => keyed(child!),
+        ),
+      );
+      final note = collect(tester, await select(tester, 'many'));
+      expect(note.stateOwners, hasLength(ContextCollector.maxStateOwners));
+    });
+
+    testWidgets('a note with no state owner has none', (tester) async {
+      await tester.pumpWidget(host(around: (_, child) => keyed(child!)));
+      final note = collect(tester, await select(tester, 'Save changes'));
+      expect(note.stateOwners, isEmpty);
+      expect(note.toJson().containsKey('stateOwners'), isFalse);
+    });
+  });
+
+  // PLAN-v3 Milestone 19, step 8.
+  group('lean properties', () {
+    testWidgets('no hash codes, no null parts', (tester) async {
+      await tester.pumpWidget(
+        host(
+          home: Scaffold(
+            body: Center(
+              child: ElevatedButton(
+                style: ButtonStyle(
+                  textStyle: const WidgetStatePropertyAll<TextStyle?>(null),
+                  padding: WidgetStatePropertyAll(const EdgeInsets.all(8)),
+                ),
+                onPressed: () {},
+                child: const Text('Go'),
+              ),
+            ),
+          ),
+          around: (_, child) => keyed(child!),
+        ),
+      );
+      final note = collect(tester, await selectUp(tester, 'Go', 1));
+      expect(note.target.widget, 'ElevatedButton');
+
+      final style = note.target.properties['style'];
+      expect(style, isNotNull);
+      expect(style, isNot(matches(RegExp(r'#[0-9a-f]{5}'))));
+      expect(style, isNot(contains('null')));
+      expect(style, contains('padding'));
+      for (final value in note.target.properties.values) {
+        expect(value, isNot(matches(RegExp(r'[A-Za-z]#[0-9a-f]{5}'))));
+        expect(value, isNot(contains(': null')));
+      }
     });
   });
 
@@ -446,6 +649,42 @@ void main() {
       );
     });
 
+    // PLAN-v3 Milestone 19, step 7.
+    testWidgets('leaves out rows with no source location and shows their '
+        'local children at their depth', (tester) async {
+      await tester.pumpWidget(
+        host(
+          home: Scaffold(
+            body: Container(
+              padding: const EdgeInsets.all(4),
+              color: Colors.white,
+              child: const _Marker(child: Text('inside')),
+            ),
+          ),
+          around: (_, child) => keyed(child!),
+        ),
+      );
+      // Text, _Marker, then the Container.
+      final note = collect(tester, await selectUp(tester, 'inside', 2));
+      expect(note.target.widget, 'Container');
+
+      final lines = note.subtree!.split('\n');
+      // The Container builds a Padding and a ColoredBox inside the
+      // framework. They have no location: no row of their own.
+      expect(
+        [for (final l in lines) l.trim().split(' ').first],
+        ['Container', '_Marker', 'Text'],
+      );
+      expect(
+        lines.map((l) => (l.length - l.trimLeft().length) ~/ 2),
+        [0, 1, 2],
+        reason: '_Marker is a child of Container once the Padding is left out',
+      );
+      for (final line in lines) {
+        expect(line, contains('context_collector_test.dart:'));
+      }
+    });
+
     testWidgets('stops at 40 nodes', (tester) async {
       await tester.pumpWidget(
         host(
@@ -525,6 +764,57 @@ void main() {
     expect(pick.sourceUnavailable, isFalse);
     final note = collect(tester, pick);
     expect(note.target.widget, 'SaveChangesBar');
-    expect(note.frameworkChain.first, 'SaveChangesBar');
   });
+}
+
+/// A widget the project made, for the ancestor list: it explains the code.
+class _Marker extends StatelessWidget {
+  const _Marker({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => child;
+}
+
+/// A widget with a State the project made.
+class _Counter extends StatefulWidget {
+  const _Counter({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_Counter> createState() => _CounterState();
+}
+
+class _CounterState extends State<_Counter> {
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
+
+class _Model {}
+
+/// A stateless widget that reads the scope in `build`, as `context.watch`
+/// does, and `MediaQuery` too.
+class _Reads extends StatelessWidget {
+  const _Reads({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    context
+        .dependOnInheritedWidgetOfExactType<_InheritedProviderScope<_Model?>>();
+    MediaQuery.of(context);
+    return child;
+  }
+}
+
+/// Named like the `provider` package's scope: the collector reads the
+/// name, and the value type from its generic argument.
+class _InheritedProviderScope<T> extends InheritedWidget {
+  const _InheritedProviderScope({required super.child});
+
+  @override
+  bool updateShouldNotify(_InheritedProviderScope<T> oldWidget) => false;
 }

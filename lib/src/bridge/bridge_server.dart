@@ -8,13 +8,16 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import '../model/annotation.dart' show NoteStatus, annotationSchema, clipText;
+import 'agent_guide.dart';
 import 'agent_instructions.dart';
+import 'bridge_config.dart';
 import 'bridge_protocol.dart';
 import 'command_queue.dart';
 import 'hot_reload.dart';
 import 'mcp_server.dart';
 import 'note_store.dart';
 import 'run_store.dart';
+import 'source_lookup.dart';
 import 'tape_store.dart';
 
 /// Why the bridge could not start.
@@ -40,7 +43,25 @@ class BridgeStartException implements Exception {
 /// - `GET /annotations?status=a,b&origin=o`: notes, to restore pins.
 /// - `PATCH /annotations/<id>`: `status`, `comment`, `intent`, `message`.
 /// - `DELETE /annotations/<id>`.
-/// - `GET /changes?since=<cursor>&origin=o`: what changed since a cursor.
+/// - `POST /annotations/<id>/undo`: `{round, changes: ["c1"] | ["*"],
+///   reason}`. The bridge puts the files of those changes back with git
+///   (never touching `HEAD` or the user's index) and hot reloads the app;
+///   with no git, or when a file changed since, it changes no file and asks
+///   the agent to undo them. The note goes back to submitted either way.
+///   Answers `{undo: done | requested | failed, reverted, conflicts,
+///   reloaded, note}`. 404 for an unknown note or round, 409 for a note the
+///   agent is working on or changes already undone.
+/// - `GET /changes?since=<cursor>&origin=o&wait=s&client=id`: what changed
+///   since a cursor. With `wait` (seconds, at most [changesWait]) the
+///   answer is held until there is a change. With `client`, the changes
+///   that client wrote itself are left out. The writes take `client` too.
+/// - `GET /source?file=<path>&line=<n>&before=<n>`: the lines of the method
+///   around a line of a project file, as `{file, start, end, text}`. 400
+///   for bad input, 403 for a path outside the project, 404 for a missing
+///   file.
+/// - `GET /declaration?type=<Name>`: where a class, mixin, enum or
+///   extension type is declared in `lib/`, as `{type, file, line}`; 404
+///   when there is none.
 /// - `GET /health`.
 ///
 /// MCP for the agent: `POST /mcp` (Streamable HTTP with JSON answers; no
@@ -59,6 +80,8 @@ class PinPointBridge {
       unawaited(expire());
       _expireTimer = Timer.periodic(expireEvery, (_) => unawaited(expire()));
     }
+    unawaited(flushTmp());
+    _tmpTimer = Timer.periodic(tmpFlushEvery, (_) => unawaited(flushTmp()));
   }
 
   /// How long notes, tapes and runs live after their last change
@@ -69,6 +92,27 @@ class PinPointBridge {
   static const Duration expireEvery = Duration(hours: 1);
 
   Timer? _expireTimer;
+
+  Timer? _tmpTimer;
+
+  /// Whether the hourly flush of `.pinpoint/tmp/` runs (false after
+  /// [close]).
+  bool get tmpFlushActive => _tmpTimer?.isActive ?? false;
+
+  /// Removes what has been in `.pinpoint/tmp/` (deleted notes) for
+  /// [tmpKeep] or more at [now]. Returns how many entries it removed.
+  Future<int> flushTmp({DateTime? now}) async {
+    try {
+      final removed = await store.flushTmp(now: now);
+      if (removed > 0) {
+        _log('pinpoint: flushed $removed deleted notes from .pinpoint/tmp/');
+      }
+      return removed;
+    } on FileSystemException catch (error) {
+      _log('pinpoint: could not flush .pinpoint/tmp/: ${error.message}');
+      return 0;
+    }
+  }
 
   /// Deletes what is older than [ttl] at [now]: notes in every folder with
   /// their screenshots, tapes with their bodies, and replay runs. Returns
@@ -133,13 +177,14 @@ class PinPointBridge {
       );
     }
     _hintInstructions(folder, log);
+    _hintStaleGuide(folder, log);
     if (lan) {
       log(
         'pinpoint: LAN mode. Every device on this network can reach port '
         '${server.port}.',
       );
     }
-    return PinPointBridge._(
+    final bridge = PinPointBridge._(
       server,
       store,
       allowedOrigins,
@@ -147,7 +192,19 @@ class PinPointBridge {
       timing: timing,
       ttl: ttl,
     );
+    bridge._status = runningStatus(
+      port: server.port,
+      root: folder.parent.path,
+      now: DateTime.now(),
+    );
+    if (!await writeBridgeStatus(folder, bridge._status)) {
+      log('pinpoint: could not write ${folder.path}/$bridgeConfigFileName');
+    }
+    return bridge;
   }
+
+  /// What `<dir>/config.json` says while the bridge runs.
+  Map<String, Object?> _status = const <String, Object?>{};
 
   final HttpServer _server;
 
@@ -163,13 +220,23 @@ class PinPointBridge {
   /// Replay runs on disk.
   late final RunStore runs = RunStore(store.root);
 
+  /// The app's source for the state lens: the project folder is the one
+  /// that holds the notes folder.
+  late final SourceLookup source = SourceLookup(store.root.parent);
+
   final List<String> _allowedOrigins;
+
+  /// Hot reload through the app's debug service, for the `hot_reload` tool
+  /// and after an undo.
+  late final HotReloader reloader = HotReloader(store.root);
+
   late final McpServer _mcp = McpServer(
     store,
     commands: commands,
-    reloader: HotReloader(store.root),
+    reloader: reloader,
     tapes: tapes,
     runs: runs,
+    source: source,
     log: _log,
   );
   final void Function(String line) _log;
@@ -184,12 +251,16 @@ class PinPointBridge {
   /// The folder an agent reads: `<dir>/open/`.
   Directory get openDir => store.openDir;
 
-  /// Stops listening and drops open connections.
+  /// Stops listening and drops open connections, and marks `config.json`
+  /// as stopped.
   Future<void> close() async {
     _expireTimer?.cancel();
+    _tmpTimer?.cancel();
     commands.close();
+    store.close();
     await _subscription.cancel();
     await _server.close(force: true);
+    await markBridgeStopped(store.root, _status, DateTime.now());
   }
 
   Future<void> _handle(HttpRequest request) async {
@@ -200,13 +271,21 @@ class PinPointBridge {
     response.headers.set('access-control-allow-origin', '*');
     try {
       final path = request.uri.path;
-      final noteId = path.startsWith('$annotationsPath/')
+      var noteId = path.startsWith('$annotationsPath/')
           ? path.substring(annotationsPath.length + 1)
           : null;
+      // `/annotations/<id>/undo`: the id is what comes before the suffix.
+      var undo = false;
+      if (noteId != null && noteId.endsWith('/$undoSegment')) {
+        noteId = noteId.substring(0, noteId.length - undoSegment.length - 1);
+        undo = true;
+      }
       final known =
           path == annotationsPath ||
           path == healthPath ||
           path == changesPath ||
+          path == sourcePath ||
+          path == declarationPath ||
           path == mcpPath ||
           path == commandsPath ||
           path.startsWith('$commandsPath/') ||
@@ -254,7 +333,7 @@ class PinPointBridge {
           '--allow-origin $origin to accept them.',
         );
       } else {
-        await _route(request, path, noteId);
+        await _route(request, path, noteId, undo: undo);
       }
     } on StoreException catch (error) {
       _error(response, error.status, error.message);
@@ -273,7 +352,12 @@ class PinPointBridge {
     }
   }
 
-  Future<void> _route(HttpRequest request, String path, String? noteId) async {
+  Future<void> _route(
+    HttpRequest request,
+    String path,
+    String? noteId, {
+    bool undo = false,
+  }) async {
     final response = request.response;
     final method = request.method;
     if (noteId != null) {
@@ -286,6 +370,11 @@ class PinPointBridge {
           'The id must match ${noteIdPattern.pattern}',
         );
       }
+      if (undo) {
+        if (method == 'POST') return _undo(request, noteId);
+        response.headers.set('allow', 'POST, OPTIONS');
+        return _error(response, HttpStatus.methodNotAllowed, 'Use POST');
+      }
       switch (method) {
         case 'GET':
           final note = await store.read(noteId);
@@ -295,7 +384,10 @@ class PinPointBridge {
         case 'PATCH':
           return _patch(request, noteId);
         case 'DELETE':
-          return await store.delete(noteId)
+          return await store.delete(
+                noteId,
+                client: request.uri.queryParameters[clientQuery],
+              )
               ? _json(response, HttpStatus.ok, {'id': noteId, 'deleted': true})
               : _error(response, HttpStatus.notFound, 'No note $noteId');
       }
@@ -334,19 +426,81 @@ class PinPointBridge {
           'cursor': store.cursor,
           'notes': notes,
         });
+      case ('GET', sourcePath):
+        return _source(request);
+      case ('GET', declarationPath):
+        return _declaration(request);
       case ('GET', changesPath):
         final query = request.uri.queryParameters;
+        // Ends the hold when the app closes the request (the tab went
+        // away, or the overlay went idle).
+        final gone = Completer<void>();
+        unawaited(
+          response.done.then<void>(
+            (_) => gone.isCompleted ? null : gone.complete(),
+            onError: (Object _) => gone.isCompleted ? null : gone.complete(),
+          ),
+        );
         final changes = await store.changes(
           query['since'],
           origin: query['origin'],
+          client: query[clientQuery],
+          wait: changesWaitOf(query['wait']),
+          cancelled: gone.future,
         );
         return _json(response, HttpStatus.ok, changes.toJson());
     }
     response.headers.set('allow', switch (path) {
-      healthPath || changesPath => 'GET, OPTIONS',
+      healthPath ||
+      changesPath ||
+      sourcePath ||
+      declarationPath => 'GET, OPTIONS',
       _ => 'GET, POST, OPTIONS',
     });
     _error(response, HttpStatus.methodNotAllowed, 'Method not allowed');
+  }
+
+  /// `GET /source?file&line&before`: the lines of a method (Milestone 21).
+  Future<void> _source(HttpRequest request) async {
+    final response = request.response;
+    final query = request.uri.queryParameters;
+    final file = query['file'];
+    final line = int.tryParse(query['line'] ?? '');
+    final before = query['before'] == null
+        ? 15
+        : int.tryParse(query['before']!);
+    if (file == null || file.isEmpty) {
+      return _error(response, HttpStatus.badRequest, 'Give file=<path>');
+    }
+    if (line == null || line < 1) {
+      return _error(response, HttpStatus.badRequest, 'Give line=<n>, 1 or up');
+    }
+    if (before == null || before < 0) {
+      return _error(response, HttpStatus.badRequest, 'before must be 0 or up');
+    }
+    try {
+      final snippet = await source.methodLines(file, line, before: before);
+      _json(response, HttpStatus.ok, snippet.toJson());
+    } on SourceLookupException catch (error) {
+      _error(response, error.status, error.message);
+    }
+  }
+
+  /// `GET /declaration?type=Name`: where a type is declared (Milestone 21).
+  Future<void> _declaration(HttpRequest request) async {
+    final response = request.response;
+    final type = request.uri.queryParameters['type'];
+    if (type == null || type.isEmpty) {
+      return _error(response, HttpStatus.badRequest, 'Give type=<Name>');
+    }
+    try {
+      final found = await source.declaration(type);
+      return found == null
+          ? _error(response, HttpStatus.notFound, 'No declaration of $type')
+          : _json(response, HttpStatus.ok, found.toJson());
+    } on SourceLookupException catch (error) {
+      _error(response, error.status, error.message);
+    }
   }
 
   /// Tapes from the app (PLAN-v2 Milestone 15): `POST /tapes` stores one,
@@ -527,9 +681,71 @@ class PinPointBridge {
       comment: body['comment'] as String?,
       intent: body['intent'] as String?,
       message: body['message'] as String?,
+      client: request.uri.queryParameters[clientQuery],
     );
     _log('pinpoint: note $id is ${note['status']}');
     _json(response, HttpStatus.ok, note);
+  }
+
+  /// `POST /annotations/<id>/undo` (PLAN-v3 Milestone 20): the user undoes
+  /// changes of one round. After a clean undo the app is hot reloaded when
+  /// its debug service is known.
+  Future<void> _undo(HttpRequest request, String id) async {
+    final response = request.response;
+    final body = await _jsonBody(request);
+    if (body == null) return;
+    final round = body['round'];
+    final changes = body['changes'];
+    final reason = body['reason'];
+    if (round is! int || round < 1) {
+      return _error(response, HttpStatus.badRequest, 'round is a number, 1 up');
+    }
+    if (changes is! List<Object?> ||
+        changes.isEmpty ||
+        changes.any((c) => c is! String || c.isEmpty)) {
+      return _error(
+        response,
+        HttpStatus.badRequest,
+        'changes is a list of change ids, or ["*"] for all',
+      );
+    }
+    if (reason != null && reason is! String) {
+      return _error(response, HttpStatus.badRequest, 'reason must be a string');
+    }
+    final outcome = await store.undo(
+      id,
+      round: round,
+      changes: [for (final c in changes) c! as String],
+      reason: reason as String?,
+      client: request.uri.queryParameters[clientQuery],
+    );
+    final reloaded = outcome.undo == 'done' && await _reloadAfterUndo();
+    _log(
+      'pinpoint: undo of $id round $round is ${outcome.undo}'
+      '${reloaded ? ', app reloaded' : ''}',
+    );
+    _json(response, HttpStatus.ok, {
+      'undo': outcome.undo,
+      'reverted': outcome.reverted,
+      'conflicts': outcome.conflicts,
+      'reloaded': reloaded,
+      'note': outcome.note,
+    });
+  }
+
+  /// Hot reloads the app after files went back; false when no debug
+  /// service address is known, or the reload failed or took too long.
+  Future<bool> _reloadAfterUndo() async {
+    if (!reloader.addressFile.existsSync()) return false;
+    try {
+      final answer = await reloader.reload().timeout(
+        undoReloadWait,
+        onTimeout: () => const <String, Object?>{'ok': false},
+      );
+      return answer['ok'] == true;
+    } on Object {
+      return false;
+    }
   }
 
   /// The request's JSON object, or null after answering with the error.
@@ -632,7 +848,12 @@ class PinPointBridge {
 
     // A draft sent again (now submitted) after an app restart has no image
     // data; its PNG is already here.
-    final path = await store.save(note, png, keepPng: png == null);
+    final path = await store.save(
+      note,
+      png,
+      keepPng: png == null,
+      client: request.uri.queryParameters[clientQuery],
+    );
 
     final comment = note['comment'];
     final summary = comment is String
@@ -673,6 +894,19 @@ class PinPointBridge {
       'to CLAUDE.md (Claude Code) or AGENTS.md in $project:\n\n'
       '${agentInstructions(dir: dir)}',
     );
+  }
+
+  /// Logs one line when the guide files in `<dir>/` are from an older
+  /// package version (`dart run pinpoint:setup --refresh` rewrites them).
+  static void _hintStaleGuide(Directory folder, void Function(String) log) {
+    try {
+      final file = File('${folder.path}/SKILL.md');
+      if (!file.existsSync()) return;
+      final line = staleGuideLine(file.readAsStringSync());
+      if (line != null) log(line);
+    } on FileSystemException {
+      // Unreadable: nothing to say.
+    }
   }
 
   bool _originAllowed(String origin) =>
