@@ -2,111 +2,132 @@ part of 'commands.dart';
 
 /// `stress_matrix`: the app under many environments.
 extension AgentStress on AgentCommands {
-  /// `stress_matrix` (plan Milestone 12, step 8): each run sets its
-  /// environment, waits for idle, scans, and takes a 400 px thumbnail.
-  /// Each distinct problem that a check can measure becomes a draft note
-  /// with the environment of the first run that showed it. Truncation is
-  /// often intended: an `info` finding is listed, never filed alone.
+  /// Runs each environment of the matrix: sets it, waits for idle, scans,
+  /// and takes a 400 px thumbnail. Each distinct problem that a check can
+  /// measure becomes a draft note with the environment of the first run
+  /// that showed it. An `info` finding is listed, never filed alone.
   ///
   /// The environment and every scroll position are put back afterwards,
-  /// so a second run starts from the same state and reports the same
-  /// findings; a draft already filed for a finding and environment is not
-  /// filed again.
+  /// and a draft already filed for a finding and environment is not filed
+  /// again.
   Future<Map<String, Object?>> stressMatrix(
     Map<String, Object?> args,
     OutputLimits limits,
     AgentCancel cancel,
   ) async {
-    final kinds = AgentView._kinds(args['kinds'], const {
-      'overflow',
-      'truncated_text',
-      'accessibility',
-    });
-    List<T>? listOf<T>(String key, T? Function(Object? value) read) {
-      final value = args[key];
-      if (value == null) return null;
-      if (value is! List<Object?>) throw AgentError('$key must be a list');
-      return [
-        for (final item in value)
-          read(item) ?? (throw AgentError('$key: cannot read $item')),
-      ];
-    }
-
-    double? positive(Object? v) => v is num && v > 0 ? v.toDouble() : null;
-    T? byName<T extends Enum>(List<T> values, Object? v) {
-      for (final value in values) {
-        if (value.name == v) return value;
-      }
-      return null;
-    }
-
-    final base = controller.environment.value;
-    final root = appRoot;
-    final runs = stressRuns(
-      base: base,
-      height: base.viewport?.height ?? root.paintBounds.height,
-      widths: listOf('widths', positive),
-      textScales: listOf('textScales', positive),
-      directions: listOf('directions', (v) => byName(TextDirection.values, v)),
-      brightness: listOf('brightness', (v) => byName(Brightness.values, v)),
-      full: args['full'] == true,
-    );
+    final plan = _stressPlan(args);
     final thumbnails = args['thumbnails'] != false;
 
     await prepareToDrive();
     final scroll = scrollSnapshot();
-    final runResults = <Map<String, Object?>>[];
-    final distinct = <String, Map<String, Object?>>{};
-    final drafts = <String>[];
-    final existing = <String>[];
+    final tally = _StressTally();
     // The rail's progress strip: one tick per run, gone at the end.
-    StressProgress.start(runs.length);
+    StressProgress.start(plan.runs.length);
     try {
-      for (final (i, run) in runs.indexed) {
+      for (final (i, run) in plan.runs.indexed) {
         cancel.check();
-        controller.environment.value = run.environment;
-        await waitIdle(AgentVerify.settleTimeout, cancel);
-        final found = await findingsFor(kinds);
-        cancel.check();
-        for (final finding in found) {
-          final seen = distinct[finding.key];
-          if (seen != null) {
-            (seen['runs']! as List<int>).add(i + 1);
-            continue;
-          }
-          distinct[finding.key] = {
-            ...findingJson(finding, limits),
-            'runs': <int>[i + 1],
-          };
-          final filed = _fileDraft(finding, run);
-          if (filed == null) continue;
-          (filed.$2 ? existing : drafts).add(filed.$1);
-        }
-        final png = thumbnails ? await capturePng(null, maxWidth: 400) : null;
-        runResults.add({
-          'run': i + 1,
-          'label': run.label,
-          'environment': run.environment.toJson(),
-          'findings': found.length,
-          'png': ?png,
-        });
-        StressProgress.advance(i + 1);
+        await _stressRun(
+          i + 1,
+          run,
+          plan.kinds,
+          tally,
+          limits,
+          cancel,
+          thumbnails: thumbnails,
+        );
       }
     } finally {
       StressProgress.finish();
-      controller.environment.value = base;
+      controller.environment.value = plan.base;
       await AgentDrive._frame();
       AgentDrive.restoreScroll(scroll);
       await waitIdle(AgentVerify.settleTimeout, AgentCancel());
     }
     return {
-      'runs': runResults,
-      'findings': distinct.values.toList(),
-      'drafts': drafts,
-      if (existing.isNotEmpty) 'existing': existing,
-      if (args['full'] == true && runs.length >= stressMaxRuns)
+      'runs': tally.results,
+      'findings': tally.distinct.values.toList(),
+      'drafts': tally.drafts,
+      if (tally.existing.isNotEmpty) 'existing': tally.existing,
+      if (args['full'] == true && plan.runs.length >= stressMaxRuns)
         'truncated': 'at most $stressMaxRuns runs',
     };
+  }
+
+  _StressPlan _stressPlan(Map<String, Object?> args) {
+    final kinds = AgentView._kinds(args['kinds'], const {
+      'overflow',
+      'truncated_text',
+      'accessibility',
+    });
+    final base = controller.environment.value;
+    final root = appRoot;
+    final runs = stressRuns(
+      base: base,
+      height: base.viewport?.height ?? root.paintBounds.height,
+      widths: _listArg(args, 'widths', _positive),
+      textScales: _listArg(args, 'textScales', _positive),
+      directions: _listArg(
+        args,
+        'directions',
+        (v) => asEnum(TextDirection.values, v),
+      ),
+      brightness: _listArg(
+        args,
+        'brightness',
+        (v) => asEnum(Brightness.values, v),
+      ),
+      full: args['full'] == true,
+    );
+    return (kinds: kinds, base: base, runs: runs);
+  }
+
+  /// Run number [n]: sets the environment, scans, files new findings.
+  Future<void> _stressRun(
+    int n,
+    StressRun run,
+    Set<String> kinds,
+    _StressTally tally,
+    OutputLimits limits,
+    AgentCancel cancel, {
+    required bool thumbnails,
+  }) async {
+    controller.environment.value = run.environment;
+    await waitIdle(AgentVerify.settleTimeout, cancel);
+    final found = await findingsFor(kinds);
+    cancel.check();
+    for (final finding in found) {
+      _stressFinding(finding, run, n, tally, limits);
+    }
+    final png = thumbnails ? await capturePng(null, maxWidth: 400) : null;
+    tally.results.add({
+      'run': n,
+      'label': run.label,
+      'environment': run.environment.toJson(),
+      'findings': found.length,
+      'png': ?png,
+    });
+    StressProgress.advance(n);
+  }
+
+  void _stressFinding(
+    Finding finding,
+    StressRun run,
+    int n,
+    _StressTally tally,
+    OutputLimits limits,
+  ) {
+    final seen = tally.distinct[finding.key];
+    if (seen != null) {
+      (seen['runs']! as List<int>).add(n);
+      return;
+    }
+    tally.distinct[finding.key] = {
+      ...findingJson(finding, limits),
+      'runs': <int>[n],
+    };
+    if (_fileDraft(finding, run) case (final id, final isExisting)) {
+      (isExisting ? tally.existing : tally.drafts).add(id);
+    }
   }
 
   /// Files [finding] from [run] as a draft note on its nearest local
@@ -148,3 +169,33 @@ extension AgentStress on AgentCommands {
     return (note.id, false);
   }
 }
+
+typedef _StressPlan = ({
+  Set<String> kinds,
+  Environment base,
+  List<StressRun> runs,
+});
+
+/// What the runs of one matrix found, in the order they were found.
+class _StressTally {
+  final List<Map<String, Object?>> results = [];
+  final Map<String, Map<String, Object?>> distinct = {};
+  final List<String> drafts = [];
+  final List<String> existing = [];
+}
+
+List<T>? _listArg<T>(
+  Map<String, Object?> args,
+  String key,
+  T? Function(Object? value) read,
+) {
+  final value = args[key];
+  if (value == null) return null;
+  if (value is! List<Object?>) throw AgentError('$key must be a list');
+  return [
+    for (final item in value)
+      read(item) ?? (throw AgentError('$key: cannot read $item')),
+  ];
+}
+
+double? _positive(Object? v) => v is num && v > 0 ? v.toDouble() : null;

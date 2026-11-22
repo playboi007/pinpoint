@@ -63,7 +63,7 @@ extension AgentView on AgentCommands {
     'accessibility',
   };
 
-  /// The Milestone 10 detectors of [kinds] on the screen as it is now.
+  /// The detectors of [kinds] on the screen as it is now.
   /// `accessibility` runs the audit: semantics for one frame, and a
   /// capture for contrast.
   Future<List<Finding>> findingsFor(Set<String> kinds) async {

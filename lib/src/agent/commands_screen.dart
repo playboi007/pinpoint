@@ -2,7 +2,7 @@ part of 'commands.dart';
 
 /// What is on screen: the widget list, one widget, inspect and flash.
 extension AgentScreen on AgentCommands {
-  /// The Milestone 4 payload for the handle's widget, without a
+  /// The info payload for the handle's widget, without a
   /// screenshot.
   Map<String, Object?> inspect(Map<String, Object?> args) {
     final target = element(args);

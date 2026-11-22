@@ -77,7 +77,7 @@ class AgentNotReady extends AgentError {
 }
 
 /// How much a tool may return. Tool output is context the agent pays for
-/// (watch out for): every list defaults to 20 items and every string to
+/// every list defaults to 20 items and every string to
 /// 200 characters, with `limit` and `max_chars` to ask for more.
 @immutable
 class OutputLimits {
@@ -123,7 +123,7 @@ class AgentHandle {
 
 /// The handles given out to the agent.
 ///
-/// Handles hold elements, which die on rebuild (watch out for). On each
+/// Handles hold elements, which die on rebuild. On each
 /// use a handle is checked against its anchor, re-resolved from it when
 /// its element is gone, and refused as stale when that fails, never acted
 /// on as another widget. A handle with no anchor to check (no source
@@ -215,7 +215,7 @@ class AgentCommands {
     this.bridge,
   });
 
-  /// The bridge, for tapes (PLAN-v2 Milestone 15); null without one.
+  /// The bridge, for tapes; null without one.
   final BridgeClient? Function()? bridge;
 
   /// The app's state adapters for `get_state`.
@@ -251,7 +251,7 @@ class AgentCommands {
   /// [_againSoon]. One that is ready runs at once: nothing waits for an
   /// app that has nothing left to do.
   ///
-  /// Each command is a cause of its own (PLAN-v2 Milestone 14): what the
+  /// Each command is a cause of its own: what the
   /// agent's tap starts names the agent, not the long poll that brought
   /// it.
   Future<Map<String, Object?>> run(

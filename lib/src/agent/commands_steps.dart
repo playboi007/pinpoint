@@ -32,7 +32,7 @@ extension AgentSteps on AgentCommands {
   /// `run_steps`: runs each step in order and stops at the first that
   /// fails. One round trip instead of one per step. Each step answers as
   /// its tool would, so a later step names its widget with a `target`
-  /// query, not with a handle from an earlier step.
+  /// query, not with a handle from a previous step.
   Future<Map<String, Object?>> runSteps(
     Map<String, Object?> args,
     AgentCancel cancel,
@@ -44,8 +44,8 @@ extension AgentSteps on AgentCommands {
     if (steps.length > maxSteps) {
       throw const AgentError('at most $maxSteps steps');
     }
-    // Every step is checked before the first runs: a typo in step 3 must
-    // not leave steps 1 and 2 done.
+    // Every step is checked before the first runs: a typo in a late
+    // step must not leave the early ones done.
     for (final (i, step) in steps.indexed) {
       final tool = step is Map<String, Object?> ? step['tool'] : null;
       if (tool is! String || !stepTools.contains(tool)) {

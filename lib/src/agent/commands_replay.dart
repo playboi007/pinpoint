@@ -3,8 +3,7 @@ part of 'commands.dart';
 /// Tapes and replays: saving, starting, resuming and stopping them.
 extension AgentReplay on AgentCommands {
   /// `save_tape`: a tape of the run from `since`, stored on the bridge
-  /// (PLAN-v2 Milestone 15). Answers its summary only: a tool answer never
-  /// carries a body (rule 16).
+  /// Answers its summary only: a tool answer never carries a body.
   Future<Map<String, Object?>> saveTape(Map<String, Object?> args) async {
     final session = AgentTrace._trace();
     final client = bridge?.call();
@@ -93,7 +92,7 @@ extension AgentReplay on AgentCommands {
   static const double maxSpeed = 20;
 
   /// `replay`: plays a tape's inputs into the app while the network source
-  /// answers from it (PLAN-v2 Milestone 15). Answers when the replay ends
+  /// answers from it. Answers when the replay ends
   /// or holds at `until`.
   Future<Map<String, Object?>> replay(
     Map<String, Object?> args,
@@ -135,7 +134,7 @@ extension AgentReplay on AgentCommands {
     'latency',
   ];
 
-  /// A full tape replays after a restart (step 7): in-memory state such as
+  /// A full tape replays after a restart: in-memory state such as
   /// a parent's cache is part of most real bugs, and only a restart brings
   /// it back to a known value. The flag goes to `sessionStorage`, the page
   /// reloads, and at start Pinpoint loads the tape before the app runs.
@@ -170,16 +169,15 @@ extension AgentReplay on AgentCommands {
         control: controller.agent.enabled,
       ),
     );
-    // After this answer has gone to the bridge. Watch out for: a page
-    // reload loads what the web server serves. Whether that includes code
-    // a hot reload compiled is unverified (PLAN-v2 "Verify by running");
-    // if it does not, a full replay after a fix needs a hot restart from
-    // Flutter Tools instead of a reload.
+    // After this answer has gone to the bridge. A page reload loads what
+    // the web server serves. Whether that includes code a hot reload
+    // compiled is unverified; if it does not, a full replay after a fix
+    // needs a hot restart from Flutter Tools instead of a reload.
     Timer(const Duration(milliseconds: 500), page.reload);
     return {'run': run, 'tape': tape.id, 'kind': 'full', 'state': 'restarting'};
   }
 
-  /// Starts the replay of a page a replay restarted (step 7), once, after
+  /// Starts the replay of a page a replay restarted, once, after
   /// the first frame. Reports each hold and the end to the bridge, where
   /// the agent's `replay` waits.
   Future<void> startBootReplay() async {
@@ -290,7 +288,7 @@ extension AgentReplay on AgentCommands {
       net: net,
       notes: notes,
       streamFrom: streamFrom,
-      // The run lives on the bridge (step 14): its events in batches, and
+      // The run lives on the bridge: its events in batches, and
       // where it is at each hold and at the end.
       stream: client == null
           ? null

@@ -7,7 +7,7 @@ extension AgentDrive on AgentCommands {
       MediaQuery.maybeDevicePixelRatioOf(pageContext()) ?? 1;
 
   /// Gets the app ready for a driving command. Picking mode's pointer trap
-  /// would swallow synthetic events (watch out for), so picking stops
+  /// would swallow synthetic events, so picking stops
   /// first. While the user writes a note, the agent waits its turn.
   Future<void> prepareToDrive() async {
     switch (controller.mode) {

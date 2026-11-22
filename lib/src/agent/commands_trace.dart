@@ -10,8 +10,7 @@ extension AgentTrace on AgentCommands {
         'TraceConfig(enabled: false))',
       ));
 
-  /// `get_trace`: the recorded events as compact lines (PLAN-v2
-  /// Milestone 13).
+  /// `get_trace`: the recorded events as compact lines.
   Map<String, Object?> getTrace(Map<String, Object?> args) {
     try {
       return traceAnswer(_trace().recorder, TraceQuery.fromArgs(args));
@@ -63,7 +62,7 @@ extension AgentTrace on AgentCommands {
       ],
       'shown': total,
       // A state dump reads only what the State shows in its diagnostics
-      // (watch out for): say so, so the agent reaches for a probe instead
+      // say so, so the agent reaches for a probe instead
       // of trusting a short list.
       'note':
           'only values a State lists in debugFillProperties are watched; '
@@ -87,8 +86,7 @@ extension AgentTrace on AgentCommands {
     };
   }
 
-  /// `why`: walks back from one event to the entry that started it
-  /// (PLAN-v2 Milestone 14).
+  /// `why`: walks back from one event to the entry that started it.
   Map<String, Object?> why(Map<String, Object?> args) {
     final seq = args['seq'];
     if (seq is! num) throw const AgentError('seq is required: an event seq');
@@ -99,7 +97,7 @@ extension AgentTrace on AgentCommands {
     }
   }
 
-  /// `caused_by`: what the widget's subtree started (PLAN-v2 Milestone 14).
+  /// `caused_by`: what the widget's subtree started.
   Map<String, Object?> causedBy(Map<String, Object?> args) {
     final session = _trace();
     final target = element(args);
@@ -117,8 +115,7 @@ extension AgentTrace on AgentCommands {
     );
   }
 
-  /// `state_flow`: why a value changed, from the state lens (PLAN-v3
-  /// Milestone 21, step 8). With no window on [target], it opens one and
+  /// `state_flow`: why a value changed, from the state lens. With no window on [target], it opens one and
   /// answers what the target reads; with one open (or one that ended less
   /// than [StateLens.recentFor] ago) it answers the chain since arming.
   Map<String, Object?> stateFlow(Map<String, Object?> args) {
@@ -161,7 +158,7 @@ extension AgentTrace on AgentCommands {
       'secondsLeft': lens.secondsLeft,
       'ended': ?state.endedBecause,
       'readers': lens.readersJson(),
-      // The story of changes per cause (PLAN-v3 Milestone 21b): the
+      // The story of changes per cause: the
       // bridge writes it as text; the card shows the same blocks.
       'story': lens
           .story(

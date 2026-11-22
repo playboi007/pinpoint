@@ -34,7 +34,7 @@ extension AgentInput on AgentCommands {
     }
     final point = visible.center;
     // A what-if viewport leaves screen around the app: a point there is
-    // over nothing (Milestone 9, RenderSearch.isOnApp).
+    // over nothing (see RenderSearch.isOnApp).
     if (!RenderSearch.isOnApp(appRoot, point)) {
       throw const AgentError('outside the app viewport');
     }
@@ -226,7 +226,7 @@ extension AgentInput on AgentCommands {
   /// a list one screen at a time until a matching widget is built, then
   /// brings it into view.
   ///
-  /// Lazy lists build only what is near the screen (watch out for):
+  /// Lazy lists build only what is near the screen:
   /// `find_widgets` cannot see an item that was never built, so this
   /// scrolls, waits for the frame that builds the next items, and searches
   /// again, at most `max_steps` times (default 30). From the end of the
@@ -272,26 +272,37 @@ extension AgentInput on AgentCommands {
           'steps': step,
         };
       }
-      final position = scrollable.position;
-      if (position.pixels >= position.maxScrollExtent - 0.5) {
-        // The end: go on from the start, once.
-        if (wrapped || start <= position.minScrollExtent + 0.5) break;
-        wrapped = true;
-        position.jumpTo(position.minScrollExtent);
-      } else {
-        // One screen on: with the cache extent, no item is skipped.
-        position.jumpTo(
-          math.min(
-            position.pixels + position.viewportDimension,
-            position.maxScrollExtent,
-          ),
-        );
-        if (wrapped && position.pixels >= start) break;
-      }
+      final page = _pageOn(scrollable.position, start, wrapped: wrapped);
+      if (page.stop) break;
+      wrapped = page.wrapped;
       // The frame that builds the newly shown items.
       await AgentDrive._frame();
     }
     throw AgentError('not found after $steps steps');
+  }
+
+  /// Moves the list one screen on, or to the start after the end (once).
+  /// With the cache extent, no item is skipped. `stop` says the search
+  /// has been all the way round.
+  static ({bool stop, bool wrapped}) _pageOn(
+    ScrollPosition position,
+    double start, {
+    required bool wrapped,
+  }) {
+    if (position.pixels >= position.maxScrollExtent - 0.5) {
+      if (wrapped || start <= position.minScrollExtent + 0.5) {
+        return (stop: true, wrapped: wrapped);
+      }
+      position.jumpTo(position.minScrollExtent);
+      return (stop: false, wrapped: true);
+    }
+    position.jumpTo(
+      math.min(
+        position.pixels + position.viewportDimension,
+        position.maxScrollExtent,
+      ),
+    );
+    return (stop: wrapped && position.pixels >= start, wrapped: wrapped);
   }
 
   NoteAnchor? _anchorOf(Element element) =>
