@@ -25,7 +25,7 @@ enum PinPointPalette {
   };
 
   /// The palette called [name] (`redline`, `cobalt` or `ember`), or null for
-  /// anything else, including null. Used to read the saved pick.
+  /// anything else, including null. Reads the saved pick.
   static PinPointPalette? parse(String? name) {
     for (final palette in values) {
       if (palette.name == name) return palette;
