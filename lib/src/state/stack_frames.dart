@@ -217,30 +217,33 @@ ProjectFrame? firstProjectFrameIn(
   // The first frame of an app package that no known file names: it is the
   // project's when a later frame proves the package is the app's.
   _Raw? pending;
-  var seen = 0;
-  for (final raw in stack.split('\n')) {
-    final line = raw.trim();
-    if (line.isEmpty) continue;
-    if (++seen > maxLines) break;
-    final frame = _parse(line);
-    if (frame == null) continue;
+  for (final frame in _parsedFrames(stack, maxLines)) {
     final shown = _shown(frame.file, paths, known);
-    if (shown != null) {
-      final waiting = pending;
-      if (waiting != null && _knownPackage(waiting.file, known)) {
-        return waiting.toFrame(waiting.file);
-      }
-      return frame.toFrame(shown);
-    }
+    if (shown != null) return _settled(pending, known) ?? frame.toFrame(shown);
     if (pending == null && !known.isEmpty && _unmatchedAppPackage(frame.file)) {
       pending = frame;
     }
-    final waiting = pending;
-    if (waiting != null && _knownPackage(waiting.file, known)) {
-      return waiting.toFrame(waiting.file);
-    }
+    if (_settled(pending, known) case final settled?) return settled;
   }
   return null;
+}
+
+/// The pending frame as a project frame, once a known file names its package.
+ProjectFrame? _settled(_Raw? pending, ProjectFiles known) =>
+    pending != null && _knownPackage(pending.file, known)
+    ? pending.toFrame(pending.file)
+    : null;
+
+/// The frames of the first [maxLines] non-empty lines. Lines that are no
+/// frame are skipped but count. A negative cap reads nothing.
+Iterable<_Raw> _parsedFrames(String stack, int maxLines) sync* {
+  final lines = stack
+      .split('\n')
+      .map((line) => line.trim())
+      .where((line) => line.isNotEmpty);
+  for (final line in lines.take(maxLines < 0 ? 0 : maxLines)) {
+    if (_parse(line) case final frame?) yield frame;
+  }
 }
 
 class _Raw {
@@ -277,11 +280,11 @@ _Raw? _parse(String line) {
   }
   final uri = _uriOf(frame);
   if (uri == null) return null;
-  final method = frame.className.isEmpty
-      ? frame.method
-      : frame.method.isEmpty
-      ? frame.className
-      : '${frame.className}.${frame.method}';
+  final method = switch ((frame.className, frame.method)) {
+    ('', final method) => method,
+    (final className, '') => className,
+    (final className, final method) => '$className.$method',
+  };
   return _Raw(
     uri,
     frame.line < 0 ? 0 : frame.line,
@@ -312,42 +315,53 @@ bool _unmatchedAppPackage(String file) =>
 /// Flutter SDK and Pinpoint.
 bool _denied(String file) {
   final path = file.toLowerCase();
-  if (path.startsWith('dart:') ||
-      path.startsWith('org-dartlang-sdk:') ||
-      path.contains('dart-sdk/') ||
-      path.contains('flutter_web_sdk') ||
-      path.contains('sky_engine') ||
-      path.contains('_engine/') ||
-      path.startsWith('lib/_') ||
-      path.startsWith('lib/ui/') ||
-      path.startsWith('packages/flutter/') ||
-      path.startsWith('package:flutter/') ||
-      path.startsWith('packages/pinpoint/') ||
-      path.startsWith('package:pinpoint/')) {
-    return true;
-  }
-  return false;
+  return _deniedStarts.any(path.startsWith) || _deniedParts.any(path.contains);
+}
+
+const _deniedStarts = [
+  'dart:',
+  'org-dartlang-sdk:',
+  'lib/_',
+  'lib/ui/',
+  'packages/flutter/',
+  'package:flutter/',
+  'packages/pinpoint/',
+  'package:pinpoint/',
+];
+
+const _deniedParts = ['dart-sdk/', 'flutter_web_sdk', 'sky_engine', '_engine/'];
+
+enum _FileKind { denied, package, uri, path }
+
+_FileKind _kindOf(String file) {
+  if (_denied(file)) return _FileKind.denied;
+  if (file.startsWith('package:')) return _FileKind.package;
+  // `file:` and `org-dartlang-app:` URIs, and absolute paths.
+  if (file.contains(':') || file.startsWith('/')) return _FileKind.uri;
+  // A relative path (`lib/a/b.dart`) or a bare name (a test file).
+  return _FileKind.path;
 }
 
 /// How [file] is shown when it is the project's, else null.
-String? _shown(String file, SourcePaths paths, ProjectFiles files) {
-  if (_denied(file)) return null;
-  if (file.startsWith('package:')) {
-    // A path dependency listed in `localPathHints`.
-    if (paths.isLocal(file)) return files.match(file) ?? file;
-    final package = _packageOf(file);
-    if (infrastructurePackages.contains(package)) return null;
-    if (files.isEmpty) return file;
-    return files.match(file) ?? (files.knowsPackage(package) ? file : null);
-  }
-  if (file.contains(':') || file.startsWith('/')) {
-    // `file:` and `org-dartlang-app:` URIs, and absolute paths.
-    if (!paths.isLocal(file)) return null;
-    return files.match(file) ?? paths.relativePath(file);
-  }
-  // A relative path (`lib/a/b.dart`) or a bare name (a test file).
+String? _shown(String file, SourcePaths paths, ProjectFiles files) =>
+    switch (_kindOf(file)) {
+      _FileKind.denied => null,
+      _FileKind.package => _shownPackage(file, paths, files),
+      _FileKind.uri =>
+        paths.isLocal(file)
+            ? files.match(file) ?? paths.relativePath(file)
+            : null,
+      _FileKind.path => files.isEmpty ? file : files.match(file),
+    };
+
+String? _shownPackage(String file, SourcePaths paths, ProjectFiles files) {
+  // A path dependency listed in `localPathHints`.
+  if (paths.isLocal(file)) return files.match(file) ?? file;
+  final package = _packageOf(file);
+  if (infrastructurePackages.contains(package)) return null;
   if (files.isEmpty) return file;
-  return files.match(file);
+  if (files.match(file) case final match?) return match;
+  return files.knowsPackage(package) ? file : null;
 }
 
 // `file line:col  member`, as DDC prints a frame: `package:app/a.dart 12:3
