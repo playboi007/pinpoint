@@ -124,6 +124,8 @@ class _Interactive extends StatefulWidget {
 
   /// Null disables the control: no cursor, no tap, `hovered` stays false.
   final VoidCallback? onTap;
+  // Builder callbacks read the hover and press states by position.
+  // ignore: avoid_positional_boolean_parameters
   final Widget Function(BuildContext context, bool hovered, bool pressed)
   builder;
   final String? semanticLabel;

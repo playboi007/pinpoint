@@ -106,9 +106,10 @@ String markdownFromJson(Map<String, Object?> json) {
     if (x != null && y != null && w != null && h != null) 'rect $x,$y ${w}x$h',
     if (constraints != null) 'constraints ${compactConstraints(constraints)}',
     if (parent != null)
-      index is int && count is int
-          ? 'parent $parent, child ${index + 1} of $count'
-          : 'parent $parent',
+      if (index is int && count is int)
+        'parent $parent, child ${index + 1} of $count'
+      else
+        'parent $parent',
   ];
   if (layoutParts.isNotEmpty) {
     out.writeln('Layout: ${_line(layoutParts.join('  '))}');
@@ -186,8 +187,8 @@ String markdownFromJson(Map<String, Object?> json) {
 /// then the compact trace lines indented. Empty without a trace.
 List<String> whatHappenedLines(Map<String, Object?> json) {
   final trace = asJsonMap(json['trace']);
-  // "rebuilds not recorded" says nothing about the problem (PLAN-v3
-  // Milestone 19, step 9): the lines of the run stay, that one goes.
+  // "rebuilds not recorded" says nothing about the problem: the lines of the
+  // run stay, that one goes.
   final lines = [
     for (final line in asJsonList(trace['lines']).whereType<String>())
       if (!line.startsWith(traceNotRecorded)) line,
@@ -204,7 +205,7 @@ List<String> whatHappenedLines(Map<String, Object?> json) {
 
 /// The tape line of a note (its `tape` JSON), for example `Tape:
 /// tp_… (full, 12 inputs, 3 requests, 1 mark). Replay it with replay.`,
-/// or null without a tape (PLAN-v2 Milestone 15, step 18).
+/// or null without a tape.
 String? tapeLine(Object? tape) {
   final t = asJsonMap(tape);
   final id = asString(t['id']);
@@ -302,8 +303,7 @@ List<String> verificationLines(Map<String, Object?> json) {
   ];
 }
 
-/// What the agent is to do with a note's tweaks (plan Milestone 11, step
-/// 10).
+/// What the agent is to do with a note's tweaks.
 const String tweakInstruction =
     'Apply these as source changes. A value may come from a theme or design '
     'token; change the token only if every use should change.';
@@ -330,7 +330,8 @@ List<String> tweakLines(Map<String, Object?> json) {
     ].join(' ');
     final made = [
       if (maker.isNotEmpty) maker,
-      if (widget != null) where == null ? 'in $widget' : 'in $widget at $where',
+      if (widget != null)
+        if (where == null) 'in $widget' else 'in $widget at $where',
     ].join(', ');
     lines.add(
       _line('- $property: $from -> $to${made.isEmpty ? '' : ' ($made)'}'),
@@ -469,5 +470,8 @@ String _line(String text) => text.replaceAll(RegExp(r'\s*[\r\n]+\s*'), ' ');
 /// comment line can never read as a heading or a field of the note.
 String _block(String text) => [
   for (final (i, line) in text.split(RegExp(r'\r\n?|\n')).indexed)
-    i == 0 || line.trim().isEmpty ? line.trimRight() : '  ${line.trimRight()}',
+    if (i == 0 || line.trim().isEmpty)
+      line.trimRight()
+    else
+      '  ${line.trimRight()}',
 ].join('\n');

@@ -12,7 +12,7 @@ import '../trace_source.dart';
 /// start, it would break DevTools "track rebuilds" for every user of
 /// Pinpoint (api-notes item 8): DevTools cannot turn on while Pinpoint
 /// holds the slot. It shares the one callback with `RebuildTracker`
-/// through [RebuildHook] (watch out for: one hook, two users), and shares
+/// through [RebuildHook], and shares
 /// it with DevTools when DevTools was there first.
 class RebuildSource extends TraceSource with FrameWork {
   RebuildSource({
@@ -26,7 +26,7 @@ class RebuildSource extends TraceSource with FrameWork {
   final RebuildHook hook;
 
   /// The element directly above the app's own widgets. Elements outside it
-  /// are Pinpoint's own UI and are never recorded (rule 14).
+  /// are Pinpoint's own UI and are never recorded.
   final Element? Function() content;
 
   /// Reads locations and decides which widgets are local.
@@ -106,9 +106,11 @@ class RebuildSource extends TraceSource with FrameWork {
     _gapFrom = null;
   }
 
-  // Called for every rebuild (watch out for): count into a map keyed by
+  // Called for every rebuild: count into a map keyed by
   // element, nothing else. Locations are resolved when the event is
   // written, once per frame.
+  // The shape of Flutter's rebuild callback.
+  // ignore: avoid_positional_boolean_parameters
   void _onRebuild(Element element, bool builtOnce) {
     _counts[element] = (_counts[element] ?? 0) + 1;
   }

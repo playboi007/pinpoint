@@ -464,14 +464,14 @@ class McpServer {
     return _text(
       'Note $id is ${note['status']}.\n\n'
       '${noteText(note, NoteDetail.compact)}'
-      '${_roundReport(report, labels.isNotEmpty)}'
+      '${_roundReport(report, labelled: labels.isNotEmpty)}'
       '${probes.isEmpty ? '' : '\n\n${_probeWarning(probes)}'}',
     );
   }
 
   /// What closing the round found, for the answer to `update_note`: the
   /// changes with their ids, and what was dropped.
-  static String _roundReport(RoundsReport report, bool labelled) {
+  static String _roundReport(RoundsReport report, {required bool labelled}) {
     final json = report.closed;
     final round = json == null ? null : NoteRound.fromJson(json);
     if (round == null) return '';
@@ -653,7 +653,7 @@ class McpServer {
   }
 
   /// `get_tape`: one tape's summary, its marks and its inputs in short.
-  /// Masked headers stay masked and no body is shown (rule 16).
+  /// Masked headers stay masked and no body is shown.
   Future<Map<String, Object?>> _getTape(Map<String, Object?> input) async {
     final id = input['id'];
     if (id is! String) throw const _InvalidParams('id is required');

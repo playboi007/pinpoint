@@ -66,6 +66,8 @@ class RebuildTracker {
   }
 
   // Runs during build: count, nothing else.
+  // The shape of Flutter's rebuild callback.
+  // ignore: avoid_positional_boolean_parameters
   void _onRebuild(Element element, bool builtOnce) {
     if (!_installed) return;
     final second = _clock().inSeconds;

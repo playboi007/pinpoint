@@ -54,7 +54,7 @@ class EnvironmentBar extends StatelessWidget {
         'text ${_number(t)}×',
         (e) => e.copyWith(textScale: () => null),
       ),
-    if (env.boldText == true)
+    if (env.boldText ?? false)
       ('bold', 'bold', (e) => e.copyWith(boldText: () => null)),
     if (env.safeArea != null)
       ('safeArea', 'safe area', (e) => e.copyWith(safeArea: () => null)),

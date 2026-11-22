@@ -507,7 +507,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     if (mode == previous) return;
     _lastMode = mode;
     // A note's trace ends when Pinpoint became active.
-    TraceSession.current?.pinpointActive(widget.controller.isActive);
+    TraceSession.current?.pinpointActive(active: widget.controller.isActive);
     // Polls only while active: an idle overlay must not keep the network
     // busy or the tab awake.
     _sync?.active = widget.controller.isActive;
@@ -517,7 +517,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     }
     if (previous == PinPointMode.idle) {
       _saveAppFocus();
-      // Once per start, never per frame (rule 2), and never while idle.
+      // Once per start, never per frame, and never while idle.
       unawaited(_checkBridges());
     }
     if (mode == PinPointMode.commenting && previous == PinPointMode.picking) {

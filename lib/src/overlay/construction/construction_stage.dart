@@ -81,6 +81,8 @@ abstract interface class ConstructionStage {
   void setColors(ConstructionColors colors);
 
   /// Whether motion is reduced: the site shows still.
+  // The test fakes implement it with this shape.
+  // ignore: avoid_positional_boolean_parameters
   void setReducedMotion(bool reduced);
 
   /// Puts up the site [id] over [rect]. [boxes] are the blueprint of the

@@ -76,9 +76,8 @@ String _header(Map<String, Object?> note) {
     ?asString(note['intent']),
     ?asString(note['status']),
     if (reopened is int && reopened > 0)
-      reopened == 1 ? 'reopened' : 'reopened $reopened times',
-    // PLAN-v2 Milestone 15, step 18: the agent can replay what the user
-    // did.
+      if (reopened == 1) 'reopened' else 'reopened $reopened times',
+    // The agent can replay what the user did.
     if (note['tape'] is Map<String, Object?>) 'has tape',
   ];
   return parts.isEmpty ? id : '$id (${parts.join(', ')})';
@@ -131,7 +130,7 @@ String _compact(Map<String, Object?> note) {
 
 String _standard(Map<String, Object?> note) => _standardLines(note).join('\n');
 
-/// The standard text, one line per entry. PLAN-v3 Milestone 19, step 9:
+/// The standard text, one line per entry:
 /// what finds and explains the problem, and no more. The properties, the
 /// subtree, the state owners and the environment are [NoteDetail.full].
 ///
@@ -178,9 +177,10 @@ List<String> _standardLines(Map<String, Object?> note, {bool onDisk = false}) {
     if (constraints != null) 'constraints ${compactConstraints(constraints)}',
     ?asString(target['renderObject']),
     if (parent != null)
-      index is int && count is int
-          ? 'parent $parent, child ${index + 1} of $count'
-          : 'parent $parent',
+      if (index is int && count is int)
+        'parent $parent, child ${index + 1} of $count'
+      else
+        'parent $parent',
   ];
   if (layout.isNotEmpty) lines.add('Layout: ${_line(layout.join('  '))}');
   final viewport = asJsonMap(page['viewport']);
@@ -251,8 +251,8 @@ String _full(Map<String, Object?> note) {
   ].join('\n');
 }
 
-/// One line for each state owner that reads state objects (PLAN-v3
-/// Milestone 21, step 1), for example `Reads: _CartState: provider CartModel
+/// One line for each state owner that reads state objects, for example `Reads:
+/// _CartState: provider CartModel
 /// #a1 (lib/cart_model.dart:9), inherited Flags #a2`. The same tag on two
 /// lines is one object.
 List<String> dependencyLines(Map<String, Object?> note) {
@@ -274,7 +274,7 @@ List<String> dependencyLines(Map<String, Object?> note) {
   ];
 }
 
-/// One short line for each round the agent closed (PLAN-v3 Milestone 20),
+/// One short line for each round the agent closed,
 /// for example `Round 2 (undone by user: c1; kept: c2)`. A round the user
 /// did not undo says what changed: `Round 1 (changed: c1, c2)`. After a
 /// request the agent has to do, it says `undo requested of: c1`.
@@ -333,5 +333,8 @@ String _line(String text) => text.replaceAll(RegExp(r'\s*[\r\n]+\s*'), ' ');
 
 String _block(String text) => [
   for (final (i, line) in text.split(RegExp(r'\r\n?|\n')).indexed)
-    i == 0 || line.trim().isEmpty ? line.trimRight() : '  ${line.trimRight()}',
+    if (i == 0 || line.trim().isEmpty)
+      line.trimRight()
+    else
+      '  ${line.trimRight()}',
 ].join('\n');

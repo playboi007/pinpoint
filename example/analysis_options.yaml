@@ -4,3 +4,11 @@ analyzer:
   exclude:
     - build/**
     - web/**
+
+# The demo app keeps its own style; the rules below apply to lib/.
+linter:
+  rules:
+    avoid_positional_boolean_parameters: false
+    join_return_with_assignment: false
+    prefer_if_elements_to_conditional_expressions: false
+    unnecessary_null_checks: false

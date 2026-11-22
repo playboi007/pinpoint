@@ -101,9 +101,9 @@ class CommentForm extends StatelessWidget {
   Widget _tapeRange(
     BuildContext context,
     CommentDraft draft,
-    TapeRecorder tapes,
-    bool sending,
-  ) {
+    TapeRecorder tapes, {
+    required bool sending,
+  }) {
     final motion = PinPointMotion.of(context);
     final switcher = AnimatedSwitcher(
       duration: motion.quick,
@@ -218,7 +218,7 @@ class CommentForm extends StatelessWidget {
               ),
             // Which part of the run goes with the note.
             if (TraceSession.current?.tapes case final tapes?)
-              _tapeRange(context, draft, tapes, sending),
+              _tapeRange(context, draft, tapes, sending: sending),
           ],
         );
       },

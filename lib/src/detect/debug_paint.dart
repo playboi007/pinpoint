@@ -26,6 +26,8 @@ enum DebugPaintFlag {
     rainbow => debugRepaintRainbowEnabled,
   };
 
+  // Passed as a `HookSlot` write callback.
+  // ignore: avoid_positional_boolean_parameters
   void _write(bool value) {
     switch (this) {
       case size:

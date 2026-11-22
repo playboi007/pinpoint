@@ -23,7 +23,7 @@ import 'trace_source.dart';
 import 'watch.dart';
 
 /// Why level 3 runs. Level 3 starts with the first reason and stops with
-/// the last (PLAN-v2, "Source levels").
+/// the last.
 abstract final class TraceDemand {
   /// The Timeline panel is open.
   static const String timeline = 'timeline';
@@ -46,8 +46,8 @@ abstract final class TraceDemand {
 /// it. Level 3 runs only while a [TraceDemand] holds it.
 ///
 /// The running session is a static, [current], not a field of the overlay's
-/// `State`: a new instance field is undefined after a web hot reload
-/// (api-notes item 29, watch out for), and `PinPoint.probe` needs to find
+/// `State`: a new instance field is undefined after a web hot reload,
+/// and `PinPoint.probe` needs to find
 /// it from anywhere.
 class TraceSession {
   TraceSession({
@@ -142,8 +142,7 @@ class TraceSession {
   final TraceConfig config;
   final TraceRecorder recorder;
 
-  /// Inputs and exchanges since app start, for tapes (PLAN-v2 Milestone
-  /// 15).
+  /// Inputs and exchanges since app start, for tapes.
   late final TapeRecorder tapes;
 
   final Element? Function() _content;
@@ -151,7 +150,7 @@ class TraceSession {
   HookRegistry? _ownHooks;
   StateLens? _lens;
 
-  /// The state lens (PLAN-v3 Milestone 21, step 5): one at a time, made on
+  /// The state lens: one at a time, made on
   /// first use. Its globals go through the wrapper's [HookRegistry], or
   /// through one of the session's own when none was given.
   StateLens get stateLens => _lens ??= StateLens(
@@ -340,7 +339,7 @@ class TraceSession {
       );
   }
 
-  /// Watches [element] (PLAN-v2 Milestone 13, step 8). Level 3 runs while
+  /// Watches [element]. Level 3 runs while
   /// any watch is set.
   TraceWatch watch(Element element, {int states = WatchSource.defaultStates}) {
     // Level 3 first, so the watch's first values are recorded.
@@ -367,7 +366,7 @@ class TraceSession {
   int? activeSince;
 
   /// Pinpoint's overlay left idle ([active]) or went back to it.
-  void pinpointActive(bool active) {
+  void pinpointActive({required bool active}) {
     if (!active) {
       activeSince = null;
     } else {
@@ -385,7 +384,7 @@ class TraceSession {
   /// The marks' thumbnails, by the mark's seq.
   final Map<int, Uint8List> thumbnails = <int, Uint8List>{};
 
-  /// Records a mark (PLAN-v2 Milestone 13, step 9): a moment the user (M
+  /// Records a mark: a moment the user (M
   /// key, Timeline) or the agent (`mark`) points at, with an optional
   /// sentence, and takes a thumbnail of the app.
   TraceEvent mark({String? text, String by = 'user'}) {
@@ -412,7 +411,7 @@ class TraceSession {
     return event;
   }
 
-  /// Names the mark [seq]. False when it is no longer held.
+  /// Names the mark [seq]. False when it is not held.
   bool renameMark(int seq, String text) {
     for (final event in recorder.newestFirst) {
       if (event.seq < seq) break;

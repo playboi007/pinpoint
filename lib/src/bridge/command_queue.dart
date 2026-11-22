@@ -145,6 +145,8 @@ class CommandQueue {
 
   /// The app turned agent control on or off. Off fails every command it
   /// has not answered, and ends its poll.
+  // Tests call it with a positional value.
+  // ignore: avoid_positional_boolean_parameters
   void setControl(bool enabled) {
     _enabled = enabled;
     if (enabled) {
