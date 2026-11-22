@@ -18,7 +18,7 @@ const double minTapTarget = 48;
 /// the WCAG contrast ratio.
 ///
 /// Semantics are turned on for the audit only: on web they build a
-/// parallel DOM tree that costs performance (watch out for). The handle is
+/// parallel DOM tree that costs performance. The handle is
 /// disposed on every path, which turns them off again unless something
 /// else (a screen reader) holds them.
 Future<List<Finding>> runAccessibilityAudit(
@@ -32,7 +32,7 @@ Future<List<Finding>> runAccessibilityAudit(
   final done = AppSemantics.read();
   try {
     // The semantics tree is built in the next frame. The audit is on
-    // demand, so forcing that one frame is fine (engineering rule 2).
+    // demand, so forcing that one frame is fine.
     await SchedulerBinding.instance.endOfFrame;
     if (!root.attached) return const <Finding>[];
     final findings = semanticsFindings(
@@ -196,7 +196,7 @@ double contrastRatio(Color a, Color b) {
 ///
 /// Takes one capture of [boundary] and, for each paragraph, compares its
 /// text color with the most common color in a 3 px ring around its rect.
-/// That is an estimate (watch out for): text over an image or a gradient
+/// That is an estimate: text over an image or a gradient
 /// has no one background, so when the most common color covers under 60%
 /// of the ring the finding says `confidence: low`. The measured ratio is
 /// always reported.
