@@ -1411,7 +1411,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
                         _PointerTrap(tracker: _tracker),
                       _paintLayers(),
                       ..._notePanels(),
-                      ..._toolPanels(material3),
+                      ..._toolPanels(material3: material3),
                       ..._statusLayers(),
                       _railLayer(),
                     ],
@@ -1531,7 +1531,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
 
   /// The environment, findings and timeline panels. Above the trap, so
   /// clicks on them never pick.
-  List<Widget> _toolPanels(bool material3) => [
+  List<Widget> _toolPanels({required bool material3}) => [
     EnvironmentPanelLayer(
       controller: widget.controller,
       panelOpen: _environmentPanel,

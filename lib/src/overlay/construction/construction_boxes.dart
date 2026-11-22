@@ -246,18 +246,6 @@ abstract final class ConstructionBoxes {
 
 /// The shared timing numbers of one site: who repairs which box, and when.
 class _Schedule {
-  _Schedule._({
-    required this.seed,
-    required this.crew,
-    required this.dims,
-    required this.stackerBoxes,
-    required this.builderRank,
-    required this.builderCount,
-    required this.slippers,
-    required this.slipCount,
-    required this.repairEnd,
-  });
-
   factory _Schedule(
     int seed,
     List<ConstructionBox> boxes,
@@ -311,6 +299,18 @@ class _Schedule {
       repairEnd: repairEnd,
     );
   }
+
+  _Schedule._({
+    required this.seed,
+    required this.crew,
+    required this.dims,
+    required this.stackerBoxes,
+    required this.builderRank,
+    required this.builderCount,
+    required this.slippers,
+    required this.slipCount,
+    required this.repairEnd,
+  });
 
   final int seed;
   final ConstructionCrew? crew;
