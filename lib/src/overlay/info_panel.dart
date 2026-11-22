@@ -404,10 +404,10 @@ class InfoPanel extends StatelessWidget {
   );
   static const Key tweakTabKey = ValueKey<String>('pinpoint.infoPanel.tweak');
 
-  /// The State tab (PLAN-v3 Milestone 21, step 7).
+  /// The State tab.
   static const Key stateTabKey = ValueKey<String>('pinpoint.infoPanel.state');
 
-  /// The Info tab's "Caused" section (PLAN-v2 Milestone 14, step 17).
+  /// The Info tab's "Caused" section.
   static const Key causedKey = ValueKey<String>('pinpoint.infoPanel.caused');
 
   /// The dial in the header ([CandidateDial]): the widgets under the spot.
@@ -504,16 +504,6 @@ class InfoPanel extends StatelessWidget {
 
   Widget _card() {
     final showsNote = tab == PanelTab.comment && note != null;
-    final Widget? footer = switch (tab) {
-      PanelTab.tweak => TweakFooter(session: controller.tweaks),
-      PanelTab.comment when !showsNote || noteActions == null => CommentFooter(
-        controller: controller,
-        onSend: onSend,
-        onSaveDraft: onSaveDraft,
-        onCopy: onCopy,
-      ),
-      _ => null,
-    };
     // A Material for the text fields and menus inside, and the default text
     // style: it adds no fill, elevation or splash.
     return Material(
@@ -524,73 +514,93 @@ class InfoPanel extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            GestureDetector(
-              key: headerKey,
-              // Count the movement from pointer down, so the panel stays
-              // under the pointer instead of lagging by the touch slop.
-              dragStartBehavior: DragStartBehavior.down,
-              onPanUpdate: onDrag == null
-                  ? null
-                  : (details) => onDrag!(details.delta),
-              child: _Header(
-                selection: selection,
-                onClose: onClose,
-                onSelectCandidate: controller.selectCandidate,
-                describeNeighbours: _neighbours,
-              ),
-            ),
+            _draggableHeader(),
             _Crumbs(
               selection: selection,
               onSelect: controller.selectChainIndex,
             ),
-            _Tabs(
-              tab: tab,
-              onTab: onTab,
-              commentLabel: note == null
-                  ? 'Comment'
-                  : noteNumber == null
-                  ? 'Note'
-                  : 'Note $noteNumber',
-            ),
-            Flexible(
-              // A note scrolls its own body over a fixed footer.
-              child: showsNote && noteActions != null
-                  ? NoteView(
-                      note: note!,
-                      number: noteNumber,
-                      drafts: drafts,
-                      focusNode: commentFocus,
-                      actions: noteActions!,
-                    )
-                  : SingleChildScrollView(
-                      padding: const EdgeInsets.all(PinPointSizes.panelPadding),
-                      child: switch (tab) {
-                        PanelTab.info => _info(),
-                        PanelTab.tweak => TweakTab(
-                          selection: selection,
-                          session: controller.tweaks,
-                          onApply: onTweak ?? controller.tweaks.apply,
-                        ),
-                        PanelTab.state => StateTab(
-                          selection: selection,
-                          session: TraceSession.current,
-                          bridge: bridge,
-                          onToast: onToast,
-                          codeLines: controller.codeLines,
-                          onWatch: _watch,
-                        ),
-                        PanelTab.comment => CommentForm(
-                          controller: controller,
-                          focusNode: commentFocus,
-                        ),
-                      },
-                    ),
-            ),
-            ?footer,
+            _Tabs(tab: tab, onTab: onTab, commentLabel: _commentLabel()),
+            Flexible(child: _body(showsNote: showsNote)),
+            ?_footer(showsNote: showsNote),
           ],
         ),
       ),
     );
+  }
+
+  Widget? _footer({required bool showsNote}) {
+    return switch (tab) {
+      PanelTab.tweak => TweakFooter(session: controller.tweaks),
+      PanelTab.comment when !showsNote || noteActions == null => CommentFooter(
+        controller: controller,
+        onSend: onSend,
+        onSaveDraft: onSaveDraft,
+        onCopy: onCopy,
+      ),
+      _ => null,
+    };
+  }
+
+  Widget _draggableHeader() {
+    return GestureDetector(
+      key: headerKey,
+      // Count the movement from pointer down, so the panel stays
+      // under the pointer instead of lagging by the touch slop.
+      dragStartBehavior: DragStartBehavior.down,
+      onPanUpdate: onDrag == null ? null : (details) => onDrag!(details.delta),
+      child: _Header(
+        selection: selection,
+        onClose: onClose,
+        onSelectCandidate: controller.selectCandidate,
+        describeNeighbours: _neighbours,
+      ),
+    );
+  }
+
+  String _commentLabel() {
+    if (note == null) return 'Comment';
+    return noteNumber == null ? 'Note' : 'Note $noteNumber';
+  }
+
+  // A note scrolls its own body over a fixed footer.
+  Widget _body({required bool showsNote}) {
+    final actions = noteActions;
+    if (showsNote && actions != null) {
+      return NoteView(
+        note: note!,
+        number: noteNumber,
+        drafts: drafts,
+        focusNode: commentFocus,
+        actions: actions,
+      );
+    }
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(PinPointSizes.panelPadding),
+      child: _tabContent(),
+    );
+  }
+
+  Widget _tabContent() {
+    return switch (tab) {
+      PanelTab.info => _info(),
+      PanelTab.tweak => TweakTab(
+        selection: selection,
+        session: controller.tweaks,
+        onApply: onTweak ?? controller.tweaks.apply,
+      ),
+      PanelTab.state => StateTab(
+        selection: selection,
+        session: TraceSession.current,
+        bridge: bridge,
+        onToast: onToast,
+        codeLines: controller.codeLines,
+        onWatch: _watch,
+      ),
+      PanelTab.comment => CommentForm(
+        controller: controller,
+        focusNode: commentFocus,
+      ),
+    };
   }
 
   Widget _info() {
@@ -605,8 +615,8 @@ class InfoPanel extends StatelessWidget {
     return _InfoContent(info: info, caused: _caused());
   }
 
-  /// What the selected widget's subtree started in the last 5 seconds
-  /// (PLAN-v2 Milestone 14, step 17), or null while the recorder is off.
+  /// What the selected widget's subtree started in the last 5 seconds, or
+  /// null while the recorder is off.
   String? _caused() {
     final session = TraceSession.current;
     if (session == null) return null;
@@ -654,28 +664,7 @@ class _Header extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    selection.entry.name,
-                    style: tokens.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  StartEllipsisText(
-                    locationLabel(selection) ?? 'source unavailable',
-                    style: tokens.value.copyWith(
-                      fontSize: 10,
-                      height: 13 / 10,
-                      color: tokens.muted,
-                    ),
-                  ),
-                ],
-              ),
-            ),
+            Expanded(child: _title(tokens)),
             const SizedBox(width: 8),
             Tooltip(
               message: 'Click the same spot again for the next widget',
@@ -701,6 +690,29 @@ class _Header extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _title(PinPointTokens tokens) {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          selection.entry.name,
+          style: tokens.title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        StartEllipsisText(
+          locationLabel(selection) ?? 'source unavailable',
+          style: tokens.value.copyWith(
+            fontSize: 10,
+            height: 13 / 10,
+            color: tokens.muted,
+          ),
+        ),
+      ],
     );
   }
 }

@@ -83,45 +83,27 @@ class _TweakTabState extends State<TweakTab> {
     );
   }
 
-  Widget _build(BuildContext context) {
-    final tokens = PinPointTokens.of(context);
-    List<TweakTarget> targets;
+  List<TweakTarget> _targets() {
     try {
-      targets = tweakTargetsFor(widget.selection);
+      return tweakTargetsFor(widget.selection);
     } catch (_) {
       // The tracker clears a selection whose element is gone after the
       // next frame; until then there is nothing to read.
-      targets = const <TweakTarget>[];
+      return const <TweakTarget>[];
     }
+  }
+
+  Widget _build(BuildContext context) {
+    final tokens = PinPointTokens.of(context);
+    final targets = _targets();
     final chain = constraintChain(widget.selection.renderObject);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          children: [
-            SizedBox(width: panelLabelWidth, child: const CapsText('STEP')),
-            DraftSegmented<int>(
-              items: const [(1, '1'), (4, '4'), (8, '8')],
-              value: _step,
-              onChanged: (step) => setState(() => _step = step),
-              cellKey: TweakTab.stepKey,
-            ),
-          ],
-        ),
+        _stepRow(),
         if (targets.isEmpty) ...[
           const SizedBox(height: PinPointSizes.sectionGap),
-          Container(
-            key: TweakTab.emptyKey,
-            padding: const EdgeInsets.only(top: 10),
-            decoration: BoxDecoration(
-              border: Border(top: BorderSide(color: tokens.rule)),
-            ),
-            child: Text(
-              'Nothing to tweak on this widget. Tweak edits padding, size, '
-              'flex, alignment, text style and decoration it already has.',
-              style: tokens.label,
-            ),
-          ),
+          _emptyNote(tokens),
         ],
         for (final (n, target) in targets.indexed) ...[
           const SizedBox(height: PinPointSizes.sectionGap),
@@ -142,6 +124,35 @@ class _TweakTabState extends State<TweakTab> {
           style: tokens.label.copyWith(fontSize: 11, height: 14 / 11),
         ),
       ],
+    );
+  }
+
+  Widget _stepRow() {
+    return Row(
+      children: [
+        SizedBox(width: panelLabelWidth, child: const CapsText('STEP')),
+        DraftSegmented<int>(
+          items: const [(1, '1'), (4, '4'), (8, '8')],
+          value: _step,
+          onChanged: (step) => setState(() => _step = step),
+          cellKey: TweakTab.stepKey,
+        ),
+      ],
+    );
+  }
+
+  Widget _emptyNote(PinPointTokens tokens) {
+    return Container(
+      key: TweakTab.emptyKey,
+      padding: const EdgeInsets.only(top: 10),
+      decoration: BoxDecoration(
+        border: Border(top: BorderSide(color: tokens.rule)),
+      ),
+      child: Text(
+        'Nothing to tweak on this widget. Tweak edits padding, size, '
+        'flex, alignment, text style and decoration it already has.',
+        style: tokens.label,
+      ),
     );
   }
 
@@ -182,88 +193,99 @@ class _TweakTabState extends State<TweakTab> {
     required bool rowReset,
   }) {
     final tweak = widget.session.tweakOf(target, property.name);
-    final tweaked = tweak != null;
-    final note = property.note;
-    final small = tokens.label.copyWith(fontSize: 11, height: 14 / 11);
-    final Widget row;
-    if (!property.editable) {
-      row = Row(
-        children: [
-          Flexible(
-            child: Text(
-              property.label,
-              style: tokens.value,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          const SizedBox(width: 6),
-          Tooltip(
-            message: note ?? 'Not editable here. Change it in source.',
-            triggerMode: TooltipTriggerMode.tap,
-            child: Opacity(
-              opacity: 0.6,
-              child: Icon(PinPointIcons.lock, size: 14, color: tokens.ink),
-            ),
-          ),
-        ],
-      );
-    } else {
-      final editor = property.editor!;
-      final grows = editor is! NumberEditor && editor is! RadiusEditor;
-      final built = _editorFor(target, property, tweak);
-      // A colour field carries its own reset; an inset is reset by its
-      // section's button.
-      final trailing = tweaked && rowReset && editor is! ColorEditor;
-      row = Row(
-        children: [
-          if (grows) Expanded(child: built) else built,
-          if (trailing) ...[
-            const SizedBox(width: 6),
-            DraftIconButton(
-              key: TweakTab.resetKey(target.section.title, property.name),
-              icon: PinPointIcons.restartAlt,
-              iconSize: 14,
-              extent: 20,
-              tooltip: 'Reset ${property.name}',
-              onPressed: () => widget.session.reset(tweak),
-            ),
-          ],
-        ],
-      );
-    }
+    final row = property.editable
+        ? _editableRow(target, property, tweak, rowReset: rowReset)
+        : _lockedRow(tokens, property);
     return PanelRow(
       name: property.name,
-      nameColor: tweaked ? tokens.editInk : null,
-      nameWeight: tweaked ? FontWeight.w500 : null,
+      nameColor: tweak != null ? tokens.editInk : null,
+      nameWeight: tweak != null ? FontWeight.w500 : null,
       nameInset: property.editable ? 4 : 0,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          row,
-          if (tweaked)
-            Padding(
-              padding: const EdgeInsets.only(top: 3),
-              child: Text(
-                'was ${tweak.fromLabel}',
-                style: tokens.micro,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          // Watch out (plan): a widget that builds every frame resets the
-          // value every frame; the session stops fighting it.
-          if (tweaked && tweak.animating)
-            Padding(
-              padding: const EdgeInsets.only(top: 3),
-              child: Text(
-                'This widget is animating; tweak cannot hold.',
-                style: small.copyWith(color: tokens.err),
-              ),
-            ),
-        ],
+        children: [row, ..._tweakNotes(tokens, tweak)],
       ),
     );
+  }
+
+  Widget _lockedRow(PinPointTokens tokens, InfoProperty<Object?> property) {
+    return Row(
+      children: [
+        Flexible(
+          child: Text(
+            property.label,
+            style: tokens.value,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        const SizedBox(width: 6),
+        Tooltip(
+          message: property.note ?? 'Not editable here. Change it in source.',
+          triggerMode: TooltipTriggerMode.tap,
+          child: Opacity(
+            opacity: 0.6,
+            child: Icon(PinPointIcons.lock, size: 14, color: tokens.ink),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _editableRow(
+    TweakTarget target,
+    InfoProperty<Object?> property,
+    Tweak? tweak, {
+    required bool rowReset,
+  }) {
+    final editor = property.editor!;
+    final grows = editor is! NumberEditor && editor is! RadiusEditor;
+    final built = _editorFor(target, property, tweak);
+    // A colour field carries its own reset; an inset is reset by its
+    // section's button.
+    final trailing = tweak != null && rowReset && editor is! ColorEditor;
+    return Row(
+      children: [
+        if (grows) Expanded(child: built) else built,
+        if (trailing) ...[
+          const SizedBox(width: 6),
+          DraftIconButton(
+            key: TweakTab.resetKey(target.section.title, property.name),
+            icon: PinPointIcons.restartAlt,
+            iconSize: 14,
+            extent: 20,
+            tooltip: 'Reset ${property.name}',
+            onPressed: () => widget.session.reset(tweak),
+          ),
+        ],
+      ],
+    );
+  }
+
+  List<Widget> _tweakNotes(PinPointTokens tokens, Tweak? tweak) {
+    if (tweak == null) return const [];
+    final small = tokens.label.copyWith(fontSize: 11, height: 14 / 11);
+    return [
+      Padding(
+        padding: const EdgeInsets.only(top: 3),
+        child: Text(
+          'was ${tweak.fromLabel}',
+          style: tokens.micro,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+      ),
+      // A widget that builds every frame resets the value every frame; the
+      // session stops fighting it.
+      if (tweak.animating)
+        Padding(
+          padding: const EdgeInsets.only(top: 3),
+          child: Text(
+            'This widget is animating; tweak cannot hold.',
+            style: small.copyWith(color: tokens.err),
+          ),
+        ),
+    ];
   }
 
   Widget _editorFor(
@@ -273,72 +295,137 @@ class _TweakTabState extends State<TweakTab> {
   ) {
     final section = target.section.title;
     final name = property.name;
-    Key key([String? part]) => TweakTab.fieldKey(section, name, part);
-    void set(Object? value) => widget.onApply(target, name, value);
-    final value = property.value;
-    final tweaked = tweak != null;
-    final original = tweak?.original;
+    final field = _FieldContext(
+      value: property.value,
+      tweak: tweak,
+      keyOf: ([part]) => TweakTab.fieldKey(section, name, part),
+      set: (value) => widget.onApply(target, name, value),
+      step: _step.toDouble(),
+    );
     return switch (property.editor!) {
-      final NumberEditor e => _NumberField(
-        key: key(),
-        value: value is num ? value.toDouble() : null,
-        integer: e.integer,
-        nullable: e.nullable,
-        min: e.min,
-        max: e.max,
-        step: e.spacing ? _step.toDouble() : e.step,
-        tweaked: tweaked,
-        onChanged: (v) => set(e.integer ? v?.round() : v),
-      ),
-      final ChoiceEditor<Object?> e => _ChoiceField(
-        key: key(),
-        value: value,
-        editor: e,
-        tweaked: tweaked,
-        itemKey: (label) => TweakTab.choiceKey(section, name, label),
-        onChanged: set,
-      ),
-      ColorEditor() => _ColorField(
-        key: key(),
-        value: value is Color ? value : null,
-        tweaked: tweaked,
-        onReset: tweaked ? () => widget.session.reset(tweak) : null,
-        resetKey: TweakTab.resetKey(section, name),
-        onChanged: set,
-      ),
-      InsetsEditor() => _InsetsField(
-        value: value is EdgeInsets ? value : EdgeInsets.zero,
-        original: tweaked && original is EdgeInsets ? original : null,
-        tweaked: tweaked,
-        keyOf: key,
-        step: _step.toDouble(),
-        onChanged: set,
-      ),
-      ConstraintsEditor() => _ConstraintsField(
-        value: value is BoxConstraints ? value : const BoxConstraints(),
-        original: tweaked && original is BoxConstraints ? original : null,
-        tweaked: tweaked,
-        keyOf: key,
-        step: _step.toDouble(),
-        onChanged: set,
-      ),
-      RadiusEditor() => _NumberField(
-        key: key(),
-        value: value is BorderRadius ? value.topLeft.x : 0,
-        min: 0,
-        step: _step.toDouble(),
-        tweaked: tweaked,
-        onChanged: (v) => set(BorderRadius.circular(v ?? 0)),
-      ),
-      BorderEditor() => _BorderField(
-        value: value is Border ? value : const Border(),
-        original: tweaked && original is Border ? original : null,
-        tweaked: tweaked,
-        keyOf: key,
-        onChanged: set,
-      ),
+      final NumberEditor e => _numberEditor(field, e),
+      final ChoiceEditor<Object?> e => _choiceEditor(field, e, section, name),
+      ColorEditor() => _colorEditor(field, section, name),
+      InsetsEditor() => _insetsEditor(field),
+      ConstraintsEditor() => _constraintsEditor(field),
+      RadiusEditor() => _radiusEditor(field),
+      BorderEditor() => _borderEditor(field),
     };
   }
+
+  Widget _numberEditor(_FieldContext f, NumberEditor e) {
+    final value = f.value;
+    return _NumberField(
+      key: f.keyOf(),
+      value: value is num ? value.toDouble() : null,
+      integer: e.integer,
+      nullable: e.nullable,
+      min: e.min,
+      max: e.max,
+      step: e.spacing ? f.step : e.step,
+      tweaked: f.tweaked,
+      onChanged: (v) => f.set(e.integer ? v?.round() : v),
+    );
+  }
+
+  Widget _choiceEditor(
+    _FieldContext f,
+    ChoiceEditor<Object?> e,
+    String section,
+    String name,
+  ) {
+    return _ChoiceField(
+      key: f.keyOf(),
+      value: f.value,
+      editor: e,
+      tweaked: f.tweaked,
+      itemKey: (label) => TweakTab.choiceKey(section, name, label),
+      onChanged: f.set,
+    );
+  }
+
+  Widget _colorEditor(_FieldContext f, String section, String name) {
+    final value = f.value;
+    final tweak = f.tweak;
+    return _ColorField(
+      key: f.keyOf(),
+      value: value is Color ? value : null,
+      tweaked: f.tweaked,
+      onReset: tweak != null ? () => widget.session.reset(tweak) : null,
+      resetKey: TweakTab.resetKey(section, name),
+      onChanged: f.set,
+    );
+  }
+
+  Widget _insetsEditor(_FieldContext f) {
+    final value = f.value;
+    final original = f.original;
+    return _InsetsField(
+      value: value is EdgeInsets ? value : EdgeInsets.zero,
+      original: f.tweaked && original is EdgeInsets ? original : null,
+      tweaked: f.tweaked,
+      keyOf: f.keyOf,
+      step: f.step,
+      onChanged: f.set,
+    );
+  }
+
+  Widget _constraintsEditor(_FieldContext f) {
+    final value = f.value;
+    final original = f.original;
+    return _ConstraintsField(
+      value: value is BoxConstraints ? value : const BoxConstraints(),
+      original: f.tweaked && original is BoxConstraints ? original : null,
+      tweaked: f.tweaked,
+      keyOf: f.keyOf,
+      step: f.step,
+      onChanged: f.set,
+    );
+  }
+
+  Widget _radiusEditor(_FieldContext f) {
+    final value = f.value;
+    return _NumberField(
+      key: f.keyOf(),
+      value: value is BorderRadius ? value.topLeft.x : 0,
+      min: 0,
+      step: f.step,
+      tweaked: f.tweaked,
+      onChanged: (v) => f.set(BorderRadius.circular(v ?? 0)),
+    );
+  }
+
+  Widget _borderEditor(_FieldContext f) {
+    final value = f.value;
+    final original = f.original;
+    return _BorderField(
+      value: value is Border ? value : const Border(),
+      original: f.tweaked && original is Border ? original : null,
+      tweaked: f.tweaked,
+      keyOf: f.keyOf,
+      onChanged: f.set,
+    );
+  }
+}
+
+/// What every editor builder reads about one property.
+class _FieldContext {
+  const _FieldContext({
+    required this.value,
+    required this.tweak,
+    required this.keyOf,
+    required this.set,
+    required this.step,
+  });
+
+  final Object? value;
+  final Tweak? tweak;
+  final Key Function([String? part]) keyOf;
+  final void Function(Object? value) set;
+  final double step;
+
+  bool get tweaked => tweak != null;
+  Object? get original => tweak?.original;
 }
 
 /// The footer of the Tweak tab: `N tweaks` and `Reset all`. Empty while
@@ -426,87 +513,92 @@ class _ChainSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tokens = PinPointTokens.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _toggle(tokens),
+        if (expanded)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: _rowList(tokens),
+          ),
+      ],
+    );
+  }
+
+  Widget _toggle(PinPointTokens tokens) {
+    return Semantics(
+      button: true,
+      expanded: expanded,
+      label: expanded
+          ? 'Hide constraints from above'
+          : 'Constraints from above',
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: onToggle,
+          child: Container(
+            height: PinPointSizes.rowHeight,
+            decoration: BoxDecoration(
+              border: Border.symmetric(
+                horizontal: BorderSide(color: tokens.rule),
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  expanded ? Icons.remove : PinPointIcons.add,
+                  size: 16,
+                  color: tokens.ink,
+                ),
+                const SizedBox(width: 8),
+                Expanded(child: CapsText(heading, color: tokens.ink)),
+                Text(
+                  '${rows.length}',
+                  style: tokens.value.copyWith(
+                    fontSize: 11,
+                    color: tokens.muted,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _rowList(PinPointTokens tokens) {
     final mono = tokens.value.copyWith(fontSize: 11, height: 14 / 11);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Semantics(
-          button: true,
-          expanded: expanded,
-          label: expanded
-              ? 'Hide constraints from above'
-              : 'Constraints from above',
-          child: MouseRegion(
-            cursor: SystemMouseCursors.click,
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: onToggle,
-              child: Container(
-                height: PinPointSizes.rowHeight,
-                decoration: BoxDecoration(
-                  border: Border.symmetric(
-                    horizontal: BorderSide(color: tokens.rule),
+        for (final (i, row) in rows.indexed) ...[
+          if (i > 0) const SizedBox(height: 4),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                flex: 2,
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: Text(
+                    row.$1,
+                    style: mono,
+                    maxLines: 1,
+                    softWrap: false,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                ),
-                child: Row(
-                  children: [
-                    Icon(
-                      expanded ? Icons.remove : PinPointIcons.add,
-                      size: 16,
-                      color: tokens.ink,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(child: CapsText(heading, color: tokens.ink)),
-                    Text(
-                      '${rows.length}',
-                      style: tokens.value.copyWith(
-                        fontSize: 11,
-                        color: tokens.muted,
-                      ),
-                    ),
-                  ],
                 ),
               ),
-            ),
+              Expanded(
+                flex: 3,
+                child: Text(row.$2, style: mono.copyWith(color: tokens.muted)),
+              ),
+            ],
           ),
-        ),
-        if (expanded)
-          Padding(
-            padding: const EdgeInsets.only(top: 6),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                for (final (i, row) in rows.indexed) ...[
-                  if (i > 0) const SizedBox(height: 4),
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        flex: 2,
-                        child: Padding(
-                          padding: const EdgeInsets.only(right: 8),
-                          child: Text(
-                            row.$1,
-                            style: mono,
-                            maxLines: 1,
-                            softWrap: false,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ),
-                      Expanded(
-                        flex: 3,
-                        child: Text(
-                          row.$2,
-                          style: mono.copyWith(color: tokens.muted),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ],
-            ),
-          ),
+        ],
       ],
     );
   }
@@ -870,23 +962,16 @@ class _ColorFieldState extends State<_ColorField> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final tokens = PinPointTokens.of(context);
-    final invalid = _invalid;
-    final state = invalid
-        ? FieldState.invalid
-        : _focus.hasFocus
-        ? FieldState.focus
-        : widget.tweaked
-        ? FieldState.tweaked
-        : FieldState.rest;
-    final textColor = state == FieldState.tweaked ? tokens.editInk : tokens.ink;
-    final Widget trailing;
-    if (invalid) {
-      trailing = Icon(PinPointIcons.error, color: tokens.err);
-    } else if (widget.tweaked && widget.onReset != null) {
-      trailing = DraftIconButton(
+  FieldState _fieldState() {
+    if (_invalid) return FieldState.invalid;
+    if (_focus.hasFocus) return FieldState.focus;
+    return widget.tweaked ? FieldState.tweaked : FieldState.rest;
+  }
+
+  Widget _trailing(PinPointTokens tokens) {
+    if (_invalid) return Icon(PinPointIcons.error, color: tokens.err);
+    if (widget.tweaked && widget.onReset != null) {
+      return DraftIconButton(
         key: widget.resetKey,
         icon: PinPointIcons.restartAlt,
         iconSize: 15,
@@ -895,13 +980,20 @@ class _ColorFieldState extends State<_ColorField> {
         tooltip: 'Reset color',
         onPressed: widget.onReset,
       );
-    } else {
-      trailing = GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: _edit,
-        child: const Icon(PinPointIcons.expandMore),
-      );
     }
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: _edit,
+      child: const Icon(PinPointIcons.expandMore),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = PinPointTokens.of(context);
+    final invalid = _invalid;
+    final state = _fieldState();
+    final textColor = state == FieldState.tweaked ? tokens.editInk : tokens.ink;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -920,7 +1012,7 @@ class _ColorFieldState extends State<_ColorField> {
                   onSubmitted: (_) => _submit(),
                 ),
               ),
-              trailing,
+              _trailing(tokens),
             ],
           ),
         ),

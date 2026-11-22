@@ -354,84 +354,97 @@ class _EnvironmentPanelState extends State<EnvironmentPanel> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     _viewport(env),
-                    _choices<double?>(
-                      'Text scale',
-                      'textScale',
-                      env.textScale,
-                      {
-                        'system': null,
-                        for (final step in textScaleSteps) _number(step): step,
-                      },
-                      label: (value, name) =>
-                          value == null ? 'System' : '$name×',
-                      onSelected: (v) =>
-                          _set((e) => e.copyWith(textScale: () => v)),
-                    ),
-                    _switch(
-                      'Bold text',
-                      'bold',
-                      env.boldText ?? false,
-                      (on) => _set(
-                        (e) => e.copyWith(boldText: () => on ? true : null),
-                      ),
-                    ),
+                    _textScale(env),
+                    _boldText(env),
                     _safeArea(env),
-                    _switch(
-                      'Fake keyboard (${_number(fakeKeyboardHeight)} px)',
-                      'keyboard',
-                      env.keyboardHeight != null,
-                      (on) => _set(
-                        (e) => e.copyWith(
-                          keyboardHeight: () => on ? fakeKeyboardHeight : null,
-                        ),
-                      ),
-                    ),
-                    _choices<TextDirection?>(
-                      'Direction',
-                      'direction',
-                      env.textDirection,
-                      const {
-                        'system': null,
-                        'ltr': TextDirection.ltr,
-                        'rtl': TextDirection.rtl,
-                      },
-                      label: (value, name) =>
-                          value == null ? 'System' : name.toUpperCase(),
-                      onSelected: (v) =>
-                          _set((e) => e.copyWith(textDirection: () => v)),
-                      note: 'Strings stay in the current locale.',
-                    ),
+                    _keyboard(env),
+                    _direction(env),
                     _theme(env),
                     _seed(env),
                     _platform(env),
-                    _choices<double?>(
-                      'Slow motion',
-                      'slow',
-                      env.timeDilation,
-                      {
-                        for (final step in slowMotionSteps)
-                          _number(step): step == 1 ? null : step,
-                      },
-                      label: (value, name) => '$name×',
-                      onSelected: (v) =>
-                          _set((e) => e.copyWith(timeDilation: () => v)),
-                    ),
+                    _slowMotion(env),
                     const SizedBox(height: PinPointSizes.sectionGap),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: DraftButton.outline(
-                        key: EnvironmentPanel.resetAllKey,
-                        onPressed: env.isEmpty ? null : _env.reset,
-                        icon: PinPointIcons.restartAlt,
-                        label: 'Reset all',
-                      ),
-                    ),
+                    _resetAll(env),
                   ],
                 ),
               ),
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _textScale(Environment env) {
+    return _choices<double?>(
+      'Text scale',
+      'textScale',
+      env.textScale,
+      {'system': null, for (final step in textScaleSteps) _number(step): step},
+      label: (value, name) => value == null ? 'System' : '$name×',
+      onSelected: (v) => _set((e) => e.copyWith(textScale: () => v)),
+    );
+  }
+
+  Widget _boldText(Environment env) {
+    return _switch(
+      'Bold text',
+      'bold',
+      value: env.boldText ?? false,
+      onChanged: (on) =>
+          _set((e) => e.copyWith(boldText: () => on ? true : null)),
+    );
+  }
+
+  Widget _keyboard(Environment env) {
+    return _switch(
+      'Fake keyboard (${_number(fakeKeyboardHeight)} px)',
+      'keyboard',
+      value: env.keyboardHeight != null,
+      onChanged: (on) => _set(
+        (e) => e.copyWith(keyboardHeight: () => on ? fakeKeyboardHeight : null),
+      ),
+    );
+  }
+
+  Widget _direction(Environment env) {
+    return _choices<TextDirection?>(
+      'Direction',
+      'direction',
+      env.textDirection,
+      const {
+        'system': null,
+        'ltr': TextDirection.ltr,
+        'rtl': TextDirection.rtl,
+      },
+      label: (value, name) => value == null ? 'System' : name.toUpperCase(),
+      onSelected: (v) => _set((e) => e.copyWith(textDirection: () => v)),
+      note: 'Strings stay in the current locale.',
+    );
+  }
+
+  Widget _slowMotion(Environment env) {
+    return _choices<double?>(
+      'Slow motion',
+      'slow',
+      env.timeDilation,
+      {
+        for (final step in slowMotionSteps)
+          _number(step): step == 1 ? null : step,
+      },
+      label: (value, name) => '$name×',
+      onSelected: (v) => _set((e) => e.copyWith(timeDilation: () => v)),
+    );
+  }
+
+  Widget _resetAll(Environment env) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: DraftButton.outline(
+        key: EnvironmentPanel.resetAllKey,
+        onPressed: env.isEmpty ? null : _env.reset,
+        icon: PinPointIcons.restartAlt,
+        label: 'Reset all',
       ),
     );
   }
@@ -455,74 +468,22 @@ class _EnvironmentPanelState extends State<EnvironmentPanel> {
     ),
   );
 
+  static String _sizeKey(Size s) => '${s.width.toInt()}x${s.height.toInt()}';
+
   Widget _viewport(Environment env) {
     final size = env.viewport;
-    String keyOf(Size s) => '${s.width.toInt()}x${s.height.toInt()}';
     final selected = size == null
         ? 'window'
         : devicePresets
                   .map((p) => p.size)
                   .where((s) => s == size || s.flipped == size)
-                  .map(keyOf)
+                  .map(_sizeKey)
                   .firstOrNull ??
               'custom';
     return _section(
       'Viewport',
       first: true,
-      [
-        Wrap(
-          spacing: 6,
-          runSpacing: 6,
-          children: [
-            _chip('viewport', 'window', 'Window', selected == 'window', () {
-              _env.setViewport(null);
-            }),
-            for (final preset in devicePresets)
-              Tooltip(
-                message: preset.name,
-                child: _chip(
-                  'viewport',
-                  keyOf(preset.size),
-                  preset.sizeLabel,
-                  selected == keyOf(preset.size),
-                  () => _env.setViewport(preset.size),
-                ),
-              ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            Expanded(
-              child: _field(
-                EnvironmentPanel.widthKey,
-                _width,
-                'Width',
-                _applySize,
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6),
-              child: Text('×', style: PinPointTokens.of(context).value),
-            ),
-            Expanded(
-              child: _field(
-                EnvironmentPanel.heightKey,
-                _height,
-                'Height',
-                _applySize,
-              ),
-            ),
-            const SizedBox(width: 4),
-            DraftIconButton(
-              key: EnvironmentPanel.rotateKey,
-              tooltip: 'Rotate',
-              onPressed: size == null ? null : _env.rotate,
-              icon: Icons.screen_rotation,
-            ),
-          ],
-        ),
-      ],
+      [_viewportChips(selected), const SizedBox(height: 8), _sizeRow(size)],
       note:
           'Device pixel ratio cannot be faked. Code that reads '
           'View.of(context) or PlatformDispatcher directly still sees the '
@@ -530,60 +491,131 @@ class _EnvironmentPanelState extends State<EnvironmentPanel> {
     );
   }
 
+  Widget _viewportChips(String selected) {
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      children: [
+        _chip(
+          'viewport',
+          'window',
+          'Window',
+          selected: selected == 'window',
+          onSelected: () => _env.setViewport(null),
+        ),
+        for (final preset in devicePresets)
+          Tooltip(
+            message: preset.name,
+            child: _chip(
+              'viewport',
+              _sizeKey(preset.size),
+              preset.sizeLabel,
+              selected: selected == _sizeKey(preset.size),
+              onSelected: () => _env.setViewport(preset.size),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _sizeRow(Size? size) {
+    return Row(
+      children: [
+        Expanded(
+          child: _field(EnvironmentPanel.widthKey, _width, 'Width', _applySize),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          child: Text('×', style: PinPointTokens.of(context).value),
+        ),
+        Expanded(
+          child: _field(
+            EnvironmentPanel.heightKey,
+            _height,
+            'Height',
+            _applySize,
+          ),
+        ),
+        const SizedBox(width: 4),
+        DraftIconButton(
+          key: EnvironmentPanel.rotateKey,
+          tooltip: 'Rotate',
+          onPressed: size == null ? null : _env.rotate,
+          icon: Icons.screen_rotation,
+        ),
+      ],
+    );
+  }
+
   Widget _safeArea(Environment env) {
     final area = env.safeArea;
-    final selected = area == null
-        ? 'system'
-        : area == EdgeInsets.zero
-        ? 'none'
-        : area == notchSafeArea
-        ? 'notch'
-        : 'custom';
+    final selected = switch (area) {
+      null => 'system',
+      EdgeInsets.zero => 'none',
+      notchSafeArea => 'notch',
+      _ => 'custom',
+    };
     return _section('Safe area', [
-      Wrap(
-        spacing: 6,
-        runSpacing: 6,
-        children: [
-          _chip('safeArea', 'system', 'System', selected == 'system', () {
-            _set((e) => e.copyWith(safeArea: () => null));
-          }),
-          _chip('safeArea', 'none', 'None', selected == 'none', () {
-            _set((e) => e.copyWith(safeArea: () => EdgeInsets.zero));
-          }),
-          _chip(
-            'safeArea',
-            'notch',
-            'Notch (59 / 34)',
-            selected == 'notch',
-            () {
-              _set((e) => e.copyWith(safeArea: () => notchSafeArea));
-            },
-          ),
-        ],
-      ),
+      _safeAreaChips(selected),
       const SizedBox(height: 8),
-      Row(
-        children: [
-          Expanded(
-            child: _field(
-              EnvironmentPanel.safeTopKey,
-              _safeTop,
-              'Top',
-              _applySafeArea,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: _field(
-              EnvironmentPanel.safeBottomKey,
-              _safeBottom,
-              'Bottom',
-              _applySafeArea,
-            ),
-          ),
-        ],
-      ),
+      _safeAreaFields(),
     ]);
+  }
+
+  Widget _safeAreaChips(String selected) {
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      children: [
+        _chip(
+          'safeArea',
+          'system',
+          'System',
+          selected: selected == 'system',
+          onSelected: () => _set((e) => e.copyWith(safeArea: () => null)),
+        ),
+        _chip(
+          'safeArea',
+          'none',
+          'None',
+          selected: selected == 'none',
+          onSelected: () =>
+              _set((e) => e.copyWith(safeArea: () => EdgeInsets.zero)),
+        ),
+        _chip(
+          'safeArea',
+          'notch',
+          'Notch (59 / 34)',
+          selected: selected == 'notch',
+          onSelected: () =>
+              _set((e) => e.copyWith(safeArea: () => notchSafeArea)),
+        ),
+      ],
+    );
+  }
+
+  Widget _safeAreaFields() {
+    return Row(
+      children: [
+        Expanded(
+          child: _field(
+            EnvironmentPanel.safeTopKey,
+            _safeTop,
+            'Top',
+            _applySafeArea,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _field(
+            EnvironmentPanel.safeBottomKey,
+            _safeBottom,
+            'Bottom',
+            _applySafeArea,
+          ),
+        ),
+      ],
+    );
   }
 
   Widget _theme(Environment env) {
@@ -628,8 +660,8 @@ class _EnvironmentPanelState extends State<EnvironmentPanel> {
               'seed',
               'none',
               'App',
-              env.seedColor == null,
-              enabled
+              selected: env.seedColor == null,
+              onSelected: enabled
                   ? () => _set((e) => e.copyWith(seedColor: () => null))
                   : null,
             ),
@@ -697,8 +729,8 @@ class _EnvironmentPanelState extends State<EnvironmentPanel> {
             section,
             name,
             label(value, name),
-            value == current,
-            onSelected == null ? null : () => onSelected(value),
+            selected: value == current,
+            onSelected: onSelected == null ? null : () => onSelected(value),
           ),
       ],
     ),
@@ -707,10 +739,10 @@ class _EnvironmentPanelState extends State<EnvironmentPanel> {
   Widget _chip(
     String section,
     String value,
-    String label,
-    bool selected,
-    VoidCallback? onSelected,
-  ) => DraftChip(
+    String label, {
+    required bool selected,
+    required VoidCallback? onSelected,
+  }) => DraftChip(
     key: EnvironmentPanel.option(section, value),
     label: label,
     look: onSelected == null
@@ -723,10 +755,10 @@ class _EnvironmentPanelState extends State<EnvironmentPanel> {
 
   Widget _switch(
     String title,
-    String section,
-    bool value,
-    ValueChanged<bool> onChanged,
-  ) => Padding(
+    String section, {
+    required bool value,
+    required ValueChanged<bool> onChanged,
+  }) => Padding(
     padding: const EdgeInsets.only(top: PinPointSizes.sectionGap),
     child: Align(
       alignment: Alignment.centerLeft,
