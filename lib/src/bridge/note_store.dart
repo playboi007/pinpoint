@@ -9,6 +9,7 @@ import 'dart:typed_data';
 
 import '../model/annotation.dart' show NoteMessage, NoteStatus;
 import '../model/json_read.dart';
+import '../model/note_round.dart' show RoundUndo;
 import '../model/tape.dart' show tapeIdPattern;
 import 'bridge_protocol.dart';
 import 'checkpoints.dart';
@@ -39,17 +40,36 @@ class UndoOutcome {
   /// `done` (the bridge put the files back), `requested` (the agent must:
   /// no git, or a file changed since) or `failed` (git failed; the agent
   /// is asked as for `requested`).
-  final String undo;
+  final RoundUndo undo;
 
   /// The files that went back, relative to the git top level.
   final List<String> reverted;
 
-  /// The files that no longer fit, relative to the git top level.
+  /// The files that do not fit, relative to the git top level.
   final List<String> conflicts;
 
   /// The note as it is now: submitted again, with the user's message.
   final Map<String, Object?> note;
 }
+
+typedef _UndoTarget = ({
+  List<Map<String, Object?>> rounds,
+  Map<String, Object?> round,
+});
+
+typedef _UndoPick = ({
+  List<Map<String, Object?>> all,
+  Set<String> already,
+  List<Map<String, Object?>> chosen,
+  List<Map<String, Object?>> kept,
+  List<String> files,
+});
+
+typedef _UndoRevert = ({
+  RoundUndo state,
+  List<String> reverted,
+  List<String> conflicts,
+});
 
 /// What [NoteStore.changes] found since a cursor.
 class StoreChanges {
@@ -86,7 +106,7 @@ class StoreChanges {
 /// <dir>/tmp/       <id>__<stamp>/            deleted notes, flushed after 1 h
 /// ```
 ///
-/// The folders are the file inbox of Milestone 7: an agent without MCP
+/// The folders are the file inbox: an agent without MCP
 /// still reads `open/*.md` and moves a note's files to `resolved/` by
 /// hand. [sync] notices such a move and records it as a change.
 ///
@@ -117,7 +137,7 @@ class NoteStore {
   final Directory root;
   final void Function(String line) _log;
 
-  /// Changes with each run, so a cursor from an earlier run is detected.
+  /// Differs for each run, so a cursor from another run is detected.
   final String _epoch;
 
   int _seq = 0;
@@ -136,9 +156,8 @@ class NoteStore {
   /// move the same note's files in two directions.
   Future<void> _queue = Future<void>.value();
 
-  /// Git trees of the working folder for the rounds of each note (PLAN-v3
-  /// Milestone 20); null in the answer when there is no git. Opened once,
-  /// on first use.
+  /// Git trees of the working folder for the rounds of each note; null in
+  /// the answer when there is no git. Opened once, on first use.
   late final Future<Checkpoints?> checkpoints = Checkpoints.open(
     root.parent,
     undoDir: Directory('${root.path}/undo'),
@@ -170,7 +189,7 @@ class NoteStore {
   }
 
   /// Stores [note] (an `Annotation.toJson` map without the image data) and
-  /// [png], replacing any earlier copy of the note. Returns the path of the
+  /// [png], replacing any copy of the note. Returns the path of the
   /// `.md` file, or of the `.json` file for a draft.
   ///
   /// With no [png], a PNG already stored for the note is kept when the
@@ -275,7 +294,7 @@ class NoteStore {
   /// [verification], and adds [message] from [from]. Moves its files when the status changes folder
   /// and rewrites its `.md`. Returns the note.
   ///
-  /// The status moves keep the note's rounds (PLAN-v3 Milestone 20):
+  /// The status moves keep the note's rounds:
   /// `submitted` takes the `base` checkpoint, `inProgress` opens a round,
   /// `fixed`, `resolved` and `rejected` close it. The agent's [changes]
   /// labels split the files of the closed round; [report] says what that
@@ -572,6 +591,23 @@ class NoteStore {
     String? reason,
     String? client,
   }) => _serial(() async {
+    final target = await _undoTarget(id, round);
+    final pick = _pickChanges(target.round, changes, round);
+    final revert = await _revertPicked(id, round, target.round, pick.files);
+    return _recordUndo(
+      id,
+      round,
+      target,
+      pick,
+      revert,
+      reason: reason,
+      client: client,
+    );
+  });
+
+  /// The round to undo. Throws 404 for an unknown note or round, 409 for a
+  /// note the agent works on or a round still open.
+  Future<_UndoTarget> _undoTarget(String id, int round) async {
     final entry = _index[id];
     final note = entry == null ? null : await _readJson(entry.folder, id);
     if (entry == null || note == null || entry.status == NoteStatus.draft) {
@@ -592,6 +628,16 @@ class NoteStore {
     if (target['endedAt'] == null) {
       throw StoreException(HttpStatus.conflict, 'Round $round is still open');
     }
+    return (rounds: rounds, round: target);
+  }
+
+  /// Which changes of [target] to undo. Throws 400 for an id that is not in
+  /// the round, 409 when nothing is left to undo.
+  static _UndoPick _pickChanges(
+    Map<String, Object?> target,
+    List<String> changes,
+    int round,
+  ) {
     final all = [
       for (final c in asJsonList(target['changes']))
         if (c is Map<String, Object?> && c['id'] is String) c,
@@ -600,14 +646,13 @@ class NoteStore {
     final wanted = changes.contains('*')
         ? [for (final c in all) c['id']! as String]
         : changes;
-    for (final changeId in wanted) {
-      if (!all.any((c) => c['id'] == changeId)) {
-        throw StoreException(
-          HttpStatus.badRequest,
-          'No change $changeId in round $round. It has: '
-          '${all.map((c) => c['id']).join(', ')}',
-        );
-      }
+    final unknown = wanted.where((w) => !all.any((c) => c['id'] == w));
+    if (unknown.firstOrNull case final changeId?) {
+      throw StoreException(
+        HttpStatus.badRequest,
+        'No change $changeId in round $round. It has: '
+        '${all.map((c) => c['id']).join(', ')}',
+      );
     }
     final chosen = [
       for (final c in all)
@@ -621,39 +666,69 @@ class NoteStore {
             : 'Those changes are already undone',
       );
     }
-    final kept = [
-      for (final c in all)
-        if (!chosen.contains(c) && !already.contains(c['id'])) c,
-    ];
-    final files = {
-      for (final c in chosen)
-        for (final f in asJsonList(c['files']))
-          if (f is Map<String, Object?> && f['path'] is String)
-            f['path']! as String,
-    }.toList();
+    return (
+      all: all,
+      already: already,
+      chosen: chosen,
+      kept: [
+        for (final c in all)
+          if (!chosen.contains(c) && !already.contains(c['id'])) c,
+      ],
+      files: {
+        for (final c in chosen)
+          for (final f in asJsonList(c['files']))
+            if (f is Map<String, Object?> && f['path'] is String)
+              f['path']! as String,
+      }.toList(),
+    );
+  }
 
+  /// Puts [files] of [target] back with git, when there is a checkpoint
+  /// pair. Without one, or on a conflict, no file changes.
+  Future<_UndoRevert> _revertPicked(
+    String id,
+    int round,
+    Map<String, Object?> target,
+    List<String> files,
+  ) async {
     final cp = await checkpoints;
     final start = target['start'];
     final end = target['end'];
-    var undo = 'requested';
-    var reverted = const <String>[];
-    var conflicts = const <String>[];
-    if (cp != null && start is String && end is String) {
-      final result = await cp.revert(start, end, files);
-      switch (result.outcome) {
-        case RevertOutcome.clean:
-          undo = 'done';
-          reverted = result.reverted;
-        case RevertOutcome.conflict:
-          conflicts = result.conflicts;
-        case RevertOutcome.failed:
-          undo = 'failed';
-          _log('pinpoint: undo of $id round $round failed: ${result.error}');
-      }
+    if (cp == null || start is! String || end is! String) {
+      return _revert(RoundUndo.requested);
     }
-    final summaries = [for (final c in chosen) '${c['summary']}'];
-    final keptSummaries = [for (final c in kept) '${c['summary']}'];
-    final text = undo == 'done'
+    final result = await cp.revert(start, end, files);
+    switch (result.outcome) {
+      case RevertOutcome.clean:
+        return _revert(RoundUndo.done, reverted: result.reverted);
+      case RevertOutcome.conflict:
+        return _revert(RoundUndo.requested, conflicts: result.conflicts);
+      case RevertOutcome.failed:
+        _log('pinpoint: undo of $id round $round failed: ${result.error}');
+        return _revert(RoundUndo.failed);
+    }
+  }
+
+  static _UndoRevert _revert(
+    RoundUndo state, {
+    List<String> reverted = const <String>[],
+    List<String> conflicts = const <String>[],
+  }) => (state: state, reverted: reverted, conflicts: conflicts);
+
+  /// Submits the note again with the user's message, and marks [pick] as
+  /// undone in the round.
+  Future<UndoOutcome> _recordUndo(
+    String id,
+    int round,
+    _UndoTarget target,
+    _UndoPick pick,
+    _UndoRevert revert, {
+    String? reason,
+    String? client,
+  }) async {
+    final summaries = [for (final c in pick.chosen) '${c['summary']}'];
+    final keptSummaries = [for (final c in pick.kept) '${c['summary']}'];
+    final text = revert.state == RoundUndo.done
         ? undoDoneMessage(
             undone: summaries,
             kept: keptSummaries,
@@ -661,11 +736,14 @@ class NoteStore {
           )
         : undoRequestedMessage(
             undone: summaries,
-            files: files,
+            files: pick.files,
             kept: keptSummaries,
             reason: reason,
           );
-    final undone = {...already, for (final c in chosen) c['id']! as String};
+    final undone = {
+      ...pick.already,
+      for (final c in pick.chosen) c['id']! as String,
+    };
     final updated = await _update(
       id,
       status: NoteStatus.submitted,
@@ -673,29 +751,29 @@ class NoteStore {
       from: 'user',
       client: client,
       edit: (note) {
-        target['undone'] = undone.length == all.length
+        target.round['undone'] = undone.length == pick.all.length
             ? const ['*']
             : [
-                for (final c in all)
+                for (final c in pick.all)
                   if (undone.contains(c['id'])) c['id'],
               ];
-        target['undo'] = undo;
-        note['rounds'] = rounds;
+        target.round['undo'] = revert.state.name;
+        note['rounds'] = target.rounds;
       },
     );
     _log(
-      'pinpoint: undo of $id round $round: $undo '
+      'pinpoint: undo of $id round $round: ${revert.state.name} '
       '(${summaries.join('; ')})',
     );
     return UndoOutcome(
-      undo: undo,
-      reverted: reverted,
-      conflicts: conflicts,
+      undo: revert.state,
+      reverted: revert.reverted,
+      conflicts: revert.conflicts,
       note: updated,
     );
-  });
+  }
 
-  /// The ids of [round]'s changes that an earlier undo took out.
+  /// The ids of [round]'s changes that a past undo took out.
   static Set<String> _undoneIds(
     Map<String, Object?> round,
     List<Map<String, Object?>> changes,

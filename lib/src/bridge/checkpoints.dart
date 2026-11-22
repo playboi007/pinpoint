@@ -53,7 +53,7 @@ class RevertResult {
   /// The files that went back (empty unless [RevertOutcome.clean]).
   final List<String> reverted;
 
-  /// The files that no longer fit the patch (for [RevertOutcome.conflict]).
+  /// The files that do not fit the patch (for [RevertOutcome.conflict]).
   final List<String> conflicts;
 
   /// What git said, for [RevertOutcome.failed].
@@ -62,9 +62,9 @@ class RevertResult {
 
 /// Git trees of the working folder at chosen moments, kept under
 /// `refs/pinpoint/<noteId>/<label>`, and the undo of the difference between
-/// two of them (PLAN-v3 Milestone 20).
+/// two of them.
 ///
-/// **Git safety (PLAN-v3 engineering rule 1).** This class never runs
+/// **Git safety.** This class never runs
 /// `checkout`, `reset`, `stash` or `commit` on a branch, never moves `HEAD`
 /// and never writes the user's index. Every command that needs an index
 /// gets `GIT_INDEX_FILE` set to a copy in the undo folder. It writes only
@@ -452,30 +452,38 @@ class Checkpoints {
           return RevertResult(RevertOutcome.failed, error: made.err.trim());
         }
         if (made.out.isEmpty) return const RevertResult(RevertOutcome.clean);
-        final index = await _indexCopy();
-        const flags = ['--whitespace=nowarn'];
-        final check = await _git(
-          ['apply', '--check', ...flags, '-'],
-          indexFile: index,
-          stdin: made.out,
-        );
-        if (!check.ok) {
-          final bad = _conflictFiles(check.err, paths);
-          if (check.code == 1 && bad.isNotEmpty) {
-            return RevertResult(RevertOutcome.conflict, conflicts: bad);
-          }
-          return RevertResult(RevertOutcome.failed, error: check.err.trim());
-        }
-        final applied = await _git(
-          ['apply', ...flags, '-'],
-          indexFile: await _indexCopy(),
-          stdin: made.out,
-        );
-        if (!applied.ok) {
-          return RevertResult(RevertOutcome.failed, error: applied.err.trim());
-        }
-        return RevertResult(RevertOutcome.clean, reverted: [...paths]);
+        return await _checkPatch(made.out, paths) ??
+            await _applyPatch(made.out, paths);
       });
+
+  static const _applyFlags = ['--whitespace=nowarn'];
+
+  /// Null when [patch] fits the working tree; else why it does not.
+  Future<RevertResult?> _checkPatch(List<int> patch, List<String> paths) async {
+    final check = await _git(
+      ['apply', '--check', ..._applyFlags, '-'],
+      indexFile: await _indexCopy(),
+      stdin: patch,
+    );
+    if (check.ok) return null;
+    final bad = _conflictFiles(check.err, paths);
+    if (check.code == 1 && bad.isNotEmpty) {
+      return RevertResult(RevertOutcome.conflict, conflicts: bad);
+    }
+    return RevertResult(RevertOutcome.failed, error: check.err.trim());
+  }
+
+  Future<RevertResult> _applyPatch(List<int> patch, List<String> paths) async {
+    final applied = await _git(
+      ['apply', ..._applyFlags, '-'],
+      indexFile: await _indexCopy(),
+      stdin: patch,
+    );
+    if (!applied.ok) {
+      return RevertResult(RevertOutcome.failed, error: applied.err.trim());
+    }
+    return RevertResult(RevertOutcome.clean, reverted: [...paths]);
+  }
 
   static final RegExp _failedAt = RegExp(r'^error: patch failed: (.+):\d+$');
   static final RegExp _cannotApply = RegExp(

@@ -7,11 +7,11 @@ import 'source_scan.dart';
 /// A limit only goes down. When a count falls, lower its limit in the same
 /// commit. Never raise one.
 const _limits = (
-  planComments: 198,
-  storyComments: 60,
+  planComments: 178,
+  storyComments: 55,
   filesOver500Lines: 27,
-  functionsOver60Lines: 85,
-  stringKindCompares: 190,
+  functionsOver60Lines: 83,
+  stringKindCompares: 188,
   jsonHelperCopies: 0,
   positionalBoolParameters: 22,
   plainDartHeadersCitingPlan: 12,
