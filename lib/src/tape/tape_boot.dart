@@ -8,7 +8,7 @@ import '../sink/bridge_client.dart';
 import 'browser_page.dart';
 
 /// What a replay that restarts the page leaves for the next start, in
-/// `sessionStorage` (PLAN-v2 Milestone 15, step 7).
+/// `sessionStorage`.
 class BootFlag {
   const BootFlag({
     required this.tape,
@@ -66,6 +66,9 @@ class BootFlag {
   });
 }
 
+/// Whether a load puts the recorded storage back first.
+enum _StorageMode { leave, restore }
+
 /// The start of a page that a replay restarted.
 ///
 /// `PinPoint.run` loads the tape before `runApp`, so the network source
@@ -117,12 +120,12 @@ abstract final class TapeBoot {
 
   /// Loads the tape of this start from the bridge, once. With
   /// [restoreStorage] and a tape that kept storage, puts the storage back
-  /// first (step 4). Completes with null when there is no flag or the
+  /// first. Completes with null when there is no flag or the
   /// load failed ([error] says why).
-  static Future<Tape?> load({bool restoreStorage = false}) =>
-      _loading ??= _load(restoreStorage);
+  static Future<Tape?> load({bool restoreStorage = false}) => _loading ??=
+      _load(restoreStorage ? _StorageMode.restore : _StorageMode.leave);
 
-  static Future<Tape?> _load(bool restoreStorage) async {
+  static Future<Tape?> _load(_StorageMode storageMode) async {
     final flag = TapeBoot.flag;
     if (flag == null) return null;
     try {
@@ -133,13 +136,13 @@ abstract final class TapeBoot {
         error = 'the bridge has no tape ${flag.tape}';
         return null;
       }
-      // Watch out for: the app checks the clock, and v2 does not fake time.
-      // A token that was fresh when recorded is expired now, and the app
-      // may log out; the first difference shows it. Putting back the
-      // storage of the recording (TraceConfig.storage) is the fix, or an
-      // app TraceSource for the session.
+      // Replay does not fake time: a token that was fresh when recorded is
+      // expired now, and the app may log out. Putting back the recorded
+      // storage (TraceConfig.storage) or an app TraceSource fixes it.
       final storage = loaded.start.storage;
-      if (restoreStorage && storage != null) page.writeStorage(storage);
+      if (storageMode == _StorageMode.restore && storage != null) {
+        page.writeStorage(storage);
+      }
       return tape = loaded;
     } catch (failure) {
       error = 'could not load tape ${flag.tape}: $failure';

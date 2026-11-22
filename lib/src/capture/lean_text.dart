@@ -1,7 +1,7 @@
 // Plain Dart: no `dart:ui` and no `package:flutter`.
 
 /// [text] (a diagnostics description) without what says nothing to an
-/// agent (PLAN-v3 Milestone 19, step 8):
+/// agent:
 ///
 /// - the hash code after a type name: `ButtonStyle#d3507(...)` is
 ///   `ButtonStyle(...)`;

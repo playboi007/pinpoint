@@ -1,5 +1,5 @@
-// Plain Dart: no `dart:ui` and no `package:flutter` (PLAN-v2 rule 13). The
-// request key and the nth answer of PLAN-v2 Milestone 15, step 8.
+// Plain Dart: no `dart:ui` and no `package:flutter`. The request key and the
+// nth answer.
 
 import 'dart:async';
 import 'dart:convert';
@@ -14,7 +14,7 @@ import '../trace/redact.dart';
 /// [ignore].
 ///
 /// The key is exact on purpose. A request that carries a time or a random
-/// id never matches by body hash (watch out for): name the field in
+/// id never matches by body hash: name the field in
 /// `TraceConfig.matchIgnore` instead of making the matcher fuzzy.
 class NetMatcher {
   const NetMatcher({
@@ -97,7 +97,7 @@ class NetMatcher {
   };
 }
 
-/// What a request with no answer in the tape does (step 9).
+/// What a request with no answer in the tape does.
 enum Unmatched {
   /// A clear error and a `replay.unmatched` event. The default for the
   /// first replay of a tape: no request reaches a server.
@@ -119,7 +119,7 @@ enum Unmatched {
   }
 }
 
-/// How long a served answer takes (step 8).
+/// How long a served answer takes.
 class ReplayLatency {
   /// The latency the tape recorded, divided by the replay speed.
   const ReplayLatency.recorded() : ms = null, instant = false;
@@ -127,7 +127,7 @@ class ReplayLatency {
   /// No wait: the answer comes in the next turn of the event loop.
   const ReplayLatency.instant() : ms = 0, instant = true;
 
-  /// Every answer takes [ms] (a variant, Milestone 16).
+  /// Every answer takes [ms].
   const ReplayLatency.fixed(int this.ms) : instant = false;
 
   /// `recorded`, `instant`, or a number of milliseconds.
@@ -207,7 +207,7 @@ class NetReplay {
   final Map<String, int> _used = <String, int>{};
 
   /// The key of every request asked for, in order: compared with the
-  /// tape's for `first_difference` (step 13).
+  /// tape's for `first_difference`.
   final List<String> asked = <String>[];
 
   /// Requests the tape had no answer for, as `METHOD url`.

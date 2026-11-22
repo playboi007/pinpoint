@@ -13,11 +13,11 @@ import 'sources/error_source.dart';
 import 'trace_config.dart';
 import 'trace_session.dart';
 
-/// Pinpoint's entry points for app code (PLAN-v2, "Public surface added").
+/// Pinpoint's entry points for app code.
 abstract final class PinPoint {
   /// Runs [body] in Pinpoint's zone, so every recorded event names the
   /// entry that started it (a tap, a frame, a key) and errors nobody caught
-  /// are recorded (PLAN-v2 Milestone 14):
+  /// are recorded:
   ///
   /// ```dart
   /// void main() => PinPoint.run(() => runApp(const MyApp()));
@@ -43,7 +43,7 @@ abstract final class PinPoint {
     R Function() body, {
     TraceConfig trace = const TraceConfig(),
   }) {
-    // A replay restarted this page (PLAN-v2 Milestone 15, step 7): load
+    // A replay restarted this page: load
     // the tape before the app starts, so the network source can answer the
     // app's first request from it. Only for a body that returns nothing
     // (`runApp`), whose result nobody waits for.
@@ -65,7 +65,7 @@ abstract final class PinPoint {
     if (!kDebugMode || !trace.enabled || !trace.causes) return body();
     if (CauseZone.current != null) return body();
     if (BindingBase.debugBindingType() != null) {
-      // Watch out for: the binding is already set up in another zone, so
+      // The binding is already set up in another zone, so
       // a zone now would give "Zone mismatch" at runApp. Record no causes.
       if (CauseZone.unavailable == null) {
         CauseZone.unavailable =
@@ -103,7 +103,7 @@ abstract final class PinPoint {
       SchedulerPhase.midFrameMicrotasks;
 
   // The app runs once `runApp` attached its root. Until then the binding's
-  // zone must stay the current one for `runApp` (watch out for).
+  // zone must stay the current one for `runApp`.
   static bool _ready() {
     if (BindingBase.debugBindingType() == null) return false;
     try {
@@ -141,7 +141,7 @@ abstract final class PinPoint {
         data: {'name': clipText(name, 80), 'values': traceValues(values)},
       );
     } catch (error) {
-      // The recorder only observes (rule 11): a probe never throws into
+      // The recorder only observes: a probe never throws into
       // app code.
       debugPrint('pinpoint: probe $name failed: $error');
     }

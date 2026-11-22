@@ -1,5 +1,5 @@
-// Plain Dart: no `dart:ui` and no `package:flutter` (PLAN-v2 rule 13). The
-// words of a story (PLAN-v3 Milestone 21b): the name ladder, short types,
+// Plain Dart: no `dart:ui` and no `package:flutter`. The
+// words of a story: the name ladder, short types,
 // the verbs of framework controllers, and the text of a row. The watch card
 // and the bridge's `state_flow` text both call these, so they say the same.
 
@@ -81,7 +81,7 @@ class StoryName {
   final int rung;
 }
 
-/// The name ladder of PLAN-v3 Milestone 21b: (1) a class the app declared,
+/// The name ladder: (1) a class the app declared,
 /// (2) the expression that [expression] read at the creating line, (3) a
 /// short type. Never waits: with no [expression] yet, the short type is the
 /// answer, and the caller asks again when the expression arrives.
@@ -299,7 +299,7 @@ String changesText(StoryRow row) {
   if (row.changes.length == 1) return row.changes.first.text;
   return [
     for (final c in row.changes)
-      c.count > 1 ? '${c.text} (${c.count})' : c.text,
+      if (c.count > 1) '${c.text} (${c.count})' else c.text,
   ].join(', ');
 }
 
@@ -361,7 +361,7 @@ String instancesText(StoryRow row) {
   if (row.instances.isEmpty) return '';
   final parts = [
     for (final i in row.instances)
-      i.change == null ? i.label : '${i.label}: ${i.change}',
+      if (i.change == null) i.label else '${i.label}: ${i.change}',
   ];
   final more = row.instanceCount - row.instances.length;
   return '${parts.join('; ')}${more > 0 ? ' (+$more more)' : ''}';

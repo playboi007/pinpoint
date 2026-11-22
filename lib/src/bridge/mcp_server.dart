@@ -47,8 +47,8 @@ const int mcpMaxListed = 50;
 const int mcpMaxDiffBytes = 40 * 1024;
 
 /// The agent's tools: `list_notes`, `get_note` and `update_note`, over the
-/// notes in [store], and with [commands] the Milestone 12 tools that run in
-/// the app ([agentToolNames]).
+/// notes in [store], and with [commands] the tools that run in the
+/// app ([agentToolNames]).
 ///
 /// Drafts are invisible here: no tool lists, reads or changes one, so
 /// half-written feedback never triggers an edit.
@@ -86,7 +86,7 @@ class McpServer {
   /// Gives the agent `hot_reload`; null: no such tool.
   final HotReloader? reloader;
 
-  /// Tapes on disk (PLAN-v2 Milestone 15).
+  /// Tapes on disk.
   late final TapeStore tapes = _tapes ?? TapeStore(store.root);
 
   final void Function(String line) _log;
@@ -457,21 +457,21 @@ class McpServer {
       '${message == null ? '' : ': $message'}',
     );
     // Probe lines are for finding a bug, not for the fix: say so while
-    // any remain (PLAN-v2 Milestone 13, step 7).
+    // any remain.
     final probes = status == 'fixed' || status == 'resolved'
         ? await findProbes(store.root.parent)
         : const <ProbeLine>[];
     return _text(
       'Note $id is ${note['status']}.\n\n'
       '${noteText(note, NoteDetail.compact)}'
-      '${_roundReport(report, labels.isNotEmpty)}'
+      '${_roundReport(report, labelled: labels.isNotEmpty)}'
       '${probes.isEmpty ? '' : '\n\n${_probeWarning(probes)}'}',
     );
   }
 
   /// What closing the round found, for the answer to `update_note`: the
   /// changes with their ids, and what was dropped.
-  static String _roundReport(RoundsReport report, bool labelled) {
+  static String _roundReport(RoundsReport report, {required bool labelled}) {
     final json = report.closed;
     final round = json == null ? null : NoteRound.fromJson(json);
     if (round == null) return '';
@@ -496,31 +496,26 @@ class McpServer {
     final id = _id(input);
     final note = await _sentNote(id);
     if (note == null) return _notFound(id);
-    final asked = input['round'];
-    if (asked != null && asked is! int) {
-      throw const _InvalidParams('round is a number');
-    }
-    final change = input['change'];
-    if (change != null && change is! String) {
-      throw const _InvalidParams('change is a change id, for example c1');
-    }
+    final int? asked = switch (input['round']) {
+      null => null,
+      final int n => n,
+      _ => throw const _InvalidParams('round is a number'),
+    };
+    final String? change = switch (input['change']) {
+      null => null,
+      final String c => c,
+      _ => throw const _InvalidParams('change is a change id, for example c1'),
+    };
     final stored = note['rounds'];
     final rounds = [
       for (final r in stored is List<Object?> ? stored : const <Object?>[])
         if (r is Map<String, Object?>) ?NoteRound.fromJson(r),
     ];
-    final closed = rounds.where((r) => !r.isOpen).toList();
     final round = asked == null
-        ? closed.lastOrNull
+        ? rounds.where((r) => !r.isOpen).lastOrNull
         : rounds.where((r) => r.n == asked).firstOrNull;
     if (round == null) {
-      return _text(
-        asked == null
-            ? 'Note $id has no finished round yet.'
-            : 'Note $id has no round $asked. It has: '
-                  '${rounds.map((r) => r.n).join(', ')}.',
-        isError: true,
-      );
+      return _text(_noRoundText(id, rounds, asked), isError: true);
     }
     if (round.isOpen) {
       return _text('Round ${round.n} is still open.', isError: true);
@@ -530,33 +525,55 @@ class McpServer {
         if (change == null || c.id == change) c,
     ];
     if (changes.isEmpty) {
-      return _text(
-        change == null
-            ? 'Round ${round.n} has no changes.'
-            : 'Round ${round.n} has no change $change. It has: '
-                  '${round.changes.map((c) => c.id).join(', ')}.',
-        isError: true,
-      );
+      return _text(_noChangeText(round, change), isError: true);
     }
     final files = {
       for (final c in changes)
         for (final f in c.files) f.path: f,
     };
-    final head = [
-      'Round ${round.n} of $id'
-          '${change == null ? '' : ', change $change'}'
-          '${round.undone.isEmpty ? '' : ' (undone: ${round.undone.join(', ')})'}:',
-      for (final c in changes) '  ${c.id}: ${c.summary}',
-      'Files (relative to the git top level):',
-      for (final f in files.values)
-        '  ${f.path}'
-            '${f.added == null ? '' : ' +${f.added} -${f.removed}'}'
-            '${f.shared ? ' (shared: another note changed it too)' : ''}',
-    ];
+    final head = _diffHead(id, round, change, changes, files);
+    return _patchAnswer(head, round, files);
+  }
+
+  static String _noRoundText(String id, List<NoteRound> rounds, int? asked) =>
+      asked == null
+      ? 'Note $id has no finished round yet.'
+      : 'Note $id has no round $asked. It has: '
+            '${rounds.map((r) => r.n).join(', ')}.';
+
+  static String _noChangeText(NoteRound round, String? change) => change == null
+      ? 'Round ${round.n} has no changes.'
+      : 'Round ${round.n} has no change $change. It has: '
+            '${round.changes.map((c) => c.id).join(', ')}.';
+
+  static String _diffHead(
+    String id,
+    NoteRound round,
+    String? change,
+    List<RoundChange> changes,
+    Map<String, RoundFile> files,
+  ) => [
+    'Round ${round.n} of $id'
+        '${change == null ? '' : ', change $change'}'
+        '${round.undone.isEmpty ? '' : ' (undone: ${round.undone.join(', ')})'}:',
+    for (final c in changes) '  ${c.id}: ${c.summary}',
+    'Files (relative to the git top level):',
+    for (final f in files.values)
+      '  ${f.path}'
+          '${f.added == null ? '' : ' +${f.added} -${f.removed}'}'
+          '${f.shared ? ' (shared: another note changed it too)' : ''}',
+  ].join('\n');
+
+  /// [head] and the patch of [round], or why there is none.
+  Future<Map<String, Object?>> _patchAnswer(
+    String head,
+    NoteRound round,
+    Map<String, RoundFile> files,
+  ) async {
     final cp = await store.checkpoints;
     if (cp == null || !round.hasCheckpoints) {
       return _text(
-        '${head.join('\n')}\n'
+        '$head\n'
         'No patch: this round has no git checkpoints. The files are the ones '
         'you named.',
       );
@@ -568,21 +585,21 @@ class McpServer {
     );
     if (patch == null) {
       return _text(
-        '${head.join('\n')}\nNo patch: git could not read the checkpoints.',
+        '$head\nNo patch: git could not read the checkpoints.',
         isError: true,
       );
     }
     final bytes = utf8.encode(patch).length;
     if (bytes > mcpMaxDiffBytes) {
       return _text(
-        '${head.join('\n')}\n'
+        '$head\n'
         'The patch is ${(bytes / 1024).ceil()} KB, over the '
         '${mcpMaxDiffBytes ~/ 1024} KB limit: files only. Ask for one '
         'change at a time with change.',
       );
     }
     return _text(
-      '${head.join('\n')}\n'
+      '$head\n'
       'The patch goes from before to after the round. To undo it, apply it '
       'in reverse.\n\n$patch',
     );
@@ -598,7 +615,7 @@ class McpServer {
 
   /// `get_trace({run})`: a stored replay run, read with the same query as
   /// the live record. A reload cleared the app's memory; the bridge kept
-  /// the run (PLAN-v2 Milestone 15, step 14).
+  /// the run.
   Future<Map<String, Object?>> _runTrace(Map<String, Object?> input) async {
     final run = input['run'];
     if (run is! String) throw const _InvalidParams('run is a run id (run_…)');
@@ -636,7 +653,7 @@ class McpServer {
   }
 
   /// `get_tape`: one tape's summary, its marks and its inputs in short.
-  /// Masked headers stay masked and no body is shown (rule 16).
+  /// Masked headers stay masked and no body is shown.
   Future<Map<String, Object?>> _getTape(Map<String, Object?> input) async {
     final id = input['id'];
     if (id is! String) throw const _InvalidParams('id is required');
@@ -757,7 +774,7 @@ class McpServer {
         );
       }
     }
-    // A full tape restarted the page (PLAN-v2 Milestone 15, step 7). The
+    // A full tape restarted the page. The
     // new page reports the run when it holds or ends.
     if (tool == 'replay' &&
         result is Map<String, Object?> &&
@@ -835,7 +852,7 @@ class McpServer {
   /// and a one-line message from `pinpoint`.
   ///
   /// The status is left alone: `verified` means the user accepted the
-  /// result (Milestone 8), and the pin shows the outcome for them to do so.
+  /// result, and the pin shows the outcome for them to do so.
   Future<Map<String, Object?>> _verifyNote(Map<String, Object?> input) async {
     final id = _id(input);
     final note = await _sentNote(id);

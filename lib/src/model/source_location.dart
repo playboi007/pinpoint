@@ -4,8 +4,7 @@
 /// Where a widget's constructor call appears in source.
 ///
 /// Read from the widget, so after an edit and a hot reload the new widget
-/// instance carries the new line. Anything stored across edits (pins in
-/// Milestone 8) must re-match by file, widget type and nearest line, not by
+/// instance carries the new line. Anything stored across edits (such as pins) must re-match by file, widget type and nearest line, not by
 /// line alone.
 class SourceLocation {
   const SourceLocation({

@@ -1,7 +1,6 @@
-// Plain Dart: no `dart:ui` and no `package:flutter` (PLAN-v2 rule 13).
+// Plain Dart: no `dart:ui` and no `package:flutter`.
 
-/// Names whose values never reach memory in clear (PLAN-v2 Milestone 14,
-/// step 15; rule 16): header names, URL parameter names, and keys of a
+/// Names whose values never reach memory in clear: header names, URL parameter names, and keys of a
 /// `message` event's JSON.
 ///
 /// A name matches case-blind. `*token*` matches any name that contains
@@ -120,9 +119,10 @@ class TraceRedact {
   /// stays.
   String _maskValues(String query) => [
     for (final pair in query.split('&'))
-      pair.contains('=')
-          ? '${pair.substring(0, pair.indexOf('='))}=$mask'
-          : pair,
+      if (pair.contains('='))
+        '${pair.substring(0, pair.indexOf('='))}=$mask'
+      else
+        pair,
   ].join('&');
 
   String _pair(String pair) {

@@ -14,7 +14,7 @@ import 'state_chain.dart';
 import 'story_view.dart';
 
 /// Places [WatchCard] while the watch session is open (watch mode of the
-/// state lens, PLAN-v3 Milestone 21).
+/// state lens).
 ///
 /// Only the card takes pointer events; the rest of the area lets them go to
 /// the app, as in idle. The card is dragged by its header, kept inside the
@@ -251,7 +251,7 @@ class _WatchCardState extends State<WatchCard> {
     });
   }
 
-  Story _storyFor(StateLens lens, bool mine) {
+  Story _storyFor(StateLens lens, {required bool mine}) {
     final value = lens.value;
     if (identical(value, _at) && mine == _mineAt && _filter == _filterAt) {
       return _story;
@@ -322,7 +322,7 @@ class _WatchCardState extends State<WatchCard> {
     final value = lens.value;
     final mine = identical(value.target, watch.target);
     final armedHere = mine && value.armed;
-    final story = _storyFor(lens, mine);
+    final story = _storyFor(lens, mine: mine);
     final until = watch.until;
     final status = armedHere
         ? (until == null ? 'watching' : 'until ${formatClock(until)}')
@@ -349,7 +349,12 @@ class _WatchCardState extends State<WatchCard> {
                     : (details) => widget.onDrag!(details.delta),
                 child: MouseRegion(
                   cursor: SystemMouseCursors.move,
-                  child: _header(tokens, watch, armedHere, status),
+                  child: _header(
+                    tokens,
+                    watch,
+                    armedHere: armedHere,
+                    status: status,
+                  ),
                 ),
               ),
               Flexible(
@@ -393,10 +398,10 @@ class _WatchCardState extends State<WatchCard> {
 
   Widget _header(
     PinPointTokens tokens,
-    WatchSession watch,
-    bool armedHere,
-    String status,
-  ) {
+    WatchSession watch, {
+    required bool armedHere,
+    required String status,
+  }) {
     return Container(
       constraints: const BoxConstraints(minHeight: PinPointSizes.panelHeader),
       padding: const EdgeInsets.only(left: 12, right: 6, top: 4, bottom: 4),

@@ -9,15 +9,14 @@ import '../../tape/net_matcher.dart';
 import '../net_record.dart';
 import 'network_source.dart';
 
-/// `window.fetch` and `XMLHttpRequest` on web (PLAN-v2 Milestone 14, step
-/// 11). `package:http` uses `fetch` (`browser_client.dart:36`); Dio uses
+/// `window.fetch` and `XMLHttpRequest` on web. `package:http` uses `fetch`
+/// (`browser_client.dart:36`); Dio uses
 /// XHR (`dio_web_adapter`). Both are needed.
 ///
 /// Wasm builds use the same `dart:js_interop` calls. Whether the wasm
-/// runtime's `package:http` calls the patched `fetch` is a manual check
-/// (watch out for).
+/// runtime's `package:http` calls the patched `fetch` is a manual check.
 ///
-/// Watch out for: WebSockets are not hooked, so they are neither recorded
+/// WebSockets are not hooked, so they are neither recorded
 /// nor answered from a tape: during a replay they reach the server. A
 /// server-sent event stream is recorded as `unsupported` and passes
 /// through (`NetRecorder._skipReason`, `NetReplay.answer`).
@@ -111,13 +110,13 @@ class _WebNetworkHooks implements NetworkHooks {
           bodySize: request.size,
         );
       } catch (_) {
-        // The recorder only observes (rule 11): the request goes on.
+        // The recorder only observes: the request goes on.
       }
     }
     final JSAny? result;
     switch (answer) {
       case ServeAnswer():
-        // Replay (PLAN-v2 Milestone 15, step 8): no request leaves the
+        // Replay: no request leaves the
         // page. The app gets a real `Response`, made from the tape.
         result = _served(answer);
       case FailAnswer(:final reason):
@@ -247,7 +246,7 @@ class _WebNetworkHooks implements NetworkHooks {
       headers: _headersOf(response['headers']),
     );
     if (!read) return;
-    // Watch out for: a body is a stream, and reading it to hash it must
+    // A body is a stream, and reading it to hash it must
     // not consume it for the app. Read a clone: the browser tees the
     // stream, and the app's branch is untouched.
     final clone = response.callMethod<JSObject>('clone'.toJS);
@@ -362,7 +361,7 @@ class _WebNetworkHooks implements NetworkHooks {
       case FailAnswer() when xhr != null:
         // A scheme the browser cannot load: the XHR fails with a network
         // error, as with the server off. No request leaves the page.
-        _reopen(self, 'GET', 'pinpoint-replay:no-answer', xhr.async);
+        _reopen(self, 'GET', 'pinpoint-replay:no-answer', isAsync: xhr.async);
         return send.callAsFunction(self);
       default:
         return send.callAsFunction(self, body);
@@ -378,14 +377,19 @@ class _WebNetworkHooks implements NetworkHooks {
 
   /// Opens [self] again through the browser's own `open`, not ours, so
   /// what our `open` learned stays.
-  void _reopen(JSObject self, String method, String url, bool async) {
+  void _reopen(
+    JSObject self,
+    String method,
+    String url, {
+    required bool isAsync,
+  }) {
     final open = _open?.previous;
     if (open == null || !open.isA<JSFunction>()) return;
     (open as JSFunction).callAsFunction(
       self,
       method.toJS,
       url.toJS,
-      async.toJS,
+      isAsync.toJS,
     );
   }
 
@@ -406,7 +410,7 @@ class _WebNetworkHooks implements NetworkHooks {
         .callAsConstructor<JSObject>(<JSAny?>[answer.body.toJS].toJS, blobInit);
     final urlApi = globalContext['URL']! as JSObject;
     final blobUrl = urlApi.callMethod<JSString>('createObjectURL'.toJS, blob);
-    _reopen(self, 'GET', blobUrl.toDart, xhr.async);
+    _reopen(self, 'GET', blobUrl.toDart, isAsync: xhr.async);
     final object = globalContext['Object']! as JSObject;
     void define(String name, JSObject descriptor) {
       descriptor['configurable'] = true.toJS;
@@ -516,7 +520,7 @@ class _WebNetworkHooks implements NetworkHooks {
     return answer;
   }
 
-  // Watch out for: for XHR, read `response` after `load`. The browser has
+  // For XHR, read `response` after `load`. The browser has
   // the whole body then, and reading it takes nothing from the app.
   void _onXhrLoad(NetCall call, JSObject self) {
     final status = self['status'];

@@ -118,7 +118,7 @@ class _PaletteInkState extends State<PaletteInk>
         child: Stack(
           fit: StackFit.passthrough,
           children: [
-            _InkBoundary(key: _boundary, child: child!),
+            _InkBoundary(key: _boundary, child: child),
             if (old != null)
               Positioned.fill(
                 child: IgnorePointer(

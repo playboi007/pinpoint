@@ -159,76 +159,81 @@ abstract final class ConstructionMarkup {
     List<ConstructionBox> boxes = const [],
     ConstructionLayout? layout,
   }) {
-    // [fixed]: the picture has its own size in px (the CSS places it).
-    String img(String cls, String name, {bool fixed = false}) {
-      final asset = ConstructionAssets.of(name);
-      final size = fixed
-          ? ' style="width:${_n(asset.width)}px;height:${_n(asset.height)}px"'
-          : '';
-      return '<img class="$cls" alt="" '
-          'draggable="false"$size src="${_attr(urls[name] ?? '')}">';
-    }
-
-    String frames(String a, String b, String an, String bn, String cls) =>
-        '${img('$cls $a', an, fixed: true)}${img('$cls $b', bn, fixed: true)}';
-
-    // A pose of the stacker: on the canvas, at the bottom, in the middle.
-    String pose(String cls, String name) {
-      final asset = ConstructionAssets.of(name);
-      return '<img class="ppc-sp $cls" alt="" draggable="false" '
-          'style="width:${_n(asset.width)}px;height:${_n(asset.height)}px;'
-          'margin-left:${_n(-asset.width / 2)}px" '
-          'src="${_attr(urls[name] ?? '')}">';
-    }
-
-    const art = ConstructionAssets.stackerArt;
+    final pics = _Pictures(urls);
     final crew = layout == null ? null : ConstructionCrew.of(layout, boxes);
     final tape =
         '<div class="ppc-tape"><span class="ppc-label">$label</span></div>';
-    return '<div class="ppc-cover"><div class="ppc-bp">'
-        '${boxesHtml(ConstructionBoxes.seedOf(id), boxes, crew: crew)}</div>'
-        '<i class="ppc-paint"></i></div>'
-        '<div class="ppc-w ppc-w-cones">'
-        '${img('ppc-cone ppc-cone-l', 'cone')}'
-        '${img('ppc-cone ppc-cone-r', 'cone')}</div>'
-        '<div class="ppc-w ppc-w-plan">'
-        '<div class="ppc-pl ppc-pl-a"><div class="ppc-sc">'
-        '${frames('ppc-fa', 'ppc-fb', 'planner_point_a', 'planner_point_b', 'ppc-pi')}'
-        '</div></div>'
-        '<div class="ppc-pl ppc-pl-b"><div class="ppc-sc">'
-        '${frames('ppc-fa', 'ppc-fb', 'planner_read_a', 'planner_read_b', 'ppc-pi')}'
-        '</div></div></div>'
-        '<div class="ppc-w ppc-w-hammer"><div class="ppc-hammer">'
-        '<div class="ppc-hin"><div class="ppc-dip">'
-        '${frames('ppc-ha', 'ppc-hb', 'builder_a', 'builder_b', 'ppc-body')}'
-        '<i class="ppc-dust"></i></div></div></div></div>'
-        '<div class="ppc-w ppc-w-barrow"><div class="ppc-barrow">'
-        '<div class="ppc-bwalk"><div class="ppc-flip">'
-        '${img('ppc-wa', 'walk_a')}${img('ppc-wb', 'walk_b')}'
-        '</div></div></div></div>'
-        '<div class="ppc-w ppc-w-stack"><div class="ppc-lnd"><div class="ppc-stk">'
+    return '${_coverHtml(ConstructionBoxes.seedOf(id), boxes, crew)}'
+        '${_conesHtml(pics)}'
+        '${_plannersHtml(pics)}'
+        '${_hammerHtml(pics)}'
+        '${_barrowHtml(pics)}'
+        '${_stackerHtml(pics)}'
+        '${_painterHtml(pics)}'
+        '<div class="ppc-half ppc-half-l">$tape</div>'
+        '<div class="ppc-half ppc-half-r">$tape</div>'
+        '<div class="ppc-done-box">${pics.img('ppc-done', 'done')}</div>';
+  }
+
+  static String _coverHtml(
+    int seed,
+    List<ConstructionBox> boxes,
+    ConstructionCrew? crew,
+  ) =>
+      '<div class="ppc-cover"><div class="ppc-bp">'
+      '${boxesHtml(seed, boxes, crew: crew)}</div>'
+      '<i class="ppc-paint"></i></div>';
+
+  static String _conesHtml(_Pictures pics) =>
+      '<div class="ppc-w ppc-w-cones">'
+      '${pics.img('ppc-cone ppc-cone-l', 'cone')}'
+      '${pics.img('ppc-cone ppc-cone-r', 'cone')}</div>';
+
+  static String _plannersHtml(_Pictures pics) =>
+      '<div class="ppc-w ppc-w-plan">'
+      '<div class="ppc-pl ppc-pl-a"><div class="ppc-sc">'
+      '${pics.frames('ppc-fa', 'ppc-fb', 'planner_point_a', 'planner_point_b', 'ppc-pi')}'
+      '</div></div>'
+      '<div class="ppc-pl ppc-pl-b"><div class="ppc-sc">'
+      '${pics.frames('ppc-fa', 'ppc-fb', 'planner_read_a', 'planner_read_b', 'ppc-pi')}'
+      '</div></div></div>';
+
+  static String _hammerHtml(_Pictures pics) =>
+      '<div class="ppc-w ppc-w-hammer"><div class="ppc-hammer">'
+      '<div class="ppc-hin"><div class="ppc-dip">'
+      '${pics.frames('ppc-ha', 'ppc-hb', 'builder_a', 'builder_b', 'ppc-body')}'
+      '<i class="ppc-dust"></i></div></div></div></div>';
+
+  static String _barrowHtml(_Pictures pics) =>
+      '<div class="ppc-w ppc-w-barrow"><div class="ppc-barrow">'
+      '<div class="ppc-bwalk"><div class="ppc-flip">'
+      '${pics.img('ppc-wa', 'walk_a')}${pics.img('ppc-wb', 'walk_b')}'
+      '</div></div></div></div>';
+
+  static String _stackerHtml(_Pictures pics) {
+    const art = ConstructionAssets.stackerArt;
+    return '<div class="ppc-w ppc-w-stack"><div class="ppc-lnd"><div class="ppc-stk">'
         '<div class="ppc-sk">'
-        '${pose('ppc-sp-st', ConstructionAssets.stackerStand)}'
+        '${pics.pose('ppc-sp-st', ConstructionAssets.stackerStand)}'
         '<div class="ppc-sfly"><div class="ppc-sbob">'
-        '${pose('ppc-sfa', ConstructionAssets.stackerFlyA)}'
-        '${pose('ppc-sfb', ConstructionAssets.stackerFlyB)}'
+        '${pics.pose('ppc-sfa', ConstructionAssets.stackerFlyA)}'
+        '${pics.pose('ppc-sfb', ConstructionAssets.stackerFlyB)}'
         '</div></div>'
-        '${pose('ppc-sp-pl', ConstructionAssets.stackerPlace)}'
+        '${pics.pose('ppc-sp-pl', ConstructionAssets.stackerPlace)}'
         '${art ? '' : '<div class="ppc-sfl"><div class="ppc-sbob">'
                   '<i class="ppc-fl ppc-fl-a"></i><i class="ppc-fl ppc-fl-b"></i>'
                   '</div></div><div class="ppc-scb"><div class="ppc-sbob">'
                   '<div class="ppc-blk"></div></div></div>'}'
         '</div></div></div>'
         '<div class="ppc-thrown"><div class="ppc-tb">'
-        '${art ? img('ppc-blkimg', 'block') : '<div class="ppc-blk"></div>'}'
-        '</div></div></div>'
-        '<div class="ppc-w ppc-w-painter"><div class="ppc-painter">'
-        '${img('ppc-pa', 'painter_a')}${img('ppc-pb', 'painter_b')}'
-        '</div></div>'
-        '<div class="ppc-half ppc-half-l">$tape</div>'
-        '<div class="ppc-half ppc-half-r">$tape</div>'
-        '<div class="ppc-done-box">${img('ppc-done', 'done')}</div>';
+        '${art ? pics.img('ppc-blkimg', 'block') : '<div class="ppc-blk"></div>'}'
+        '</div></div></div>';
   }
+
+  static String _painterHtml(_Pictures pics) =>
+      '<div class="ppc-w ppc-w-painter"><div class="ppc-painter">'
+      '${pics.img('ppc-pa', 'painter_a')}${pics.img('ppc-pb', 'painter_b')}'
+      '</div></div>';
 
   /// The picture of the widget that bounces in at the end.
   static String shotHtml(String url) =>
@@ -390,4 +395,33 @@ abstract final class ConstructionMarkup {
 #$rootId.$reducedClass .ppc-site,#$rootId.$reducedClass .ppc-site *{animation:none!important}
 @media (prefers-reduced-motion:reduce){#$rootId .ppc-site,#$rootId .ppc-site *{animation:none!important}}
 ''';
+}
+
+/// The `<img>` elements of a site, from the URLs of its assets.
+class _Pictures {
+  const _Pictures(this.urls);
+
+  final Map<String, String> urls;
+
+  /// [fixed]: the picture has its own size in px (the CSS places it).
+  String img(String cls, String name, {bool fixed = false}) {
+    final asset = ConstructionAssets.of(name);
+    final size = fixed
+        ? ' style="width:${ConstructionMarkup._n(asset.width)}px;height:${ConstructionMarkup._n(asset.height)}px"'
+        : '';
+    return '<img class="$cls" alt="" '
+        'draggable="false"$size src="${ConstructionMarkup._attr(urls[name] ?? '')}">';
+  }
+
+  String frames(String a, String b, String an, String bn, String cls) =>
+      '${img('$cls $a', an, fixed: true)}${img('$cls $b', bn, fixed: true)}';
+
+  /// A pose of the stacker: on the canvas, at the bottom, in the middle.
+  String pose(String cls, String name) {
+    final asset = ConstructionAssets.of(name);
+    return '<img class="ppc-sp $cls" alt="" draggable="false" '
+        'style="width:${ConstructionMarkup._n(asset.width)}px;height:${ConstructionMarkup._n(asset.height)}px;'
+        'margin-left:${ConstructionMarkup._n(-asset.width / 2)}px" '
+        'src="${ConstructionMarkup._attr(urls[name] ?? '')}">';
+  }
 }

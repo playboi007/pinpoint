@@ -1,4 +1,4 @@
-// Plain Dart: no `dart:ui` and no `package:flutter` (PLAN-v2 rule 13). The
+// Plain Dart: no `dart:ui` and no `package:flutter`. The
 // Flutter side gives it a [TapeStart] for the page; everything else is
 // read from the recorder's events and the network tap.
 
@@ -11,70 +11,7 @@ import '../trace/net_record.dart';
 import '../trace/trace_recorder.dart';
 import 'net_matcher.dart';
 
-/// Where a saved tape starts: `start`, a mark, or seconds back.
-sealed class TapeSince {
-  const TapeSince();
-
-  /// App start: a full tape when nothing was lost.
-  static const TapeSince start = _SinceStart();
-
-  /// `start`, `mark` (the last), `mark:N` (the Nth held, from 1), a number
-  /// of seconds, or `"30s"`. Throws a [FormatException] with a message for
-  /// the agent.
-  static TapeSince parse(Object? value) {
-    switch (value) {
-      case null || 'start':
-        return start;
-      case 'mark':
-        return const SinceMark(null);
-      case final num seconds when seconds > 0:
-        return SinceSeconds(seconds.toDouble());
-      case final String text:
-        if (text.startsWith('mark:')) {
-          final n = int.tryParse(text.substring(5));
-          if (n != null && n > 0) return SinceMark(n);
-        }
-        final match = RegExp(r'^(\d+(?:\.\d+)?)s$').firstMatch(text);
-        if (match != null) return SinceSeconds(double.parse(match[1]!));
-    }
-    throw FormatException(
-      'since is "start", "mark", "mark:N", seconds back (30 or "30s"); '
-      'got $value',
-    );
-  }
-
-  /// The 1-based mark index, or null for "the last mark" and other kinds.
-  int? get markIndex => null;
-}
-
-class _SinceStart extends TapeSince {
-  const _SinceStart();
-}
-
-/// From a mark: the Nth held ([index], from 1) or the last (null).
-class SinceMark extends TapeSince {
-  const SinceMark(this.index);
-
-  final int? index;
-
-  @override
-  int? get markIndex => index;
-}
-
-/// From [seconds] before now.
-class SinceSeconds extends TapeSince {
-  const SinceSeconds(this.seconds);
-
-  final double seconds;
-}
-
-/// From a recorder time [t] (ms since the recording began): the comment
-/// form's range picker.
-class SinceTime extends TapeSince {
-  const SinceTime(this.t);
-
-  final int t;
-}
+part 'tape_since.dart';
 
 /// One request the tape recorder follows.
 class _Exchange {
@@ -88,14 +25,14 @@ class _Exchange {
 
 /// Keeps the inputs and network exchanges of the run since app start, in
 /// its own store apart from the ring buffer: a full tape needs the first
-/// minute even when the bug was in the tenth (PLAN-v2 Milestone 15, step 3).
+/// minute even when the bug was in the tenth.
 ///
-/// Bounded twice (rule 12): [maxInputs] and [maxExchanges] by count, the
+/// Bounded twice: [maxInputs] and [maxExchanges] by count, the
 /// bodies by [maxBodyBytes]. Over a limit the oldest go, and from then on
 /// a tape from app start can only be a partial segment that starts after
 /// what was lost ("tape starts 3 min ago").
 ///
-/// Nothing is written to disk here (step 6): a tape exists in memory until
+/// Nothing is written to disk here: a tape exists in memory until
 /// the user or the agent saves it.
 class TapeRecorder implements NetTap {
   TapeRecorder(
@@ -205,9 +142,8 @@ class TapeRecorder implements NetTap {
     if (_replaying) return;
     final kind = event.kind;
     if (TraceKind.isInput(kind)) {
-      // The agent's synthetic input and the player's own events are tagged
-      // `agent` (rule 14, watch out for): a tape replays the user.
-      if (event.data['by'] == 'agent') return;
+      // A tape replays the user, not the agent's or the player's own input.
+      if (event.byAgent) return;
       _inputs.add(event);
       if (_inputs.length > maxInputs) {
         final old = _inputs.removeFirst();
@@ -317,119 +253,23 @@ class TapeRecorder implements NetTap {
     String? name,
     int? untilT,
   }) {
-    var startSeq = 1;
-    var startT = 0;
-    var wantsFull = false;
-    switch (since) {
-      case _SinceStart():
-        wantsFull = true;
-      case SinceMark(:final index):
-        final marks = _marks.toList();
-        final mark = index == null
-            ? (marks.isEmpty ? null : marks.last)
-            : (index <= marks.length ? marks[index - 1] : null);
-        if (mark == null) {
-          throw FormatException(
-            index == null
-                ? 'no mark yet; make one with mark'
-                : 'there are ${marks.length} marks; mark:$index is not one',
-          );
-        }
-        startSeq = mark.seq;
-        startT = mark.t;
-      case SinceTime(:final t):
-        startT = t < 0 ? 0 : t;
-        startSeq = _firstSeqFrom(startT);
-      case SinceSeconds(:final seconds):
-        startT = recorder.now - (seconds * 1000).round();
-        if (startT < 0) startT = 0;
-        startSeq = _firstSeqFrom(startT);
-    }
-
-    var partial = false;
-    String? reason;
-    final lost = _lostBefore;
-    if (lost != null && startSeq < lost) {
-      startSeq = lost;
-      startT = _lostAtT ?? startT;
-      partial = true;
-      final ago = startsAgo;
-      reason =
-          '$_lostReason: the tape starts '
-          '${ago == null ? 'later' : _ago(ago)} ago';
-    }
-    final full = wantsFull && canSaveFull;
-    final start = full ? appStart! : startAt(t: startT, seq: startSeq);
+    final range = _clampToKept(_rangeStart(since));
+    final full = since is _SinceStart && canSaveFull;
+    final start = full ? appStart! : startAt(t: range.t, seq: range.seq);
 
     // [untilT]: the end of the range. Inputs, requests, marks and routes
     // after it are left out; an answer to a request made before it is kept,
     // whenever it came.
     bool inRange(TraceEvent e) =>
-        e.seq >= startSeq && (untilT == null || e.t <= untilT);
-    final inputs = <TraceEvent>[
-      for (final e in _inputs)
-        if (inRange(e)) e,
-    ];
-    final net = <NetExchange>[];
-    final bodies = <int, Uint8List>{};
-    final nth = <String, int>{};
-    for (final exchange in _net.values) {
-      final call = exchange.call;
-      if (!inRange(call.request)) continue;
-      final n = net.length;
-      final count = nth[exchange.key] = (nth[exchange.key] ?? 0) + 1;
-      final response = call.response;
-      final error = call.error;
-      final body = exchange.body;
-      String? unsupported;
-      if (response != null && body == null && bodiesRead) {
-        unsupported =
-            call.notKept ??
-            (exchange.ended ? 'body not kept' : 'answer still loading');
-      }
-      final headers = response?.data['headers'];
-      net.add(
-        NetExchange(
-          n: n,
-          key: exchange.key,
-          nth: count,
-          method: call.method,
-          url: call.url,
-          t: call.request.t,
-          status: response?.data['status'] as int?,
-          headers: headers is Map<String, Object?>
-              ? {for (final e in headers.entries) e.key: '${e.value}'}
-              : const <String, String>{},
-          ms: response?.data['ms'] as int? ?? error?.data['ms'] as int?,
-          hash: response?.data['hash'] as String?,
-          size: response?.data['size'] as int?,
-          error: error?.data['error'] as String?,
-          unsupported: unsupported,
-          answeredSeq: (response ?? error)?.seq,
-        ),
-      );
-      if (body != null) bodies[n] = body;
-    }
+        e.seq >= range.seq && (untilT == null || e.t <= untilT);
+    final exchanges = _exchangesIn(inRange);
     return Tape(
       id: id ?? newTapeId(),
       name: name,
       kind: full ? TapeKind.full : TapeKind.segment,
       start: start,
-      inputs: [
-        for (final (i, e) in inputs.indexed)
-          TapeInput(
-            step: i + 1,
-            seq: e.seq,
-            t: e.t,
-            frame: e.frame,
-            kind: e.kind,
-            widget: e.widget,
-            source: e.source,
-            data: Map<String, Object?>.of(e.data),
-            after: answeredBefore(e.seq, net),
-          ),
-      ],
-      net: net,
+      inputs: _tapeInputs(inRange, exchanges.net),
+      net: exchanges.net,
       marks: [
         for (final m in _marks)
           if (inRange(m))
@@ -444,12 +284,133 @@ class TapeRecorder implements NetTap {
         for (final r in _routes)
           if (inRange(r) && r.data['to'] is String) r.data['to']! as String,
       ],
-      partial: partial,
-      partialReason: reason,
+      partial: range.partial,
+      partialReason: range.reason,
       bodiesRead: bodiesRead,
-      bodies: bodies,
+      bodies: exchanges.bodies,
     );
   }
+
+  /// Where [since] starts: the first seq and the run time (ms) of the tape.
+  ({int seq, int t}) _rangeStart(TapeSince since) => switch (since) {
+    _SinceStart() => (seq: 1, t: 0),
+    SinceMark(:final index) => _markStart(index),
+    SinceTime(:final t) => _timeStart(t),
+    SinceSeconds(:final seconds) => _timeStart(
+      recorder.now - (seconds * 1000).round(),
+    ),
+  };
+
+  ({int seq, int t}) _timeStart(int t) {
+    final startT = t < 0 ? 0 : t;
+    return (seq: _firstSeqFrom(startT), t: startT);
+  }
+
+  ({int seq, int t}) _markStart(int? index) {
+    final marks = _marks.toList();
+    final mark = switch (index) {
+      null => marks.lastOrNull,
+      _ when index <= marks.length => marks[index - 1],
+      _ => null,
+    };
+    if (mark == null) {
+      throw FormatException(
+        index == null
+            ? 'no mark yet; make one with mark'
+            : 'there are ${marks.length} marks; mark:$index is not one',
+      );
+    }
+    return (seq: mark.seq, t: mark.t);
+  }
+
+  /// [start] moved forward to the first event still held, with the reason
+  /// when something before it was lost.
+  ({int seq, int t, bool partial, String? reason}) _clampToKept(
+    ({int seq, int t}) start,
+  ) {
+    final lost = _lostBefore;
+    if (lost == null || start.seq >= lost) {
+      return (seq: start.seq, t: start.t, partial: false, reason: null);
+    }
+    final ago = startsAgo;
+    return (
+      seq: lost,
+      t: _lostAtT ?? start.t,
+      partial: true,
+      reason:
+          '$_lostReason: the tape starts '
+          '${ago == null ? 'later' : _ago(ago)} ago',
+    );
+  }
+
+  /// The requests of the range as tape exchanges, and their bodies by
+  /// exchange number.
+  ({List<NetExchange> net, Map<int, Uint8List> bodies}) _exchangesIn(
+    bool Function(TraceEvent event) inRange,
+  ) {
+    final net = <NetExchange>[];
+    final bodies = <int, Uint8List>{};
+    final counts = <String, int>{};
+    for (final exchange in _net.values) {
+      if (!inRange(exchange.call.request)) continue;
+      final n = net.length;
+      final nth = counts[exchange.key] = (counts[exchange.key] ?? 0) + 1;
+      net.add(_netExchange(exchange, n, nth));
+      if (exchange.body case final body?) bodies[n] = body;
+    }
+    return (net: net, bodies: bodies);
+  }
+
+  NetExchange _netExchange(_Exchange exchange, int n, int nth) {
+    final call = exchange.call;
+    final response = call.response;
+    final error = call.error;
+    final headers = response?.data['headers'];
+    return NetExchange(
+      n: n,
+      key: exchange.key,
+      nth: nth,
+      method: call.method,
+      url: call.url,
+      t: call.request.t,
+      status: response?.data['status'] as int?,
+      headers: headers is Map<String, Object?>
+          ? {for (final e in headers.entries) e.key: '${e.value}'}
+          : const <String, String>{},
+      ms: response?.data['ms'] as int? ?? error?.data['ms'] as int?,
+      hash: response?.data['hash'] as String?,
+      size: response?.data['size'] as int?,
+      error: error?.data['error'] as String?,
+      unsupported: _unsupportedReason(exchange),
+      answeredSeq: (response ?? error)?.seq,
+    );
+  }
+
+  /// Why the answer cannot be served from the tape, or null when it can.
+  String? _unsupportedReason(_Exchange exchange) {
+    final answered = exchange.call.response != null;
+    if (!answered || exchange.body != null || !bodiesRead) return null;
+    return exchange.call.notKept ??
+        (exchange.ended ? 'body not kept' : 'answer still loading');
+  }
+
+  List<TapeInput> _tapeInputs(
+    bool Function(TraceEvent event) inRange,
+    List<NetExchange> net,
+  ) => [
+    for (final (i, e) in _inputs.where(inRange).indexed)
+      TapeInput(
+        step: i + 1,
+        seq: e.seq,
+        t: e.t,
+        frame: e.frame,
+        kind: e.kind,
+        widget: e.widget,
+        source: e.source,
+        data: Map<String, Object?>.of(e.data),
+        after: answeredBefore(e.seq, net),
+      ),
+  ];
 
   /// The first seq at or after [t], in the ring buffer or the store (the
   /// ring buffer may have dropped what the store still has).

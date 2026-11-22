@@ -2,7 +2,7 @@ import 'browser_page_stub.dart'
     if (dart.library.js_interop) 'browser_page_web.dart'
     as platform;
 
-/// What a tape needs from the page it runs in (PLAN-v2 Milestone 15): its
+/// What a tape needs from the page it runs in: its
 /// URL, its storage, a reload, and a way to send a `message` event. Outside
 /// a browser there is no page: every read is empty and every write does
 /// nothing.
@@ -34,7 +34,7 @@ abstract interface class BrowserPage {
 
   /// Sends a `message` event to `window` with [data] (JSON text, or text)
   /// and [origin]. An event made in script has no `source` window: an app
-  /// that answers to `event.source` fails there (watch out for).
+  /// that answers to `event.source` fails there.
   void postMessage(String data, String origin);
 }
 

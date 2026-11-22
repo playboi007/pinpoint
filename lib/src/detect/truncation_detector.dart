@@ -7,7 +7,7 @@ import 'detector.dart';
 /// with `didExceedMaxLines`.
 ///
 /// Truncation is often intended (a list title with an ellipsis), so a
-/// finding is `info`, and Milestone 12's stress matrix must never file one
+/// finding is `info`, and the stress matrix must never file one
 /// as a note by itself.
 class TruncationDetector extends Detector {
   const TruncationDetector();

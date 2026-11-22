@@ -7,7 +7,7 @@ import '../../theme/pinpoint_motion.dart';
 import '../../theme/pinpoint_tokens.dart';
 import 'flights.dart';
 
-/// The paper plane of a send (PLAN-v2 polish, "seldom-used moments").
+/// The paper plane of a send.
 ///
 /// On Send, a small plane flies from the left of the button to the right
 /// and off, with a dashed trail, in about 350 ms. It starts with the send

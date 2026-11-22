@@ -22,7 +22,7 @@ const String healthPath = '/health';
 const String changesPath = '/changes';
 
 /// The lines of the method around a file and line (`GET /source?file=&line=
-/// &before=`), for the state lens (PLAN-v3 Milestone 21).
+/// &before=`), for the state lens.
 const String sourcePath = '/source';
 
 /// Where a class is declared (`GET /declaration?type=Name`).
@@ -43,7 +43,7 @@ const String mcpPath = '/mcp';
 /// (`POST /commands/control`).
 const String commandsPath = '/commands';
 
-/// Tapes (PLAN-v2 Milestone 15): `POST /tapes` stores one with its bodies,
+/// Tapes: `POST /tapes` stores one with its bodies,
 /// `GET /tapes/<id>` gives it back for a replay.
 const String tapesPath = '/tapes';
 
@@ -111,7 +111,7 @@ bool isLoopbackOrigin(String origin) {
 }
 
 /// The last part of `POST /annotations/<id>/undo`: the user undoes some or
-/// all of the changes of one round of the agent (PLAN-v3 Milestone 20).
+/// all of the changes of one round of the agent.
 const String undoSegment = 'undo';
 
 /// The longest the bridge waits for the hot reload after an undo.

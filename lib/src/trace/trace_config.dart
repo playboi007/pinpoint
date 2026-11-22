@@ -4,7 +4,7 @@ import 'redact.dart';
 import 'trace_recorder.dart';
 import 'trace_source.dart';
 
-/// Settings for the flight recorder (PLAN-v2 Milestone 13), in
+/// Settings for the flight recorder, in
 /// `PinPointConfig.trace`.
 @immutable
 class TraceConfig {
@@ -38,8 +38,8 @@ class TraceConfig {
   /// The app's own sources, started with the built-in ones by their level.
   final List<TraceSource> sources;
 
-  /// Whether events name the entry that started them (PLAN-v2 Milestone
-  /// 14). Needs `PinPoint.run` around `runApp`; pass the same config there:
+  /// Whether events name the entry that started them. Needs `PinPoint.run`
+  /// around `runApp`; pass the same config there:
   ///
   /// ```dart
   /// const trace = TraceConfig();
@@ -68,13 +68,13 @@ class TraceConfig {
   final List<String> redact;
 
   /// Whether a tape keeps a copy of `localStorage` and `sessionStorage`
-  /// at app start, and a replay after a restart puts it back (PLAN-v2
-  /// Milestone 15, step 4). Off by default: storage holds session tokens.
+  /// at app start, and a replay after a restart puts it back. Off by default:
+  /// storage holds session tokens.
   /// Without it, a replay starts from the storage the browser has now.
   final bool storage;
 
   /// Body fields and URL parameters left out of a request's key when a
-  /// tape is matched (step 8): a time stamp or a random request id that
+  /// tape is matched: a time stamp or a random request id that
   /// differs on every run. Names match exactly, at any depth of a JSON
   /// body. Parameters named in [redact] are always left out.
   final List<String> matchIgnore;

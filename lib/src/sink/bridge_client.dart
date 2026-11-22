@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 
 import '../bridge/bridge_protocol.dart';
 import '../model/annotation.dart';
+import '../model/json_read.dart';
 import '../model/tape.dart';
 import 'http_sink.dart';
 import 'pinpoint_sink.dart';
@@ -51,7 +52,7 @@ class UndoResult {
   /// The files that went back, relative to the git top level.
   final List<String> reverted;
 
-  /// The files that no longer fit the patch (a `requested` answer).
+  /// The files that do not fit the patch (a `requested` answer).
   final List<String> conflicts;
 
   /// Whether the bridge hot reloaded the app after a `done` undo.
@@ -164,7 +165,7 @@ class BridgeClient {
   }
 
   /// Undoes the changes [changes] (ids such as `c1`, or `['*']` for all) of
-  /// round [round] of note [id] (PLAN-v3 Milestone 20), with the user's
+  /// round [round] of note [id], with the user's
   /// [reason]. The bridge puts the files back when it can, hot reloads the
   /// app, and opens the note again; without git, or when a file changed
   /// since, it asks the agent instead. Waits for the reload, so it may take
@@ -182,15 +183,10 @@ class BridgeClient {
       body: {'round': round, 'changes': changes, 'reason': ?reason},
       timeout: const Duration(seconds: 60),
     );
-    List<String> strings(Object? list) => [
-      if (list is List<Object?>)
-        for (final item in list)
-          if (item is String) item,
-    ];
     return UndoResult(
       undo: json['undo'] is String ? json['undo']! as String : 'requested',
-      reverted: strings(json['reverted']),
-      conflicts: strings(json['conflicts']),
+      reverted: asStrings(json['reverted']),
+      conflicts: asStrings(json['conflicts']),
       reloaded: json['reloaded'] == true,
       note: json['note'] is Map<String, Object?>
           ? Annotation.fromJson(json['note']! as Map<String, Object?>)
@@ -285,7 +281,7 @@ class BridgeClient {
   Future<void> setAgentControl({required bool enabled}) =>
       _send('POST', _at('$commandsPath/control'), body: {'enabled': enabled});
 
-  /// Stores [tape] and its bodies on the bridge (PLAN-v2 Milestone 15).
+  /// Stores [tape] and its bodies on the bridge.
   /// Returns its summary as the bridge has it.
   Future<Map<String, Object?>> saveTape(Tape tape) => _send(
     'POST',
@@ -311,7 +307,7 @@ class BridgeClient {
 
   /// The lines of the method around [line] of [file], as `{file, start,
   /// end, text}`, or null when the bridge has no such file or refuses the
-  /// path (PLAN-v3 Milestone 21). [before] is how far up the method start
+  /// path. [before] is how far up the method start
   /// is looked for.
   Future<({String file, int start, int end, String text})?> source(
     String file,
@@ -339,7 +335,7 @@ class BridgeClient {
   }
 
   /// Where the type [type] is declared, as `{file, line}`, or null when the
-  /// bridge finds none (PLAN-v3 Milestone 21).
+  /// bridge finds none.
   Future<({String file, int line})?> declaration(String type) async {
     final Map<String, Object?> json;
     try {
@@ -359,7 +355,7 @@ class BridgeClient {
   Future<void> postRunStatus(String run, Map<String, Object?> status) =>
       _send('POST', _at('$runsPath/$run/status'), body: status);
 
-  /// A batch of the run's events, as JSON (step 14).
+  /// A batch of the run's events, as JSON.
   Future<void> postRunEvents(String run, List<Map<String, Object?>> events) =>
       _send(
         'POST',

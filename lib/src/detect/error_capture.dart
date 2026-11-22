@@ -90,9 +90,9 @@ class ErrorCapture {
   }
 
   // Runs during build, layout or paint. Never touch widgets or call
-  // setState here: queue, and turn the queue into findings after the frame
-  // (watch out for). An error inside this handler would come back to it
-  // and loop, so its body only prints (watch out for).
+  // setState here: queue, and turn the queue into findings after the frame.
+  // An error inside this handler would come back to it
+  // and loop, so its body only prints.
   void _onFlutterError(FlutterErrorDetails details) {
     if (_installed) {
       try {

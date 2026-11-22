@@ -330,8 +330,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     _startSync();
     _attachAgent();
     _followConstruction();
-    // A page a replay restarted plays its tape once the app has drawn
-    // (PLAN-v2 Milestone 15, step 7).
+    // A page a replay restarted plays its tape once the app has drawn.
     if (TapeBoot.flag != null) {
       WidgetsBinding.instance.addPostFrameCallback(
         (_) => unawaited(_agentCommands.startBootReplay()),
@@ -392,7 +391,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
   }
 
   void _onLifecycle(AppLifecycleState state) {
-    // Watch out for: a long poll held open must end when the tab is
+    // A long poll held open must end when the tab is
     // hidden. On web a hidden tab draws no frames, so a command could not
     // finish anyway.
     _visible = switch (state) {
@@ -508,7 +507,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     if (mode == previous) return;
     _lastMode = mode;
     // A note's trace ends when Pinpoint became active.
-    TraceSession.current?.pinpointActive(widget.controller.isActive);
+    TraceSession.current?.pinpointActive(active: widget.controller.isActive);
     // Polls only while active: an idle overlay must not keep the network
     // busy or the tab awake.
     _sync?.active = widget.controller.isActive;
@@ -518,7 +517,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     }
     if (previous == PinPointMode.idle) {
       _saveAppFocus();
-      // Once per start, never per frame (rule 2), and never while idle.
+      // Once per start, never per frame, and never while idle.
       unawaited(_checkBridges());
     }
     if (mode == PinPointMode.commenting && previous == PinPointMode.picking) {
@@ -807,7 +806,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
     unawaited(_sync?.save(note));
   }
 
-  /// [note] with a tape of what happened (PLAN-v2 Milestone 15, step 16),
+  /// [note] with a tape of what happened,
   /// stored on the bridge: a full tape when one is possible, else a
   /// segment from the last mark. Without a bridge, or when it fails, the
   /// note goes without one and a toast says why.
@@ -977,7 +976,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
   }
 
   /// Undoes [changes] of [round] of the note [id] through the bridge
-  /// (PLAN-v3 Milestone 20). The bridge sends the note back to the agent;
+  /// The bridge sends the note back to the agent;
   /// the note it answers with lands in the book. A toast says how it went.
   /// A failure shows no toast here: [NoteSync] reports it.
   Future<void> _undoChanges(
@@ -1106,7 +1105,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
   static final Set<String> _notingFindings = <String>{};
 
   /// Makes [finding] a note on its nearest local widget, with the summary
-  /// as the comment, the matching check for Milestone 12, and the current
+  /// as the comment, the matching check, and the current
   /// environment, and sends it. Such a note is complete, never half
   /// written, so it does not wait as a draft for a second click: the agent
   /// sees it at once. When a sink fails it stays a draft, on the bridge
@@ -1181,7 +1180,7 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
   /// says why: the comment matters more than the image.
   ///
   /// With [pair], the image is the crop without the tweaks on the left and
-  /// with them on the right (plan Milestone 11, step 11).
+  /// with them on the right.
   Future<Annotation> _withScreenshot(
     Annotation note, {
     RenderObject? target,
@@ -1395,8 +1394,6 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
                 // Every key that reaches the holder stops here while a mode is
                 // active, so it never bubbles up to the app's Shortcuts. Pinpoint's
                 // own keys arrive through the HardwareKeyboard handler instead.
-                // Milestone 5: the comment form needs its own traversal shortcuts,
-                // because Tab stops here too.
                 onKeyEvent: (node, event) => widget.controller.isActive
                     ? KeyEventResult.handled
                     : KeyEventResult.ignored,
@@ -1412,168 +1409,11 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
                       if (widget.controller.isActive &&
                           !widget.controller.reviewing)
                         _PointerTrap(tracker: _tracker),
-                      IgnorePointer(
-                        child: Builder(
-                          builder: (paintContext) => Stack(
-                            fit: StackFit.expand,
-                            children: [
-                              CustomPaint(
-                                key: InspectorOverlay.rulerKey,
-                                painter: RulerPainter(
-                                  selected: widget.controller.selection,
-                                  hovered: widget.controller.hovered,
-                                  measuring: widget.controller.measuring,
-                                  origin: () => _originOf(paintContext),
-                                  tokens: PinPointTokens.of(paintContext),
-                                ),
-                              ),
-                              CustomPaint(
-                                key: InspectorOverlay.highlightKey,
-                                painter: HighlightPainter(
-                                  hovered: widget.controller.hovered,
-                                  selected: widget.controller.selection,
-                                  origin: () => _originOf(paintContext),
-                                  tokens: PinPointTokens.of(paintContext),
-                                ),
-                              ),
-                              CustomPaint(
-                                key: InspectorOverlay.tweakOutlineKey,
-                                painter: TweakOutlinePainter(
-                                  outlines: widget.controller.tweaks.outlines,
-                                  origin: () => _originOf(paintContext),
-                                  tokens: PinPointTokens.of(paintContext),
-                                ),
-                              ),
-                              CustomPaint(
-                                key: InspectorOverlay.findingKey,
-                                painter: FindingPainter(
-                                  findings: widget.controller.findings,
-                                  origin: () => _originOf(paintContext),
-                                  tokens: PinPointTokens.of(paintContext),
-                                ),
-                              ),
-                              // Watch mode: the dashed outline of the widget
-                              // the state lens watches. Moved only after
-                              // frames the app draws.
-                              CustomPaint(
-                                key: InspectorOverlay.watchMarkerKey,
-                                painter: WatchMarkerPainter(
-                                  rect: widget.controller.watch.markerRect,
-                                  origin: () => _originOf(paintContext),
-                                  tokens: PinPointTokens.of(paintContext),
-                                ),
-                              ),
-                              // "Scan this screen": a line sweeps the app
-                              // once and each finding pops in as it passes.
-                              ScanSweep(
-                                findings: widget.controller.findings,
-                                origin: () => _originOf(paintContext),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      // Above the trap, so a click on a pin opens its note
-                      // instead of picking. In every mode, idle included.
-                      PinLayer(
-                        placements: _pins.placements,
-                        onOpen: _openPin,
-                        openNote: widget.controller.openNote,
-                      ),
-                      // Above the trap, so clicks on the panel never pick.
-                      InfoPanelLayer(
-                        controller: widget.controller,
-                        tab: _tab,
-                        commentFocus: _commentFocus,
-                        onSend: _send,
-                        onSaveDraft: _saveDraft,
-                        onCopy: _copy,
-                        noteActions: _noteActions,
-                        onTweak: _applyTweak,
-                        bridge: () => BridgeClient.find(
-                          url: widget.config.bridgeUrl,
-                          sinks: widget.config.sinks,
-                        ),
-                        onToast: _toasts.show,
-                        // Keeps the panel clear of the rail, which is drawn
-                        // above it so the launcher can always stop picking.
-                        rightInset: RailPlacement.inset + RailPlacement.width,
-                      ),
-                      // The live changes card of watch mode. It shows in
-                      // idle too: the app has its events, the card its own.
-                      WatchCardLayer(
-                        controller: widget.controller,
-                        bridge: () => BridgeClient.find(
-                          url: widget.config.bridgeUrl,
-                          sinks: widget.config.sinks,
-                        ),
-                        onToast: _toasts.show,
-                        rightInset: RailPlacement.inset + RailPlacement.width,
-                      ),
-                      // Above the trap, so clicks on it never pick.
-                      EnvironmentPanelLayer(
-                        controller: widget.controller,
-                        panelOpen: _environmentPanel,
-                        placement: _rail,
-                        themeVariants: widget.config.themeVariants.keys
-                            .toList(),
-                        material3: material3,
-                      ),
-                      // Above the trap, so clicks on it never pick.
-                      FindingsPanelLayer(
-                        controller: widget.controller,
-                        panelOpen: _findingsPanel,
-                        placement: _rail,
-                        onScan: _scanFindings,
-                        onAudit: () => unawaited(_auditAccessibility()),
-                        onMakeNote: (finding) =>
-                            unawaited(_noteFromFinding(finding)),
-                        onSendDraft: (id) => unawaited(_sendNotes([id])),
-                        onCopy: (finding) => unawaited(_copyFinding(finding)),
-                      ),
-                      // Above the trap, so clicks on it never pick.
-                      TimelinePanelLayer(
-                        controller: widget.controller,
-                        placement: _rail,
-                        others: [_environmentPanel, _findingsPanel],
-                        onFlash: _flashEvent,
-                      ),
-                      // In idle too while any tweak is active.
-                      TweakChip(session: widget.controller.tweaks),
-                      // In idle too while an override is active.
-                      EnvironmentBar(controller: widget.controller),
-                      // The frozen and bridge-offline badges, top-right.
-                      SystemBadgeLayer(
-                        controller: widget.controller,
-                        offline: _offline,
-                      ),
-                      // Takes no pointer events, so a synthetic tap reaches
-                      // the app beneath it.
-                      Builder(
-                        builder: (layerContext) => AgentLayer(
-                          agent: widget.controller.agent,
-                          origin: () => _originOf(layerContext),
-                        ),
-                      ),
-                      // The plane, the "Sent" stamp and the card that flies into
-                      // its pin: they outlive the panel, so they live here.
-                      FlightLayer(flights: _flights),
-                      ToastLayer(
-                        toasts: _toasts,
-                        controller: widget.controller,
-                      ),
-                      // Above the trap, so the launcher at its foot can always
-                      // stop picking. Always offered by default: some shortcuts
-                      // never reach Flutter.
-                      RailLayer(
-                        controller: widget.controller,
-                        placement: _rail,
-                        environmentPanel: _environmentPanel,
-                        findingsPanel: _findingsPanel,
-                        shortcutLabel: widget.config.shortcut.label,
-                        showLauncher: widget.config.showLauncher,
-                        allowAgentControl: widget.config.allowAgentControl,
-                      ),
+                      _paintLayers(),
+                      ..._notePanels(),
+                      ..._toolPanels(material3: material3),
+                      ..._statusLayers(),
+                      _railLayer(),
                     ],
                   ),
                 ),
@@ -1584,6 +1424,171 @@ class _InspectorOverlayState extends State<InspectorOverlay> {
       ),
     );
   }
+
+  BridgeClient? _bridge() => BridgeClient.find(
+    url: widget.config.bridgeUrl,
+    sinks: widget.config.sinks,
+  );
+
+  /// The drawn marks over the app. They take no pointer events.
+  Widget _paintLayers() => IgnorePointer(
+    child: Builder(
+      builder: (paintContext) =>
+          Stack(fit: StackFit.expand, children: _markLayers(paintContext)),
+    ),
+  );
+
+  List<Widget> _markLayers(BuildContext paintContext) {
+    final controller = widget.controller;
+    final tokens = PinPointTokens.of(paintContext);
+    Offset origin() => _originOf(paintContext);
+    return [
+      CustomPaint(
+        key: InspectorOverlay.rulerKey,
+        painter: RulerPainter(
+          selected: controller.selection,
+          hovered: controller.hovered,
+          measuring: controller.measuring,
+          origin: origin,
+          tokens: tokens,
+        ),
+      ),
+      CustomPaint(
+        key: InspectorOverlay.highlightKey,
+        painter: HighlightPainter(
+          hovered: controller.hovered,
+          selected: controller.selection,
+          origin: origin,
+          tokens: tokens,
+        ),
+      ),
+      CustomPaint(
+        key: InspectorOverlay.tweakOutlineKey,
+        painter: TweakOutlinePainter(
+          outlines: controller.tweaks.outlines,
+          origin: origin,
+          tokens: tokens,
+        ),
+      ),
+      CustomPaint(
+        key: InspectorOverlay.findingKey,
+        painter: FindingPainter(
+          findings: controller.findings,
+          origin: origin,
+          tokens: tokens,
+        ),
+      ),
+      // Watch mode: the dashed outline of the widget the state lens watches.
+      // Moved only after frames the app draws.
+      CustomPaint(
+        key: InspectorOverlay.watchMarkerKey,
+        painter: WatchMarkerPainter(
+          rect: controller.watch.markerRect,
+          origin: origin,
+          tokens: tokens,
+        ),
+      ),
+      // "Scan this screen": a line sweeps the app once and each finding pops
+      // in as it passes.
+      ScanSweep(findings: controller.findings, origin: origin),
+    ];
+  }
+
+  /// The pins, the info panel and the watch card.
+  List<Widget> _notePanels() => [
+    // Above the trap, so a click on a pin opens its note instead of picking.
+    // In every mode, idle included.
+    PinLayer(
+      placements: _pins.placements,
+      onOpen: _openPin,
+      openNote: widget.controller.openNote,
+    ),
+    // Above the trap, so clicks on the panel never pick.
+    InfoPanelLayer(
+      controller: widget.controller,
+      tab: _tab,
+      commentFocus: _commentFocus,
+      onSend: _send,
+      onSaveDraft: _saveDraft,
+      onCopy: _copy,
+      noteActions: _noteActions,
+      onTweak: _applyTweak,
+      bridge: _bridge,
+      onToast: _toasts.show,
+      // Keeps the panel clear of the rail, which is drawn above it so the
+      // launcher can always stop picking.
+      rightInset: RailPlacement.inset + RailPlacement.width,
+    ),
+    // The live changes card of watch mode. It shows in idle too: the app has
+    // its events, the card its own.
+    WatchCardLayer(
+      controller: widget.controller,
+      bridge: _bridge,
+      onToast: _toasts.show,
+      rightInset: RailPlacement.inset + RailPlacement.width,
+    ),
+  ];
+
+  /// The environment, findings and timeline panels. Above the trap, so
+  /// clicks on them never pick.
+  List<Widget> _toolPanels({required bool material3}) => [
+    EnvironmentPanelLayer(
+      controller: widget.controller,
+      panelOpen: _environmentPanel,
+      placement: _rail,
+      themeVariants: widget.config.themeVariants.keys.toList(),
+      material3: material3,
+    ),
+    FindingsPanelLayer(
+      controller: widget.controller,
+      panelOpen: _findingsPanel,
+      placement: _rail,
+      onScan: _scanFindings,
+      onAudit: () => unawaited(_auditAccessibility()),
+      onMakeNote: (finding) => unawaited(_noteFromFinding(finding)),
+      onSendDraft: (id) => unawaited(_sendNotes([id])),
+      onCopy: (finding) => unawaited(_copyFinding(finding)),
+    ),
+    TimelinePanelLayer(
+      controller: widget.controller,
+      placement: _rail,
+      others: [_environmentPanel, _findingsPanel],
+      onFlash: _flashEvent,
+    ),
+  ];
+
+  /// The chips, badges, agent layer, flights and toasts.
+  List<Widget> _statusLayers() => [
+    // In idle too while any tweak is active.
+    TweakChip(session: widget.controller.tweaks),
+    // In idle too while an override is active.
+    EnvironmentBar(controller: widget.controller),
+    // The frozen and bridge-offline badges, top-right.
+    SystemBadgeLayer(controller: widget.controller, offline: _offline),
+    // Takes no pointer events, so a synthetic tap reaches the app beneath it.
+    Builder(
+      builder: (layerContext) => AgentLayer(
+        agent: widget.controller.agent,
+        origin: () => _originOf(layerContext),
+      ),
+    ),
+    // The plane, the "Sent" stamp and the card that flies into its pin: they
+    // outlive the panel, so they live here.
+    FlightLayer(flights: _flights),
+    ToastLayer(toasts: _toasts, controller: widget.controller),
+  ];
+
+  /// Above the trap, so the launcher at its foot can always stop picking.
+  /// Always offered by default: some shortcuts never reach Flutter.
+  Widget _railLayer() => RailLayer(
+    controller: widget.controller,
+    placement: _rail,
+    environmentPanel: _environmentPanel,
+    findingsPanel: _findingsPanel,
+    shortcutLabel: widget.config.shortcut.label,
+    showLauncher: widget.config.showLauncher,
+    allowAgentControl: widget.config.allowAgentControl,
+  );
 }
 
 /// Global position of the render object built at [context].

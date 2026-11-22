@@ -21,13 +21,13 @@ import '../trace_source.dart';
 /// Records down, up, cancel and scroll signals. Moves only while a pointer
 /// is down, and at most one per frame (one per 16 ms when no frame is
 /// drawn): they can come hundreds a second, and without the limit the
-/// buffer would hold nothing else (watch out for). Scroll signals in one
+/// buffer would hold nothing else. Scroll signals in one
 /// frame add up into one event.
 ///
 /// A down records the local widget it hit and the position inside it as a
-/// fraction (step 5), so Milestone 15 can replay a tap after the layout
+/// fraction, so a tape can replay a tap after the layout
 /// changed. A pointer that lands on Pinpoint's own UI is not recorded, and
-/// the agent's synthetic input is tagged `by: agent` (rule 14).
+/// the agent's synthetic input is tagged `by: agent`.
 class PointerSource extends TraceSource {
   PointerSource({
     required this.appKey,
@@ -184,7 +184,7 @@ class PointerSource extends TraceSource {
     );
     // The widget under the pointer needs a pick search (about 5 ms on web)
     // and its anchor a walk of the tree. Neither runs inside the pointer
-    // dispatch, where it would delay the app's own handling (rule 11): a
+    // dispatch, where it would delay the app's own handling: a
     // one-shot timer runs them after the event, before the layout changes
     // in the next frame, and forces no frame (engineering rule 2).
     _pendingDowns.add((recorded, event.position));

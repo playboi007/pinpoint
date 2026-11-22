@@ -8,7 +8,7 @@ import '../trace/cause_zone.dart';
 import '../trace/state_flow.dart';
 import '../trace/trace_recorder.dart';
 
-/// Names a hover cause (PLAN-v3 Milestone 21b, "Story view").
+/// Names a hover cause.
 ///
 /// The pointer source does not record hover moves (hundreds a second), so a
 /// state change that a hover makes has a cause with no input to name it.

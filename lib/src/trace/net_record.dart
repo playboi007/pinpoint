@@ -1,5 +1,5 @@
-// Plain Dart: no `dart:ui` and no `package:flutter` (PLAN-v2 rule 13). The
-// network events of PLAN-v2 Milestone 14 (steps 11 to 13), without a
+// Plain Dart: no `dart:ui` and no `package:flutter`. The
+// network events, without a
 // platform: the web hooks turn `fetch` and XHR objects into these calls,
 // and tests drive them directly.
 
@@ -17,7 +17,7 @@ import 'trace_recorder.dart';
 ///
 /// Request and response metadata is level 1. Bodies are level 2
 /// ([bodies], `TraceConfig.bodies`): a body is read only to hash it and to
-/// keep up to [maxBody] bytes of it for a tape (Milestone 15). Bodies never
+/// keep up to [maxBody] bytes of it for a tape. Bodies never
 /// go into events.
 class NetRecorder {
   NetRecorder(
@@ -30,23 +30,23 @@ class NetRecorder {
   }) : readBodies = bodies,
        store = store ?? NetBodies();
 
-  /// While a replay runs, answers requests from a tape (PLAN-v2 Milestone
-  /// 15, step 8). Null: every request reaches the network.
+  /// While a replay runs, answers requests from a tape. Null: every request
+  /// reaches the network.
   NetReplay? replay;
 
   /// Sees every recorded request with its raw URL and body, and its answer
-  /// (the tape recorder, Milestone 15). With a tap, kept bodies go to the
+  /// (the tape recorder). With a tap, kept bodies go to the
   /// tap and not to [store]: a body is held once.
   NetTap? tap;
 
   final TraceRecorder recorder;
 
   /// Header and URL parameter names whose values are masked before an
-  /// event exists (rule 16).
+  /// event exists.
   final TraceRedact redact;
 
-  /// Origins never recorded, such as `http://127.0.0.1:4747`: the bridge's
-  /// (rule 14). Their requests pass through untouched.
+  /// Origins never recorded, such as `http://127.0.0.1:4747`: the bridge's.
+  /// Their requests pass through untouched.
   final Set<String> ignoreOrigins;
 
   /// Requests left out: to an ignored origin, or Pinpoint's own.
@@ -84,14 +84,14 @@ class NetRecorder {
     int? bodySize,
   }) {
     final cause = CauseZone.currentCause;
-    // Pinpoint never records itself (rule 14): its long poll and its
+    // Pinpoint never records itself: its long poll and its
     // posts to the bridge are left out, by zone and by origin.
     if ((cause != null && cause.internal) || _ignored(url)) {
       ignored++;
       return null;
     }
     final upper = method.toUpperCase();
-    // Masked before the event exists (rule 16).
+    // Masked before the event exists.
     final shownUrl = clipText(redact.url(url), maxUrl);
     final event = recorder.add(
       TraceKind.netRequest,
@@ -110,7 +110,7 @@ class NetRecorder {
     try {
       tap?.requested(call, url, body);
     } catch (_) {
-      // The recorder only observes (rule 11).
+      // The recorder only observes.
     }
     return call;
   }
@@ -181,7 +181,7 @@ class NetRecorder {
     try {
       call(tap);
     } catch (_) {
-      // The recorder only observes (rule 11).
+      // The recorder only observes.
     }
   }
 
@@ -198,7 +198,7 @@ class NetRecorder {
   String? _skipReason(Map<String, String> headers, int? length) {
     if (!readBodies) return 'TraceConfig.bodies is false';
     final type = (_header(headers, 'content-type') ?? '').toLowerCase();
-    // Watch out for: a cloned body is in memory twice until the copy is
+    // A cloned body is in memory twice until the copy is
     // read. Skip the clone for a large download, and for types that are
     // not text or JSON. A stream of events never ends, so it is skipped
     // too.
@@ -228,7 +228,7 @@ class NetRecorder {
 /// answer's bytes (for a tape).
 abstract interface class NetTap {
   /// A request started. [url] and [body] are raw: use them for a key
-  /// only, never keep them in clear (rule 16).
+  /// only, never keep them in clear.
   void requested(NetCall call, String url, List<int>? body);
 
   /// The answer's headers arrived ([NetCall.response] is set).
@@ -401,7 +401,7 @@ class NetHash {
   static String of(List<int> bytes) => (NetHash()..add(bytes)).hex;
 }
 
-/// The bodies kept for tapes, bounded twice (rule 12): by count and by
+/// The bodies kept for tapes, bounded twice: by count and by
 /// bytes. The oldest go first.
 class NetBodies {
   NetBodies({this.maxCount = 200, this.maxBytes = 8 * 1024 * 1024});

@@ -8,6 +8,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import '../model/annotation.dart' show NoteStatus, annotationSchema, clipText;
+import '../model/note_round.dart' show RoundUndo;
 import 'agent_guide.dart';
 import 'agent_instructions.dart';
 import 'bridge_config.dart';
@@ -211,10 +212,10 @@ class PinPointBridge {
   /// The notes on disk.
   final NoteStore store;
 
-  /// Agent commands on their way to the app (Milestone 12).
+  /// Agent commands on their way to the app.
   final CommandQueue commands;
 
-  /// Tapes on disk (PLAN-v2 Milestone 15).
+  /// Tapes on disk.
   late final TapeStore tapes = TapeStore(store.root);
 
   /// Replay runs on disk.
@@ -358,46 +359,7 @@ class PinPointBridge {
     String? noteId, {
     bool undo = false,
   }) async {
-    final response = request.response;
-    final method = request.method;
-    if (noteId != null) {
-      // The id becomes a file name. A crafted id such as `../../x` would
-      // reach outside the notes folder, so it must match the pattern.
-      if (!noteIdPattern.hasMatch(noteId)) {
-        return _error(
-          response,
-          HttpStatus.badRequest,
-          'The id must match ${noteIdPattern.pattern}',
-        );
-      }
-      if (undo) {
-        if (method == 'POST') return _undo(request, noteId);
-        response.headers.set('allow', 'POST, OPTIONS');
-        return _error(response, HttpStatus.methodNotAllowed, 'Use POST');
-      }
-      switch (method) {
-        case 'GET':
-          final note = await store.read(noteId);
-          return note == null
-              ? _error(response, HttpStatus.notFound, 'No note $noteId')
-              : _json(response, HttpStatus.ok, note);
-        case 'PATCH':
-          return _patch(request, noteId);
-        case 'DELETE':
-          return await store.delete(
-                noteId,
-                client: request.uri.queryParameters[clientQuery],
-              )
-              ? _json(response, HttpStatus.ok, {'id': noteId, 'deleted': true})
-              : _error(response, HttpStatus.notFound, 'No note $noteId');
-      }
-      response.headers.set('allow', 'GET, PATCH, DELETE, OPTIONS');
-      return _error(
-        response,
-        HttpStatus.methodNotAllowed,
-        'Method not allowed',
-      );
-    }
+    if (noteId != null) return _noteRoute(request, noteId, undo: undo);
     if (path == commandsPath || path.startsWith('$commandsPath/')) {
       return _command(request, path);
     }
@@ -405,51 +367,21 @@ class PinPointBridge {
       return _tape(request, path);
     }
     if (path.startsWith('$runsPath/')) return _run(request, path);
-    switch ((method, path)) {
+    switch ((request.method, path)) {
       case ('POST', mcpPath):
         return _mcpCall(request);
       case ('POST', annotationsPath):
         return _receive(request);
       case ('GET', annotationsPath):
-        final query = request.uri.queryParameters;
-        final Set<NoteStatus>? statuses;
-        try {
-          statuses = _statuses(query['status']);
-        } on FormatException catch (error) {
-          return _error(response, HttpStatus.badRequest, error.message);
-        }
-        final notes = await store.list(
-          statuses: statuses,
-          origin: query['origin'],
-        );
-        return _json(response, HttpStatus.ok, {
-          'cursor': store.cursor,
-          'notes': notes,
-        });
+        return _listNotes(request);
       case ('GET', sourcePath):
         return _source(request);
       case ('GET', declarationPath):
         return _declaration(request);
       case ('GET', changesPath):
-        final query = request.uri.queryParameters;
-        // Ends the hold when the app closes the request (the tab went
-        // away, or the overlay went idle).
-        final gone = Completer<void>();
-        unawaited(
-          response.done.then<void>(
-            (_) => gone.isCompleted ? null : gone.complete(),
-            onError: (Object _) => gone.isCompleted ? null : gone.complete(),
-          ),
-        );
-        final changes = await store.changes(
-          query['since'],
-          origin: query['origin'],
-          client: query[clientQuery],
-          wait: changesWaitOf(query['wait']),
-          cancelled: gone.future,
-        );
-        return _json(response, HttpStatus.ok, changes.toJson());
+        return _changes(request);
     }
+    final response = request.response;
     response.headers.set('allow', switch (path) {
       healthPath ||
       changesPath ||
@@ -460,7 +392,92 @@ class PinPointBridge {
     _error(response, HttpStatus.methodNotAllowed, 'Method not allowed');
   }
 
-  /// `GET /source?file&line&before`: the lines of a method (Milestone 21).
+  /// `/annotations/<id>` and `/annotations/<id>/undo`.
+  Future<void> _noteRoute(
+    HttpRequest request,
+    String noteId, {
+    required bool undo,
+  }) async {
+    final response = request.response;
+    // The id becomes a file name. A crafted id such as `../../x` would
+    // reach outside the notes folder, so it must match the pattern.
+    if (!noteIdPattern.hasMatch(noteId)) {
+      return _error(
+        response,
+        HttpStatus.badRequest,
+        'The id must match ${noteIdPattern.pattern}',
+      );
+    }
+    if (undo) {
+      if (request.method == 'POST') return _undo(request, noteId);
+      response.headers.set('allow', 'POST, OPTIONS');
+      return _error(response, HttpStatus.methodNotAllowed, 'Use POST');
+    }
+    switch (request.method) {
+      case 'GET':
+        return _readNote(response, noteId);
+      case 'PATCH':
+        return _patch(request, noteId);
+      case 'DELETE':
+        return _deleteNote(request, noteId);
+    }
+    response.headers.set('allow', 'GET, PATCH, DELETE, OPTIONS');
+    _error(response, HttpStatus.methodNotAllowed, 'Method not allowed');
+  }
+
+  Future<void> _readNote(HttpResponse response, String noteId) async {
+    final note = await store.read(noteId);
+    if (note == null) {
+      return _error(response, HttpStatus.notFound, 'No note $noteId');
+    }
+    _json(response, HttpStatus.ok, note);
+  }
+
+  Future<void> _deleteNote(HttpRequest request, String noteId) async {
+    final client = request.uri.queryParameters[clientQuery];
+    final response = request.response;
+    if (!await store.delete(noteId, client: client)) {
+      return _error(response, HttpStatus.notFound, 'No note $noteId');
+    }
+    _json(response, HttpStatus.ok, {'id': noteId, 'deleted': true});
+  }
+
+  Future<void> _listNotes(HttpRequest request) async {
+    final response = request.response;
+    final query = request.uri.queryParameters;
+    final Set<NoteStatus>? statuses;
+    try {
+      statuses = _statuses(query['status']);
+    } on FormatException catch (error) {
+      return _error(response, HttpStatus.badRequest, error.message);
+    }
+    final notes = await store.list(statuses: statuses, origin: query['origin']);
+    _json(response, HttpStatus.ok, {'cursor': store.cursor, 'notes': notes});
+  }
+
+  /// `GET /changes`: a long poll that ends when the app closes the request
+  /// (the tab went away, or the overlay went idle).
+  Future<void> _changes(HttpRequest request) async {
+    final response = request.response;
+    final query = request.uri.queryParameters;
+    final gone = Completer<void>();
+    unawaited(
+      response.done.then<void>(
+        (_) => gone.isCompleted ? null : gone.complete(),
+        onError: (Object _) => gone.isCompleted ? null : gone.complete(),
+      ),
+    );
+    final changes = await store.changes(
+      query['since'],
+      origin: query['origin'],
+      client: query[clientQuery],
+      wait: changesWaitOf(query['wait']),
+      cancelled: gone.future,
+    );
+    _json(response, HttpStatus.ok, changes.toJson());
+  }
+
+  /// `GET /source?file&line&before`: the lines of a method.
   Future<void> _source(HttpRequest request) async {
     final response = request.response;
     final query = request.uri.queryParameters;
@@ -486,7 +503,7 @@ class PinPointBridge {
     }
   }
 
-  /// `GET /declaration?type=Name`: where a type is declared (Milestone 21).
+  /// `GET /declaration?type=Name`: where a type is declared.
   Future<void> _declaration(HttpRequest request) async {
     final response = request.response;
     final type = request.uri.queryParameters['type'];
@@ -503,7 +520,7 @@ class PinPointBridge {
     }
   }
 
-  /// Tapes from the app (PLAN-v2 Milestone 15): `POST /tapes` stores one,
+  /// Tapes from the app: `POST /tapes` stores one,
   /// `GET /tapes/<id>` gives it back with its bodies for a replay.
   Future<void> _tape(HttpRequest request, String path) async {
     final response = request.response;
@@ -538,7 +555,7 @@ class PinPointBridge {
     });
   }
 
-  /// A replay run from the app (PLAN-v2 Milestone 15, step 14):
+  /// A replay run from the app:
   /// `POST /runs/<id>/events` with `{events: [...]}`, and
   /// `POST /runs/<id>/status` with where the replay is.
   Future<void> _run(HttpRequest request, String path) async {
@@ -687,7 +704,7 @@ class PinPointBridge {
     _json(response, HttpStatus.ok, note);
   }
 
-  /// `POST /annotations/<id>/undo` (PLAN-v3 Milestone 20): the user undoes
+  /// `POST /annotations/<id>/undo`: the user undoes
   /// changes of one round. After a clean undo the app is hot reloaded when
   /// its debug service is known.
   Future<void> _undo(HttpRequest request, String id) async {
@@ -719,13 +736,13 @@ class PinPointBridge {
       reason: reason as String?,
       client: request.uri.queryParameters[clientQuery],
     );
-    final reloaded = outcome.undo == 'done' && await _reloadAfterUndo();
+    final reloaded = outcome.undo == RoundUndo.done && await _reloadAfterUndo();
     _log(
-      'pinpoint: undo of $id round $round is ${outcome.undo}'
+      'pinpoint: undo of $id round $round is ${outcome.undo.name}'
       '${reloaded ? ', app reloaded' : ''}',
     );
     _json(response, HttpStatus.ok, {
-      'undo': outcome.undo,
+      'undo': outcome.undo.name,
       'reverted': outcome.reverted,
       'conflicts': outcome.conflicts,
       'reloaded': reloaded,
@@ -873,8 +890,7 @@ class PinPointBridge {
   }
 
   /// Prints the agent section when no agent file in the project (the
-  /// folder above [folder]) has it yet. Never edits those files; Milestone
-  /// 8's `setup --write` does that on request.
+  /// folder above [folder]) has it yet. Never edits those files.
   static void _hintInstructions(Directory folder, void Function(String) log) {
     final project = folder.parent.path;
     for (final name in ['CLAUDE.md', 'AGENTS.md']) {

@@ -24,7 +24,7 @@ class _WindowMessages implements MessageHooks {
           _text(event['data']),
         );
       } catch (_) {
-        // The recorder only observes (rule 11).
+        // The recorder only observes.
       }
     }).toJS;
     globalContext.callMethod<JSAny?>(

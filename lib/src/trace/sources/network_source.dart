@@ -24,11 +24,11 @@ abstract interface class NetworkHooks {
 /// The hooks for this platform.
 NetworkHooks createNetworkHooks() => platform.createPlatformNetworkHooks();
 
-/// `net.request`, `net.response` and `net.error` events (PLAN-v2 Milestone
-/// 14, steps 11 to 13). Level 1 for the metadata; the bodies are level 2
+/// `net.request`, `net.response` and `net.error` events. Level 1 for the
+/// metadata; the bodies are level 2
 /// (`TraceConfig.bodies`).
 ///
-/// The source only observes (rule 11): the app gets the very objects it
+/// The source only observes: the app gets the very objects it
 /// would get without it, with the same timing.
 class NetworkSource extends TraceSource {
   NetworkSource({
@@ -50,7 +50,7 @@ class NetworkSource extends TraceSource {
   /// Masked header and parameter names.
   final TraceRedact redact;
 
-  /// Origins never recorded: the bridge's (rule 14).
+  /// Origins never recorded: the bridge's.
   final Set<String> ignoreOrigins;
 
   /// Sees each request with its raw URL and body: the tape recorder.
@@ -60,8 +60,8 @@ class NetworkSource extends TraceSource {
   bool _installed = false;
   NetReplay? _replay;
 
-  /// The replay that answers requests now, or null (PLAN-v2 Milestone 15,
-  /// step 8). Setting null puts the network back: every request reaches
+  /// The replay that answers requests now, or null. Setting null puts the
+  /// network back: every request reaches
   /// the server again.
   NetReplay? get replay => _replay;
   set replay(NetReplay? value) {
@@ -81,7 +81,7 @@ class NetworkSource extends TraceSource {
   @override
   int get level => 1;
 
-  /// The answers are input for a tape: a replay serves them (Milestone 15).
+  /// The answers are input for a tape: a replay serves them.
   @override
   bool get isInput => true;
 

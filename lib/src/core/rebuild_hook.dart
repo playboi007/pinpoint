@@ -6,7 +6,7 @@ import 'hook_registry.dart';
 /// by every user inside Pinpoint: the rebuild heat detector
 /// (`RebuildTracker`) and the trace's rebuild source.
 ///
-/// One hook, two users (PLAN-v2 Milestone 13, watch out for). It also
+/// One hook, two users. It also
 /// shares the slot with DevTools "track rebuilds" where Flutter lets it
 /// (docs/api-notes.md, item 8):
 ///
@@ -93,6 +93,8 @@ class RebuildHook {
   }
 
   // Runs during build, for every rebuild: hand on, nothing else.
+  // The shape of Flutter's rebuild callback.
+  // ignore: avoid_positional_boolean_parameters
   void _onRebuild(Element element, bool builtOnce) {
     _shared?.call(element, builtOnce);
     for (var i = 0; i < _listeners.length; i++) {

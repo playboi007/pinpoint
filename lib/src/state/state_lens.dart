@@ -80,13 +80,13 @@ class StateLensState {
   final bool rebuildsRecorded;
 }
 
-/// The state lens for one target element (PLAN-v3 Milestone 21, step 5).
+/// The state lens for one target element.
 ///
 /// [arm] computes what the target reads (always cheap), attaches
 /// [StateListen] to the objects it reads and to the target's subtree,
 /// starts [BuildStacks] and, on web, the [ConsoleFilter]; and for a window
 /// (at most [maxWindow]) joins each state event with the elements that
-/// rebuilt after it (step 4). The window ends by itself, on [stop], on
+/// rebuilt after it. The window ends by itself, on [stop], on
 /// dispose and when the target unmounts: then every listener and global is
 /// taken back.
 ///
@@ -395,119 +395,125 @@ class StateLens extends ChangeNotifier
     }
   }
 
-  // The state events since the last join, grouped by cause, each with the
-  // elements that rebuilt because of them. Returns whether it joined any.
+  /// Joins the state events since the last join, grouped by cause, with the
+  /// elements that rebuilt because of them. Returns whether it joined any.
   bool _join(Set<Element> rebuilt) {
     final end = recorder.nextSeq;
-    final groups = <String, List<TraceEvent>>{};
-    for (var seq = _processed; seq < end; seq++) {
-      final e = recorder.at(seq);
-      if (e == null) continue;
-      if (e.kind != TraceKind.stateNotify &&
-          e.kind != TraceKind.stateSetState) {
-        continue;
-      }
-      if (isNoiseSetState(e)) continue;
-      groups
-          .putIfAbsent(
-            e.cause == null ? 'f${e.frame}' : 'c${e.cause}',
-            () => <TraceEvent>[],
-          )
-          .add(e);
-    }
+    final groups = _newStateGroups(end);
     _processed = end;
     if (groups.isEmpty) return false;
-    final listen = _listen;
-    for (final events in groups.values) {
+    for (final events in groups) {
       _events += events.length;
-      final owners = <String, String>{};
-      for (final e in events) {
-        if (e.kind == TraceKind.stateNotify && e.data['tag'] is String) {
-          owners[e.data['tag']! as String] = '${e.data['owner'] ?? e.widget}';
-        }
-      }
-      final setStateTypes = {
-        for (final e in events)
-          if (e.kind == TraceKind.stateSetState && e.widget != null) e.widget!,
-      };
-      final readers = <String, FlowReader>{};
-      final builders = Map<Element, String>.identity();
-      if (listen != null) {
-        for (final tag in owners.keys) {
-          for (final element in listen.elementsFor(tag)) {
-            // A provider scope is where the object lives, not a reader.
-            if (element is! InheritedElement) builders[element] = tag;
-          }
-        }
-      }
-      var read = 0;
-      for (final element in rebuilt) {
-        if (++read > maxJoinElements) break;
-        if (!element.mounted) continue;
-        final entry = resolver.entryOf(element);
-        var asReader = false;
-        final builderTag = builders[element];
-        if (builderTag != null) {
-          asReader = true;
-          _add(
-            readers,
-            FlowReader(
-              type: entry.name,
-              via: 'builder',
-              source: _where(entry),
-              tag: builderTag,
-              owner: owners[builderTag],
-            ),
-          );
-        }
-        final stateful = element is StatefulElement;
-        if (entry.isLocal && (stateful || element is StatelessElement)) {
-          for (final dependency in dependenciesOf(
-            element,
-            resolver,
-            tags: tags,
-          )) {
-            if (!owners.containsKey(dependency.tag)) continue;
-            asReader = true;
-            _add(
-              readers,
-              FlowReader(
-                type: entry.name,
-                via: 'dependency',
-                source: _where(entry),
-                tag: dependency.tag,
-                owner: dependency.type,
-              ),
-            );
-          }
-        }
-        // A builder or a reader that also called `setState` is one reader.
-        if (!asReader &&
-            stateful &&
-            entry.isLocal &&
-            setStateTypes.contains(entry.name)) {
-          _add(
-            readers,
-            FlowReader(
-              type: entry.name,
-              via: 'setState',
-              source: _where(entry),
-            ),
-          );
-        }
-      }
-      _rebuilds.add(
-        FlowRebuild(
-          frame: recorder.frameOf(),
-          eventSeqs: {for (final e in events) e.seq},
-          readers: readers.values.toList(),
-        ),
-      );
+      _rebuilds.add(_rebuildOf(events, rebuilt));
     }
     while (_rebuilds.length > maxRebuilds) {
       _rebuilds.removeAt(0);
     }
     return true;
+  }
+
+  /// The state events from [_processed] to [end], one list per cause (or per
+  /// frame when there is no cause), in order of the first event.
+  List<List<TraceEvent>> _newStateGroups(int end) {
+    final groups = <String, List<TraceEvent>>{};
+    for (var seq = _processed; seq < end; seq++) {
+      final e = recorder.at(seq);
+      if (e == null) continue;
+      final isState =
+          e.kind == TraceKind.stateNotify || e.kind == TraceKind.stateSetState;
+      if (!isState || isNoiseSetState(e)) continue;
+      final key = e.cause == null ? 'f${e.frame}' : 'c${e.cause}';
+      groups.putIfAbsent(key, () => <TraceEvent>[]).add(e);
+    }
+    return groups.values.toList();
+  }
+
+  FlowRebuild _rebuildOf(List<TraceEvent> events, Set<Element> rebuilt) {
+    final owners = <String, String>{
+      for (final e in events)
+        if (e.kind == TraceKind.stateNotify && e.data['tag'] is String)
+          e.data['tag']! as String: '${e.data['owner'] ?? e.widget}',
+    };
+    final setStateTypes = {
+      for (final e in events)
+        if (e.kind == TraceKind.stateSetState && e.widget != null) e.widget!,
+    };
+    final builders = _buildersOf(owners.keys);
+    final readers = <String, FlowReader>{};
+    var read = 0;
+    for (final element in rebuilt) {
+      if (++read > maxJoinElements) break;
+      if (!element.mounted) continue;
+      for (final reader in _readersOf(
+        element,
+        owners: owners,
+        builders: builders,
+        setStateTypes: setStateTypes,
+      )) {
+        _add(readers, reader);
+      }
+    }
+    return FlowRebuild(
+      frame: recorder.frameOf(),
+      eventSeqs: {for (final e in events) e.seq},
+      readers: readers.values.toList(),
+    );
+  }
+
+  /// The elements that build from the objects tagged [ownerTags], by element.
+  Map<Element, String> _buildersOf(Iterable<String> ownerTags) {
+    final builders = Map<Element, String>.identity();
+    final listen = _listen;
+    if (listen == null) return builders;
+    for (final tag in ownerTags) {
+      for (final element in listen.elementsFor(tag)) {
+        // A provider scope is where the object lives, not a reader.
+        if (element is! InheritedElement) builders[element] = tag;
+      }
+    }
+    return builders;
+  }
+
+  /// How [element] read the changed state: as a builder, through a
+  /// dependency, or only by calling `setState`.
+  List<FlowReader> _readersOf(
+    Element element, {
+    required Map<String, String> owners,
+    required Map<Element, String> builders,
+    required Set<String> setStateTypes,
+  }) {
+    final entry = resolver.entryOf(element);
+    final stateful = element is StatefulElement;
+    final readers = <FlowReader>[
+      if (builders[element] case final tag?)
+        FlowReader(
+          type: entry.name,
+          via: 'builder',
+          source: _where(entry),
+          tag: tag,
+          owner: owners[tag],
+        ),
+      if (entry.isLocal && (stateful || element is StatelessElement))
+        for (final dependency in dependenciesOf(element, resolver, tags: tags))
+          if (owners.containsKey(dependency.tag))
+            FlowReader(
+              type: entry.name,
+              via: 'dependency',
+              source: _where(entry),
+              tag: dependency.tag,
+              owner: dependency.type,
+            ),
+    ];
+    // A builder or a reader that also called `setState` is one reader.
+    if (readers.isEmpty &&
+        stateful &&
+        entry.isLocal &&
+        setStateTypes.contains(entry.name)) {
+      readers.add(
+        FlowReader(type: entry.name, via: 'setState', source: _where(entry)),
+      );
+    }
+    return readers;
   }
 
   static void _add(Map<String, FlowReader> readers, FlowReader reader) =>
@@ -548,7 +554,7 @@ class StateLens extends ChangeNotifier
     return stateFlowChain(recorder, fromSeq: _fromSeq, rebuilds: _rebuilds);
   }
 
-  /// The story since the window opened (PLAN-v3 Milestone 21b): blocks per
+  /// The story since the window opened: blocks per
   /// cause in time order, oldest first, with rows, diffs and what rebuilt.
   /// [filter] folds hover and controller changes and, for "Only my state",
   /// owners outside the project. The card and `state_flow` read this.

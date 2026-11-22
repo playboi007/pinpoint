@@ -15,7 +15,7 @@ class HookRegistry {
 
   /// Adds [handler] to `HardwareKeyboard.instance` until [dispose].
   ///
-  /// Every handler sees every key, whatever earlier handlers return; the
+  /// Every handler sees every key, whatever previous handlers return; the
   /// return value only reports "handled" to the embedder (docs/api-notes.md,
   /// item 6). To keep keys from the app, take focus away from it.
   void addKeyHandler(KeyEventCallback handler) {
@@ -111,7 +111,7 @@ class GlobalSlot<T> {
         !identical(holder, this) &&
         holder._held &&
         holder._isSame(_read(), holder._ours)) {
-      // Take over: the other holder no longer restores anything.
+      // Take over: the other holder restores nothing.
       _previous = holder._previous as T;
       holder._held = false;
     } else if (!_held || !_isSame(_read(), _ours)) {

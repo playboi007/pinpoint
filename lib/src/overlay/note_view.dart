@@ -20,8 +20,7 @@ class NoteActions {
     this.replay,
   });
 
-  /// Plays the note's tape (PLAN-v2 Milestone 15, step 16). Null: no
-  /// Replay button.
+  /// Plays the note's tape. Null: no Replay button.
   final ValueChanged<String>? replay;
 
   /// Submits a draft to every sink.
@@ -44,8 +43,7 @@ class NoteActions {
   final void Function(String id, String comment) edit;
 
   /// Undoes [changes] (ids like `c1`, or `['*']` for all) of round [round]
-  /// of the note, with the user's reason (null when none was typed)
-  /// (PLAN-v3 Milestone 20).
+  /// of the note, with the user's reason (null when none was typed).
   final void Function(
     String id,
     int round,
@@ -244,10 +242,8 @@ class _NoteViewState extends State<NoteView> {
   Widget build(BuildContext context) {
     final tokens = PinPointTokens.of(context);
     final note = widget.note;
-    final number = widget.number;
     // The body scrolls; the reason field and the buttons stay in a footer
-    // under it, as the Comment tab's do. A note with many replies would
-    // otherwise push Accept and Reopen out of the panel.
+    // under it, so many replies cannot push Accept and Reopen out of view.
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -255,7 +251,7 @@ class _NoteViewState extends State<NoteView> {
         Flexible(
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(PinPointSizes.panelPadding),
-            child: _body(tokens, note, number),
+            child: _body(tokens, note, widget.number),
           ),
         ),
         _footer(tokens, note),
@@ -264,77 +260,15 @@ class _NoteViewState extends State<NoteView> {
   }
 
   Widget _body(PinPointTokens tokens, Annotation note, int? number) {
-    final id = note.id;
     final status = note.status;
-    final draft = status == NoteStatus.draft;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          children: [
-            _StatusGlyph(status),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                key: NoteView.statusKey,
-                '${number == null ? 'NOTE' : 'NOTE $number'}'
-                ' · ${PinMarker.label(status).toUpperCase()}'
-                ' · ${note.intent.name.toUpperCase()}',
-                style: tokens.caps.copyWith(color: tokens.ink),
-              ),
-            ),
-            if (NoteView.canUndo(note)) ...[
-              const SizedBox(width: 8),
-              DraftButton.link(
-                key: NoteView.changesKey,
-                label:
-                    'Changes · ${NoteView.latestClosedRound(note)!.changes.length}',
-                onPressed: () => setState(() {
-                  _changesOpen = !_changesOpen;
-                  if (!_changesOpen) _ticked.clear();
-                }),
-              ),
-            ],
-          ],
-        ),
+        _header(tokens, note, number),
         _changesSection(tokens, note),
         const SizedBox(height: 12),
-        if (draft)
-          TextField(
-            key: NoteView.fieldKey,
-            controller: _text,
-            focusNode: widget.focusNode,
-            minLines: 3,
-            maxLines: 8,
-            keyboardType: TextInputType.multiline,
-            onChanged: (value) => widget.actions.edit(id, value),
-            onTapOutside: (_) {},
-            decoration: const InputDecoration(
-              contentPadding: EdgeInsets.all(8),
-            ),
-          )
-        else
-          SelectableText(note.comment, style: tokens.body),
-        if (note.messages.isNotEmpty) ...[
-          const SizedBox(height: 14),
-          const CapsText('REPLIES'),
-          const SizedBox(height: 6),
-          for (final message in note.messages)
-            Container(
-              padding: const EdgeInsets.symmetric(vertical: 6),
-              decoration: BoxDecoration(
-                border: Border(top: BorderSide(color: tokens.rule)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(message.from, style: tokens.micro),
-                  const SizedBox(height: 2),
-                  Text(message.text, style: tokens.body),
-                ],
-              ),
-            ),
-        ],
+        _comment(tokens, note),
+        ..._replies(tokens, note),
         if (note.verification case final verification?)
           Padding(
             padding: const EdgeInsets.only(top: 14),
@@ -353,6 +287,78 @@ class _NoteViewState extends State<NoteView> {
           ),
       ],
     );
+  }
+
+  Widget _header(PinPointTokens tokens, Annotation note, int? number) {
+    final status = note.status;
+    return Row(
+      children: [
+        _StatusGlyph(status),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            key: NoteView.statusKey,
+            '${number == null ? 'NOTE' : 'NOTE $number'}'
+            ' · ${PinMarker.label(status).toUpperCase()}'
+            ' · ${note.intent.name.toUpperCase()}',
+            style: tokens.caps.copyWith(color: tokens.ink),
+          ),
+        ),
+        if (NoteView.canUndo(note)) ...[
+          const SizedBox(width: 8),
+          DraftButton.link(
+            key: NoteView.changesKey,
+            label:
+                'Changes · ${NoteView.latestClosedRound(note)!.changes.length}',
+            onPressed: () => setState(() {
+              _changesOpen = !_changesOpen;
+              if (!_changesOpen) _ticked.clear();
+            }),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _comment(PinPointTokens tokens, Annotation note) {
+    if (note.status != NoteStatus.draft) {
+      return SelectableText(note.comment, style: tokens.body);
+    }
+    return TextField(
+      key: NoteView.fieldKey,
+      controller: _text,
+      focusNode: widget.focusNode,
+      minLines: 3,
+      maxLines: 8,
+      keyboardType: TextInputType.multiline,
+      onChanged: (value) => widget.actions.edit(note.id, value),
+      onTapOutside: (_) {},
+      decoration: const InputDecoration(contentPadding: EdgeInsets.all(8)),
+    );
+  }
+
+  List<Widget> _replies(PinPointTokens tokens, Annotation note) {
+    if (note.messages.isEmpty) return const [];
+    return [
+      const SizedBox(height: 14),
+      const CapsText('REPLIES'),
+      const SizedBox(height: 6),
+      for (final message in note.messages)
+        Container(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          decoration: BoxDecoration(
+            border: Border(top: BorderSide(color: tokens.rule)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(message.from, style: tokens.micro),
+              const SizedBox(height: 2),
+              Text(message.text, style: tokens.body),
+            ],
+          ),
+        ),
+    ];
   }
 
   /// The section under the header: the shown round, a checkbox for each
@@ -384,170 +390,183 @@ class _NoteViewState extends State<NoteView> {
     );
   }
 
-  Widget _changes(PinPointTokens tokens, Annotation note, NoteRound round) {
-    final rounds = NoteView.closedRounds(note);
+  Widget _changes(PinPointTokens tokens, Annotation note, NoteRound round) =>
+      Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(border: Border.all(color: tokens.rule)),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _changesHeader(tokens, NoteView.closedRounds(note), round),
+            for (final change in round.changes) _changeRow(change, round),
+            const SizedBox(height: 8),
+            _undoButtons(round),
+          ],
+        ),
+      );
+
+  Widget _changesHeader(
+    PinPointTokens tokens,
+    List<NoteRound> rounds,
+    NoteRound round,
+  ) => Row(
+    children: [
+      const CapsText('CHANGES'),
+      const SizedBox(width: 8),
+      if (rounds.length > 1)
+        Expanded(
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: DraftSegmented<int>(
+                items: [for (final r in rounds) (r.n, 'R${r.n}')],
+                value: round.n,
+                cellWidth: 32,
+                cellKey: NoteView.roundKey,
+                onChanged: (n) => setState(() {
+                  _round = n;
+                  _ticked.clear();
+                }),
+              ),
+            ),
+          ),
+        )
+      else
+        Text('Round ${round.n}', style: tokens.micro),
+    ],
+  );
+
+  Widget _changeRow(RoundChange change, NoteRound round) => _ChangeRow(
+    change: change,
+    undone: round.isUndone(change.id),
+    ticked: _ticked.contains(change.id),
+    onChanged: (on) => setState(() {
+      if (on) {
+        _ticked.add(change.id);
+      } else {
+        _ticked.remove(change.id);
+      }
+    }),
+  );
+
+  Widget _undoButtons(NoteRound round) {
     final git = round.hasCheckpoints;
     final undoable = [
       for (final c in round.changes)
         if (!round.isUndone(c.id)) c,
     ];
     final selected = undoable.where((c) => _ticked.contains(c.id)).length;
-    return Container(
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(border: Border.all(color: tokens.rule)),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              const CapsText('CHANGES'),
-              const SizedBox(width: 8),
-              if (rounds.length > 1)
-                Expanded(
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: DraftSegmented<int>(
-                        items: [for (final r in rounds) (r.n, 'R${r.n}')],
-                        value: round.n,
-                        cellWidth: 32,
-                        cellKey: NoteView.roundKey,
-                        onChanged: (n) => setState(() {
-                          _round = n;
-                          _ticked.clear();
-                        }),
-                      ),
-                    ),
-                  ),
-                )
-              else
-                Text('Round ${round.n}', style: tokens.micro),
-            ],
-          ),
-          for (final change in round.changes)
-            _ChangeRow(
-              change: change,
-              undone: round.isUndone(change.id),
-              ticked: _ticked.contains(change.id),
-              onChanged: (on) => setState(() {
-                if (on) {
-                  _ticked.add(change.id);
-                } else {
-                  _ticked.remove(change.id);
-                }
-              }),
-            ),
-          const SizedBox(height: 8),
-          Wrap(
-            alignment: WrapAlignment.end,
-            spacing: 8,
-            runSpacing: 4,
-            children: [
-              DraftButton.link(
-                key: NoteView.undoSelectedKey,
-                label: git ? 'Undo selected' : 'Ask agent to undo selected',
-                onPressed: selected == 0 ? null : () => _undo(all: false),
-              ),
-              DraftButton.link(
-                key: NoteView.undoAllKey,
-                label: git ? 'Undo all' : 'Ask agent to undo all',
-                onPressed: undoable.isEmpty ? null : () => _undo(all: true),
-              ),
-            ],
-          ),
-        ],
-      ),
+    return Wrap(
+      alignment: WrapAlignment.end,
+      spacing: 8,
+      runSpacing: 4,
+      children: [
+        DraftButton.link(
+          key: NoteView.undoSelectedKey,
+          label: git ? 'Undo selected' : 'Ask agent to undo selected',
+          onPressed: selected == 0 ? null : () => _undo(all: false),
+        ),
+        DraftButton.link(
+          key: NoteView.undoAllKey,
+          label: git ? 'Undo all' : 'Ask agent to undo all',
+          onPressed: undoable.isEmpty ? null : () => _undo(all: true),
+        ),
+      ],
     );
   }
 
-  Widget _footer(PinPointTokens tokens, Annotation note) {
+  Widget _footer(PinPointTokens tokens, Annotation note) => Container(
+    padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+    decoration: BoxDecoration(
+      border: Border(top: BorderSide(color: tokens.ink)),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (PinMarker.showsMark(note.status)) ...[
+          _reasonField(tokens),
+          const SizedBox(height: 8),
+        ],
+        _footerButtons(note),
+      ],
+    ),
+  );
+
+  /// The reason reaches the agent as the user's message: without it a
+  /// reopened note says nothing about what is still wrong.
+  Widget _reasonField(PinPointTokens tokens) => TextField(
+    key: NoteView.reasonKey,
+    controller: _reason,
+    // One line that grows to four. Enter adds a line; Reopen and Undo send
+    // the text.
+    minLines: 1,
+    maxLines: 4,
+    keyboardType: TextInputType.multiline,
+    onTapOutside: (_) {},
+    style: tokens.body,
+    decoration: InputDecoration(
+      isDense: true,
+      hintText: 'What is still wrong? Sent with Reopen or Undo',
+      hintStyle: tokens.body.copyWith(color: tokens.muted),
+      contentPadding: const EdgeInsets.all(8),
+    ),
+  );
+
+  Widget _footerButtons(Annotation note) {
     final id = note.id;
     final status = note.status;
     final draft = status == NoteStatus.draft;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-      decoration: BoxDecoration(
-        border: Border(top: BorderSide(color: tokens.ink)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (PinMarker.showsMark(status)) ...[
-            // The reason reaches the agent as the user's message: without it
-            // a reopened note says nothing about what is still wrong.
-            TextField(
-              key: NoteView.reasonKey,
-              controller: _reason,
-              // One line that grows to four. Enter adds a line; Reopen and
-              // Undo send the text.
-              minLines: 1,
-              maxLines: 4,
-              keyboardType: TextInputType.multiline,
-              onTapOutside: (_) {},
-              style: tokens.body,
-              decoration: InputDecoration(
-                isDense: true,
-                hintText: 'What is still wrong? Sent with Reopen or Undo',
-                hintStyle: tokens.body.copyWith(color: tokens.muted),
-                contentPadding: const EdgeInsets.all(8),
-              ),
-            ),
-            const SizedBox(height: 8),
-          ],
-          Wrap(
-            alignment: WrapAlignment.end,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              DraftButton.link(
-                key: NoteView.deleteKey,
-                label: 'Delete',
-                onPressed: () => widget.actions.delete(id),
-              ),
-              if (note.tape != null && widget.actions.replay != null)
-                DraftButton.outline(
-                  key: NoteView.replayKey,
-                  label: 'Replay',
-                  onPressed: () => widget.actions.replay!(id),
-                ),
-              if (draft && widget.drafts > 1)
-                DraftButton.outline(
-                  key: NoteView.sendAllKey,
-                  label: 'Send all ${widget.drafts} drafts',
-                  onPressed: widget.actions.sendAll,
-                ),
-              if (PinMarker.showsMark(status))
-                DraftButton.outline(
-                  key: NoteView.reopenKey,
-                  label: 'Reopen',
-                  onPressed: _reopen,
-                ),
-              if (NoteView.acceptsAnyway(note))
-                DraftButton.outline(
-                  key: NoteView.acceptKey,
-                  label: 'Accept anyway',
-                  onPressed: () => widget.actions.accept(id),
-                )
-              else if (NoteView.canAccept(note))
-                DraftButton.primary(
-                  key: NoteView.acceptKey,
-                  label: 'Accept',
-                  onPressed: () => widget.actions.accept(id),
-                ),
-              if (draft)
-                DraftButton.primary(
-                  key: NoteView.sendKey,
-                  label: 'Send',
-                  onPressed: _text.text.trim().isEmpty
-                      ? null
-                      : () => widget.actions.send(id),
-                ),
-            ],
+    return Wrap(
+      alignment: WrapAlignment.end,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        DraftButton.link(
+          key: NoteView.deleteKey,
+          label: 'Delete',
+          onPressed: () => widget.actions.delete(id),
+        ),
+        if (note.tape != null && widget.actions.replay != null)
+          DraftButton.outline(
+            key: NoteView.replayKey,
+            label: 'Replay',
+            onPressed: () => widget.actions.replay!(id),
           ),
-        ],
-      ),
+        if (draft && widget.drafts > 1)
+          DraftButton.outline(
+            key: NoteView.sendAllKey,
+            label: 'Send all ${widget.drafts} drafts',
+            onPressed: widget.actions.sendAll,
+          ),
+        if (PinMarker.showsMark(status))
+          DraftButton.outline(
+            key: NoteView.reopenKey,
+            label: 'Reopen',
+            onPressed: _reopen,
+          ),
+        if (NoteView.acceptsAnyway(note))
+          DraftButton.outline(
+            key: NoteView.acceptKey,
+            label: 'Accept anyway',
+            onPressed: () => widget.actions.accept(id),
+          )
+        else if (NoteView.canAccept(note))
+          DraftButton.primary(
+            key: NoteView.acceptKey,
+            label: 'Accept',
+            onPressed: () => widget.actions.accept(id),
+          ),
+        if (draft)
+          DraftButton.primary(
+            key: NoteView.sendKey,
+            label: 'Send',
+            onPressed: _text.text.trim().isEmpty
+                ? null
+                : () => widget.actions.send(id),
+          ),
+      ],
     );
   }
 }
@@ -692,15 +711,13 @@ class _Verification extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tokens = PinPointTokens.of(context);
+    final raw = verification['checks'];
     final checks = [
-      for (final c
-          in verification['checks'] is List<Object?>
-              ? verification['checks']! as List<Object?>
-              : const <Object?>[])
-        if (c is Map<String, Object?>) c,
+      if (raw is List<Object?>)
+        for (final c in raw)
+          if (c is Map<String, Object?>) c,
     ];
     final passed = verification['passed'] == true;
-    final count = checks.where((c) => c['passed'] == true).length;
     final color = passed ? tokens.ok : tokens.err;
     return Container(
       padding: const EdgeInsets.all(8),
@@ -711,54 +728,66 @@ class _Verification extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            children: [
-              Icon(
-                passed ? PinPointIcons.checkCircle : PinPointIcons.error,
-                size: 14,
-                color: color,
-              ),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  'Checks ${passed ? 'passed' : 'failed'} ($count of '
-                  '${checks.length} passed)',
-                  style: tokens.body.copyWith(
-                    color: color,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ),
-            ],
+          _heading(tokens, checks, passed: passed, color: color),
+          for (final check in checks) _checkRow(tokens, check),
+        ],
+      ),
+    );
+  }
+
+  Widget _heading(
+    PinPointTokens tokens,
+    List<Map<String, Object?>> checks, {
+    required bool passed,
+    required Color color,
+  }) {
+    final count = checks.where((c) => c['passed'] == true).length;
+    return Row(
+      children: [
+        Icon(
+          passed ? PinPointIcons.checkCircle : PinPointIcons.error,
+          size: 14,
+          color: color,
+        ),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            'Checks ${passed ? 'passed' : 'failed'} ($count of '
+            '${checks.length} passed)',
+            style: tokens.body.copyWith(
+              color: color,
+              fontWeight: FontWeight.w500,
+            ),
           ),
-          for (final check in checks)
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(
-                    check['passed'] == true
-                        ? PinPointIcons.check
-                        : PinPointIcons.close,
-                    size: 12,
-                    color: check['passed'] == true ? tokens.ok : tokens.err,
-                  ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      '${check['type']}'
-                      '${check['message'] is String ? ': ${check['message']}' : ''}',
-                      style: tokens.value.copyWith(
-                        fontSize: 11,
-                        height: 14 / 11,
-                        color: tokens.ink,
-                      ),
-                    ),
-                  ),
-                ],
+        ),
+      ],
+    );
+  }
+
+  Widget _checkRow(PinPointTokens tokens, Map<String, Object?> check) {
+    final ok = check['passed'] == true;
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            ok ? PinPointIcons.check : PinPointIcons.close,
+            size: 12,
+            color: ok ? tokens.ok : tokens.err,
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              '${check['type']}'
+              '${check['message'] is String ? ': ${check['message']}' : ''}',
+              style: tokens.value.copyWith(
+                fontSize: 11,
+                height: 14 / 11,
+                color: tokens.ink,
               ),
             ),
+          ),
         ],
       ),
     );

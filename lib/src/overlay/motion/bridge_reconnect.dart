@@ -126,21 +126,23 @@ class _OnlineBadge extends StatelessWidget {
 
   final Animation<double> run;
 
+  static Duration get _whole =>
+      BridgeBadgeSlot.snapBase +
+      BridgeBadgeSlot.holdBase +
+      PinPointMotion.moderateBase;
+
+  /// Where in the run the halves have met, and where the fade starts.
+  static double get _snapEnd =>
+      BridgeBadgeSlot.snapBase.inMicroseconds / _whole.inMicroseconds;
+  static double get _fadeStart =>
+      (BridgeBadgeSlot.snapBase + BridgeBadgeSlot.holdBase).inMicroseconds /
+      _whole.inMicroseconds;
+
   @override
   Widget build(BuildContext context) {
     final tokens = PinPointTokens.of(context);
-    final snapEnd =
-        BridgeBadgeSlot.snapBase.inMicroseconds /
-        (BridgeBadgeSlot.snapBase +
-                BridgeBadgeSlot.holdBase +
-                PinPointMotion.moderateBase)
-            .inMicroseconds;
-    final fadeStart =
-        (BridgeBadgeSlot.snapBase + BridgeBadgeSlot.holdBase).inMicroseconds /
-        (BridgeBadgeSlot.snapBase +
-                BridgeBadgeSlot.holdBase +
-                PinPointMotion.moderateBase)
-            .inMicroseconds;
+    final snapEnd = _snapEnd;
+    final fadeStart = _fadeStart;
     return IgnorePointer(
       child: Semantics(
         liveRegion: true,
@@ -151,54 +153,62 @@ class _OnlineBadge extends StatelessWidget {
           builder: (context, _) {
             final v = run.value;
             final snap = (v / snapEnd).clamp(0.0, 1.0);
-            final joined = snap >= 1;
             final fade = v <= fadeStart
                 ? 1.0
                 : 1 - (v - fadeStart) / (1 - fadeStart);
-            final content = Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _SplitLink(
-                    // 1 while the halves are apart, 0 when they meet; the
-                    // spring overshoots, so they press into each other.
-                    apart: 1 - PinPointMotion.spring.transform(snap),
-                    color: tokens.ink,
-                  ),
-                  const SizedBox(width: 5),
-                  Text(
-                    joined ? 'BRIDGE ONLINE' : 'BRIDGE OFFLINE',
-                    style: tokens.caps.copyWith(color: tokens.ink),
-                  ),
-                ],
-              ),
-            );
             return Opacity(
               key: BridgeBadgeSlot.onlineKey,
               opacity: fade.clamp(0.0, 1.0),
-              child: SizedBox(
-                height: 22,
-                child: joined
-                    ? DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: tokens.paper,
-                          border: Border.all(color: tokens.ink),
-                        ),
-                        child: Center(widthFactor: 1, child: content),
-                      )
-                    : DashedBox(
-                        color: tokens.ink,
-                        fill: tokens.paper,
-                        child: Center(widthFactor: 1, child: content),
-                      ),
-              ),
+              child: _badge(tokens, snap),
             );
           },
         ),
       ),
     );
   }
+
+  /// The 22 px badge: dashed while the halves are apart, solid once joined.
+  Widget _badge(PinPointTokens tokens, double snap) {
+    final joined = snap >= 1;
+    final content = _content(tokens, snap, joined: joined);
+    return SizedBox(
+      height: 22,
+      child: joined
+          ? DecoratedBox(
+              decoration: BoxDecoration(
+                color: tokens.paper,
+                border: Border.all(color: tokens.ink),
+              ),
+              child: Center(widthFactor: 1, child: content),
+            )
+          : DashedBox(
+              color: tokens.ink,
+              fill: tokens.paper,
+              child: Center(widthFactor: 1, child: content),
+            ),
+    );
+  }
+
+  Widget _content(PinPointTokens tokens, double snap, {required bool joined}) =>
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _SplitLink(
+              // 1 while the halves are apart, 0 when they meet; the
+              // spring overshoots, so they press into each other.
+              apart: 1 - PinPointMotion.spring.transform(snap),
+              color: tokens.ink,
+            ),
+            const SizedBox(width: 5),
+            Text(
+              joined ? 'BRIDGE ONLINE' : 'BRIDGE OFFLINE',
+              style: tokens.caps.copyWith(color: tokens.ink),
+            ),
+          ],
+        ),
+      );
 }
 
 /// The `link` glyph cut in two across the middle. [apart] is 1 with the

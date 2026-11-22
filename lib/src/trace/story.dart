@@ -1,35 +1,44 @@
-// Plain Dart: no `dart:ui` and no `package:flutter` (PLAN-v2 rule 13). The
-// bridge imports this file, so `state_flow` and the watch card read the same
-// blocks (PLAN-v3 Milestone 21b, "Story view").
+// Plain Dart: no `dart:ui` and no `package:flutter`. The bridge imports this
+// file, so `state_flow` and the watch card read the same blocks.
 //
 // A story is a list of blocks in time order, oldest first. One block is one
 // cause (a tap, a timer, a network answer, ...) with the rows it changed and
 // the widgets that rebuilt. [StoryBuilder] makes it; this file is the data
 // and its JSON.
 
+import '../model/json_read.dart';
+
 /// The kinds of cause a block has. The label says the rest.
-abstract final class StoryKind {
-  static const String tap = 'tap';
-  static const String press = 'press';
-  static const String drag = 'drag';
-  static const String scroll = 'scroll';
-  static const String hover = 'hover';
-  static const String key = 'key';
-  static const String text = 'text';
-  static const String timer = 'timer';
-  static const String network = 'network';
-  static const String message = 'message';
-  static const String route = 'route';
-  static const String frame = 'frame';
-  static const String agent = 'agent';
-  static const String replay = 'replay';
-  static const String other = 'other';
+enum StoryKind {
+  tap('tap'),
+  press('press'),
+  drag('drag'),
+  scroll('scroll'),
+  hover('hover'),
+  key('key'),
+  text('text'),
+  timer('timer'),
+  network('network'),
+  message('message'),
+  route('route'),
+  frame('frame'),
+  agent('agent'),
+  replay('replay'),
+  other('other'),
 
   /// Changes that came with no cause (no `PinPoint.run`).
-  static const String none = 'none';
+  none('none');
 
-  /// Kinds that [StoryFilter.showHover] folds.
-  static bool isHover(String kind) => kind == hover;
+  const StoryKind(this.wire);
+
+  final String wire;
+
+  /// An unknown or missing kind reads as [other].
+  static StoryKind fromWire(Object? wire) =>
+      values.firstWhere((kind) => kind.wire == wire, orElse: () => other);
+
+  /// Whether [StoryFilter.showHover] folds this kind.
+  bool get isHover => this == hover;
 }
 
 /// What started a block.
@@ -37,13 +46,12 @@ class StoryCause {
   const StoryCause({required this.kind, required this.label, this.id});
 
   factory StoryCause.fromJson(Map<String, Object?> json) => StoryCause(
-    kind: '${json['kind'] ?? StoryKind.other}',
+    kind: StoryKind.fromWire(json['kind']),
     label: '${json['label'] ?? ''}',
     id: json['id'] is int ? json['id']! as int : null,
   );
 
-  /// See [StoryKind].
-  final String kind;
+  final StoryKind kind;
 
   /// `tap "Fetch"`, `timer or async callback`, `no cause recorded`.
   final String label;
@@ -51,7 +59,11 @@ class StoryCause {
   /// The cause's id; null for a change with no cause.
   final int? id;
 
-  Map<String, Object?> toJson() => {'kind': kind, 'label': label, 'id': ?id};
+  Map<String, Object?> toJson() => {
+    'kind': kind.wire,
+    'label': label,
+    'id': ?id,
+  };
 }
 
 /// One kind of change inside a row, and how many times it happened:
@@ -123,12 +135,14 @@ class StoryRow {
     mine: json['mine'] != false,
     count: json['count'] is int ? json['count']! as int : 1,
     instances: [
-      for (final i in _list(json['instances'])) ?StoryInstance.fromJson(i),
+      for (final i in asJsonList(json['instances'])) ?StoryInstance.fromJson(i),
     ],
     instanceCount: json['instanceCount'] is int
         ? json['instanceCount']! as int
         : 0,
-    changes: [for (final c in _list(json['changes'])) ?StoryChange.fromJson(c)],
+    changes: [
+      for (final c in asJsonList(json['changes'])) ?StoryChange.fromJson(c),
+    ],
     file: json['file'] is String ? json['file']! as String : null,
     line: json['line'] is int ? json['line']! as int : null,
     method: json['method'] is String ? json['method']! as String : null,
@@ -215,7 +229,7 @@ class StoryRow {
     if (hasValue) 'hasValue': true,
   };
 
-  /// A string that is equal for two rows that say the same (used to fold
+  /// A string that is equal for two rows that say the same (it folds
   /// blocks that repeat).
   String get signature =>
       '$kind|$owner|$src|$verb|${changes.map((c) => c.text).join(';')}|$method';
@@ -241,14 +255,14 @@ class StoryBlock {
   factory StoryBlock.fromJson(Map<String, Object?> json) => StoryBlock(
     id: '${json['id'] ?? ''}',
     at: json['at'] is int ? json['at']! as int : 0,
-    cause: StoryCause.fromJson(_map(json['cause'])),
+    cause: StoryCause.fromJson(asJsonMap(json['cause'])),
     wall: json['wall'] is int ? json['wall']! as int : null,
     rows: [
-      for (final r in _list(json['rows']))
+      for (final r in asJsonList(json['rows']))
         if (r is Map<String, Object?>) StoryRow.fromJson(r),
     ],
     droppedRows: json['droppedRows'] is int ? json['droppedRows']! as int : 0,
-    rebuilt: [for (final r in _list(json['rebuilt'])) '$r'],
+    rebuilt: [for (final r in asJsonList(json['rebuilt'])) '$r'],
     rebuiltCount: json['rebuiltCount'] is int
         ? json['rebuiltCount']! as int
         : 0,
@@ -396,18 +410,18 @@ class Story {
     if (json is! Map<String, Object?>) return const Story();
     return Story(
       blocks: [
-        for (final b in _list(json['blocks']))
+        for (final b in asJsonList(json['blocks']))
           if (b is Map<String, Object?>) StoryBlock.fromJson(b),
       ],
       ends: [
-        for (final e in _list(json['ends']))
+        for (final e in asJsonList(json['ends']))
           if (e is Map<String, Object?>) StoryEnd.fromJson(e),
       ],
-      droppedBlocks: _int(json['droppedBlocks']),
-      hiddenHover: _int(json['hiddenHover']),
-      hiddenControllers: _int(json['hiddenControllers']),
-      hiddenForeign: _int(json['hiddenForeign']),
-      droppedStacks: _int(json['droppedStacks']),
+      droppedBlocks: (asInt(json['droppedBlocks']) ?? 0),
+      hiddenHover: (asInt(json['hiddenHover']) ?? 0),
+      hiddenControllers: (asInt(json['hiddenControllers']) ?? 0),
+      hiddenForeign: (asInt(json['hiddenForeign']) ?? 0),
+      droppedStacks: (asInt(json['droppedStacks']) ?? 0),
       noCauseHint: json['noCauseHint'] is String
           ? json['noCauseHint']! as String
           : null,
@@ -482,11 +496,3 @@ class Story {
     if (!rebuildsRecorded) 'rebuildsRecorded': false,
   };
 }
-
-int _int(Object? v) => v is int ? v : 0;
-
-List<Object?> _list(Object? value) =>
-    value is List<Object?> ? value : const <Object?>[];
-
-Map<String, Object?> _map(Object? value) =>
-    value is Map<String, Object?> ? value : const <String, Object?>{};

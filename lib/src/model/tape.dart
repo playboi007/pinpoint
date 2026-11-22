@@ -1,9 +1,11 @@
-// Plain Dart: no `dart:ui` and no `package:flutter` (PLAN-v2 rule 13). The
-// app makes tapes and the bridge stores and reads the same shape.
+// Plain Dart: no `dart:ui` and no `package:flutter`. The app makes tapes and
+// the bridge stores and reads the same shape.
 
 import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
+
+import 'json_read.dart';
 
 /// Version of the tape JSON shape.
 const int tapeSchema = 1;
@@ -33,17 +35,12 @@ String newRunId([DateTime? at]) => _stamp(at ?? DateTime.now(), 'run');
 
 /// A **full** tape starts at app start and replays after a restart. A
 /// **segment** starts at a mark (or seconds back) and replays from wherever
-/// the app is now (PLAN-v2 Milestone 15, step 2).
+/// the app is now.
 enum TapeKind {
   full,
   segment;
 
-  static TapeKind? byName(Object? name) {
-    for (final kind in values) {
-      if (kind.name == name) return kind;
-    }
-    return null;
-  }
+  static TapeKind? byName(Object? name) => asEnum(values, name);
 }
 
 /// Where a tape starts: the page, its size, its environment and, when the
@@ -64,34 +61,33 @@ class TapeStart {
 
   static TapeStart? fromJson(Object? json) {
     if (json is! Map<String, Object?>) return null;
-    final t = json['t'];
-    final seq = json['seq'];
-    final wall = json['wall'];
-    if (t is! int || seq is! int || wall is! String) return null;
-    final env = json['environment'];
-    final storage = json['storage'];
-    return TapeStart(
-      t: t,
-      seq: seq,
-      wallTime: wall,
-      url: json['url'] is String ? json['url']! as String : '',
-      width: _double(json['width']),
-      height: _double(json['height']),
-      pixelRatio: _double(json['pixelRatio']),
-      locale: json['locale'] is String ? json['locale']! as String : null,
-      environment: env is Map<String, Object?> ? env : null,
-      storage: storage is Map<String, Object?>
-          ? {
-              for (final MapEntry(:key, :value) in storage.entries)
-                if (value is Map<String, Object?>)
-                  key: {
-                    for (final e in value.entries)
-                      if (e.value is String) e.key: e.value! as String,
-                  },
-            }
-          : null,
-    );
+    if (json case {
+      't': final int t,
+      'seq': final int seq,
+      'wall': final String wall,
+    }) {
+      return TapeStart(
+        t: t,
+        seq: seq,
+        wallTime: wall,
+        url: json.str('url') ?? '',
+        width: asDouble(json['width']),
+        height: asDouble(json['height']),
+        pixelRatio: asDouble(json['pixelRatio']),
+        locale: json.str('locale'),
+        environment: json.object('environment', (map) => map),
+        storage: json.object('storage', _storageOf),
+      );
+    }
+    return null;
   }
+
+  static Map<String, Map<String, String>> _storageOf(
+    Map<String, Object?> storage,
+  ) => {
+    for (final MapEntry(:key, :value) in storage.entries)
+      if (value is Map<String, Object?>) key: asStringMap(value),
+  };
 
   /// Run time (ms) at which the tape starts. 0 for a full tape.
   final int t;
@@ -113,12 +109,12 @@ class TapeStart {
   /// For example `en-US`.
   final String? locale;
 
-  /// The Milestone 9 environment in force (`Environment.toJson`).
+  /// The environment override in force (`EnvironmentController.toJson`).
   final Map<String, Object?>? environment;
 
   /// `local` and `session`: copies of `localStorage` and `sessionStorage`
   /// at app start. Only with `TraceConfig.storage`, because they hold
-  /// session tokens (step 4).
+  /// session tokens.
   final Map<String, Map<String, String>>? storage;
 
   Map<String, Object?> toJson() => {
@@ -136,7 +132,7 @@ class TapeStart {
 }
 
 /// One input of a tape: a pointer, key, text or message event, with what
-/// it waits for at replay (step 10).
+/// it waits for at replay.
 class TapeInput {
   const TapeInput({
     required this.step,
@@ -152,29 +148,25 @@ class TapeInput {
 
   static TapeInput? fromJson(Object? json) {
     if (json is! Map<String, Object?>) return null;
-    final step = json['step'];
-    final seq = json['seq'];
-    final t = json['t'];
-    final frame = json['frame'];
-    final kind = json['kind'];
-    if (step is! int || seq is! int || t is! int || kind is! String) {
-      return null;
+    if (json case {
+      'step': final int step,
+      'seq': final int seq,
+      't': final int t,
+      'kind': final String kind,
+    }) {
+      return TapeInput(
+        step: step,
+        seq: seq,
+        t: t,
+        frame: asInt(json['frame']) ?? 0,
+        kind: kind,
+        widget: json.str('widget'),
+        source: json.str('source'),
+        data: asJsonMap(json['data']),
+        after: json.items('after', asInt),
+      );
     }
-    final data = json['data'];
-    final after = json['after'];
-    return TapeInput(
-      step: step,
-      seq: seq,
-      t: t,
-      frame: frame is int ? frame : 0,
-      kind: kind,
-      widget: json['widget'] is String ? json['widget']! as String : null,
-      source: json['source'] is String ? json['source']! as String : null,
-      data: data is Map<String, Object?> ? data : const <String, Object?>{},
-      after: after is List<Object?>
-          ? [for (final n in after) ?(n is int ? n : null)]
-          : const <int>[],
-    );
+    return null;
   }
 
   /// 1-based order in the tape: what `first_difference` and `until:
@@ -236,42 +228,31 @@ class NetExchange {
 
   static NetExchange? fromJson(Object? json) {
     if (json is! Map<String, Object?>) return null;
-    final n = json['n'];
-    final key = json['key'];
-    final method = json['method'];
-    final url = json['url'];
-    final t = json['t'];
-    if (n is! int ||
-        key is! String ||
-        method is! String ||
-        url is! String ||
-        t is! int) {
-      return null;
+    if (json case {
+      'n': final int n,
+      'key': final String key,
+      'method': final String method,
+      'url': final String url,
+      't': final int t,
+    }) {
+      return NetExchange(
+        n: n,
+        key: key,
+        method: method,
+        url: url,
+        t: t,
+        nth: asInt(json['nth']) ?? 1,
+        status: asInt(json['status']),
+        headers: asStringMap(json['headers']),
+        ms: asInt(json['ms']),
+        hash: json.str('hash'),
+        size: asInt(json['size']),
+        error: json.str('error'),
+        unsupported: json.str('unsupported'),
+        answeredSeq: asInt(json['answered']),
+      );
     }
-    final headers = json['headers'];
-    return NetExchange(
-      n: n,
-      key: key,
-      method: method,
-      url: url,
-      t: t,
-      nth: json['nth'] is int ? json['nth']! as int : 1,
-      status: json['status'] is int ? json['status']! as int : null,
-      headers: headers is Map<String, Object?>
-          ? {
-              for (final e in headers.entries)
-                if (e.value is String) e.key: e.value! as String,
-            }
-          : const <String, String>{},
-      ms: json['ms'] is int ? json['ms']! as int : null,
-      hash: json['hash'] is String ? json['hash']! as String : null,
-      size: json['size'] is int ? json['size']! as int : null,
-      error: json['error'] is String ? json['error']! as String : null,
-      unsupported: json['unsupported'] is String
-          ? json['unsupported']! as String
-          : null,
-      answeredSeq: json['answered'] is int ? json['answered']! as int : null,
-    );
+    return null;
   }
 
   /// Order number in the tape, from 0, by request order.
@@ -286,7 +267,7 @@ class NetExchange {
 
   final String method;
 
-  /// The URL as recorded: masked (rule 16).
+  /// The URL as recorded, with secret query values masked.
   final String url;
 
   /// Run time (ms) of the request.
@@ -344,15 +325,15 @@ class TapeMark {
 
   static TapeMark? fromJson(Object? json) {
     if (json is! Map<String, Object?>) return null;
-    final seq = json['seq'];
-    final t = json['t'];
-    if (seq is! int || t is! int) return null;
-    return TapeMark(
-      seq: seq,
-      t: t,
-      text: json['text'] is String ? json['text']! as String : '',
-      by: json['by'] is String ? json['by']! as String : 'user',
-    );
+    if (json case {'seq': final int seq, 't': final int t}) {
+      return TapeMark(
+        seq: seq,
+        t: t,
+        text: json.str('text') ?? '',
+        by: json.str('by') ?? 'user',
+      );
+    }
+    return null;
   }
 
   final int seq;
@@ -369,11 +350,11 @@ class TapeMark {
 }
 
 /// The inputs and network answers of a run, saved so the run can happen
-/// again (PLAN-v2 Milestone 15).
+/// again.
 ///
 /// The bodies are not part of [toJson]: they live in files next to the
 /// tape on the bridge (`tapes/<id>/bodies/`), and a tool answer never
-/// carries them (rule 16).
+/// carries them.
 class Tape {
   Tape({
     required this.id,
@@ -394,45 +375,39 @@ class Tape {
   /// null when a required part is missing.
   static Tape? fromJson(Object? json, {Object? bodies}) {
     if (json is! Map<String, Object?>) return null;
-    final id = json['id'];
+    final id = json.str('id');
     final kind = TapeKind.byName(json['kind']);
     final start = TapeStart.fromJson(json['start']);
-    if (id is! String || kind == null || start == null) return null;
-    List<T> list<T>(Object? raw, T? Function(Object?) read) => [
-      for (final item in raw is List<Object?> ? raw : const <Object?>[])
-        ?read(item),
-    ];
-    final kept = <int, Uint8List>{};
-    if (bodies is Map<String, Object?>) {
-      for (final MapEntry(:key, :value) in bodies.entries) {
-        final n = int.tryParse(key);
-        if (n == null || value is! String) continue;
-        try {
-          kept[n] = base64Decode(value);
-        } on FormatException {
-          // A broken body is left out; its request passes through.
-        }
-      }
-    }
-    final routes = json['routes'];
+    if (id == null || kind == null || start == null) return null;
     return Tape(
       id: id,
       kind: kind,
       start: start,
-      name: json['name'] is String ? json['name']! as String : null,
-      inputs: list(json['inputs'], TapeInput.fromJson),
-      net: list(json['net'], NetExchange.fromJson),
-      marks: list(json['marks'], TapeMark.fromJson),
-      routes: routes is List<Object?>
-          ? [for (final r in routes) ?(r is String ? r : null)]
-          : const <String>[],
+      name: json.str('name'),
+      inputs: json.items('inputs', TapeInput.fromJson),
+      net: json.items('net', NetExchange.fromJson),
+      marks: json.items('marks', TapeMark.fromJson),
+      routes: json.items('routes', asString),
       partial: json['partial'] == true,
-      partialReason: json['reason'] is String
-          ? json['reason']! as String
-          : null,
+      partialReason: json.str('reason'),
       bodiesRead: json['bodies'] != false,
-      bodies: kept,
+      bodies: _decodeBodies(bodies),
     );
+  }
+
+  /// A body that is not valid base64 is left out; its request passes through.
+  static Map<int, Uint8List> _decodeBodies(Object? bodies) {
+    final decoded = <int, Uint8List>{};
+    for (final MapEntry(:key, :value) in asJsonMap(bodies).entries) {
+      final n = int.tryParse(key);
+      if (n == null || value is! String) continue;
+      try {
+        decoded[n] = base64Decode(value);
+      } on FormatException {
+        continue;
+      }
+    }
+    return decoded;
   }
 
   final String id;
@@ -444,10 +419,10 @@ class Tape {
   final List<TapeMark> marks;
 
   /// The route names in the order they were shown: what a replay compares
-  /// first (step 13).
+  /// first.
   final List<String> routes;
 
-  /// Whether a limit dropped data the tape needed (rule 19). A replay of a
+  /// Whether a limit dropped data the tape needed. A replay of a
   /// partial tape cannot give `changed`.
   final bool partial;
   final String? partialReason;
@@ -502,10 +477,8 @@ class Tape {
 }
 
 /// The order numbers of the exchanges in [net] answered before the event
-/// [seq]: the `after` of an input at [seq] (step 1).
+/// [seq]: the `after` of an input at [seq].
 List<int> answeredBefore(int seq, List<NetExchange> net) => [
   for (final e in net)
     if (e.answeredSeq != null && e.answeredSeq! < seq) e.n,
 ];
-
-double? _double(Object? value) => value is num ? value.toDouble() : null;

@@ -235,7 +235,7 @@ class Environment {
   String get summary => [
     if (viewport case final v?) sizeLabelOf(v),
     if (textScale case final t?) 'text ${_label(t)}×',
-    if (boldText == true) 'bold',
+    if (boldText ?? false) 'bold',
     if (safeArea != null) 'safe area',
     if (keyboardHeight != null) 'keyboard',
     if (textDirection == TextDirection.rtl) 'RTL',

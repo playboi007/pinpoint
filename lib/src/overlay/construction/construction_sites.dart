@@ -113,7 +113,7 @@ class ConstructionSites {
     final placements = _placements?.value ?? const <PinPlacement>[];
     final byId = {for (final p in placements) p.id: p};
 
-    // Sites whose note is no longer being worked on.
+    // Sites whose note is not being worked on any more.
     for (final id in _sites.keys.toList()) {
       final site = _sites[id]!;
       final placement = byId[id];

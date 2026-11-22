@@ -4,6 +4,8 @@ import 'construction_assets.dart';
 import 'construction_boxes.dart';
 import 'construction_layout.dart';
 
+part 'construction_crew_css.dart';
+
 /// One trip of the stacker, and the wheelbarrow worker's walk that feeds it.
 ///
 /// All times are seconds in the timeline the trip belongs to (see
@@ -306,235 +308,15 @@ class ConstructionCrew {
     return out;
   }
 
-  // ---- CSS ----
-
-  static String _n(double v) {
-    final s = v.toStringAsFixed(3);
-    return s.contains('.')
-        ? s.replaceFirst(RegExp(r'0+$'), '').replaceFirst(RegExp(r'\.$'), '')
-        : s;
-  }
-
   /// The share of a flight up that is straight up.
   static const double _riseShare = 0.35;
 
-  /// `@keyframes name` over [length] seconds from [stops].
-  static String _keyframes(String name, double length, List<_Stop> stops) {
-    final out = StringBuffer('@keyframes $name{');
-    var last = -1.0;
-    for (final s in stops) {
-      var p = (s.t / length * 100).clamp(0.0, 100.0);
-      if (p < last) p = last;
-      last = p;
-      out.write('${_n(p)}%{${s.css}');
-      if (s.timing != null) out.write(';animation-timing-function:${s.timing}');
-      out.write('}');
-    }
-    out.write('}');
-    return out.toString();
-  }
-
-  /// The stops of an opacity that is 1 on each of [spans] and 0 elsewhere.
-  static List<_Stop> _visible(
-    List<(double, double)> spans,
-    double length, {
-    bool initial = false,
-  }) {
-    final stops = <_Stop>[_Stop(0, 'opacity:${initial ? 1 : 0}', 'step-end')];
-    for (final (a, b) in spans) {
-      stops
-        ..add(_Stop(a, 'opacity:1', 'step-end'))
-        ..add(_Stop(b, 'opacity:0', 'step-end'));
-    }
-    return _close(stops, length);
-  }
-
-  /// Ends [stops] at [length] with the value of the last one.
-  static List<_Stop> _close(List<_Stop> stops, double length) {
-    final sorted = [...stops]..sort((a, b) => a.t.compareTo(b.t));
-    final out = <_Stop>[];
-    for (final s in sorted) {
-      if (out.isNotEmpty &&
-          (s.t - out.last.t).abs() < 1e-9 &&
-          s.css == out.last.css) {
-        continue;
-      }
-      out.add(s);
-    }
-    if (out.last.t < length) out.add(_Stop(length, out.last.css, null));
-    return out;
-  }
-
-  /// All the tracks of one timeline of trips, as `(suffix, stops)`.
-  List<(String, List<_Stop>)> _tracks(
-    List<StackerTrip> list,
-    double length, {
-    required bool withDrop,
-  }) {
-    // The stacker's flight.
-    final moves = _moves(list, withDrop: withDrop);
-    final fly = [
-      for (final m in moves)
-        _Stop(
-          m.t,
-          'transform:translate(${_n(m.x)}px,${_n(m.y)}px)',
-          m.ease.css,
-        ),
-    ];
-
-    // The wheelbarrow worker: where he is, and which way he faces.
-    final barrow = <_Stop>[_Stop(0, 'transform:translateX(0px)', null)];
-    final turn = <_Stop>[_Stop(0, 'transform:scaleX(1)', 'step-end')];
-    final run = layout.barrowRun;
-    for (final t in list) {
-      barrow
-        ..add(_Stop(t.start, 'transform:translateX(0px)', null))
-        ..add(
-          _Stop(t.start + t.walk, 'transform:translateX(${_n(run)}px)', null),
-        )
-        ..add(_Stop(t.turnAt, 'transform:translateX(${_n(run)}px)', null))
-        ..add(_Stop(t.end, 'transform:translateX(0px)', null));
-      turn
-        ..add(_Stop(t.turnAt, 'transform:scaleX(-1)', 'step-end'))
-        ..add(_Stop(t.end, 'transform:scaleX(1)', 'step-end'));
-    }
-
-    // The block's arc: a parabola, in a few straight pieces.
-    final (sx, sy) = _arcStart;
-    final (ex, ey) = _arcEnd;
-    final lift = math.max(8.0, 0.14 * layout.stackerBoxHeight);
-    String at(double u) {
-      final x = sx + (ex - sx) * u - _block / 2;
-      final y = sy + (ey - sy) * u - 4 * lift * u * (1 - u) - _block / 2;
-      return 'transform:translate(${_n(x)}px,${_n(y)}px)';
-    }
-
-    final arc = <_Stop>[_Stop(0, at(0), null)];
-    for (final t in list) {
-      for (var k = 0; k <= 6; k++) {
-        arc.add(
-          _Stop(t.throwAt + (t.catchAt - t.throwAt) * k / 6, at(k / 6), null),
-        );
-      }
-    }
-
-    return [
-      ('sf', _close(fly, length)),
-      ('bx', _close(barrow, length)),
-      ('bf', _close(turn, length)),
-      ('ta', _close(arc, length)),
-      (
-        'sst',
-        _close([
-          _Stop(0, 'opacity:1', 'step-end'),
-          for (final t in list) ...[
-            _Stop(t.catchAt, 'opacity:0', 'step-end'),
-            _Stop(t.liftAt, 'opacity:1', 'step-end'),
-          ],
-        ], length),
-      ),
-      (
-        'sfy',
-        _visible([for (final t in list) (t.catchAt, t.arriveAt)], length),
-      ),
-      ('spl', _visible([for (final t in list) (t.arriveAt, t.liftAt)], length)),
-      (
-        'sfl',
-        _visible([
-          if (withDrop) (dropStart, dropStart + dropSeconds),
-          for (final t in list) (t.catchAt, t.landAt),
-        ], length),
-      ),
-      ('scb', _visible([for (final t in list) (t.catchAt, t.hitAt)], length)),
-      ('thr', _visible([for (final t in list) (t.throwAt, t.catchAt)], length)),
-    ];
-  }
-
-  /// The selector of each track's element.
-  static const Map<String, String> _targets = {
-    'sf': '.ppc-stk',
-    'bx': '.ppc-bwalk',
-    'bf': '.ppc-flip',
-    'ta': '.ppc-tb',
-    'sst': '.ppc-sp-st',
-    'sfy': '.ppc-sfly',
-    'spl': '.ppc-sp-pl',
-    'sfl': '.ppc-sfl',
-    'scb': '.ppc-scb',
-    'thr': '.ppc-thrown',
-  };
-
   /// The CSS of this crew for the site whose class is `ppc-$key`: the
-  /// keyframes of both timelines and the rules that play them. One
-  /// `<style>` element per site holds it; the stage removes it with the
-  /// site.
+  /// keyframes of both timelines and the rules that play them.
   ///
-  /// Each element plays the building keyframes once (they hold their last
-  /// value), then the loop keyframes forever; the loop's animation is the
-  /// later one in the list, so it wins once it starts. When the site
-  /// reveals, they stop (the wheelbarrow worker is only paused) and the
-  /// stacker lands (`ppc-land`).
-  String css(String key, String rootId) {
-    final build = _tracks(trips, buildEnd, withDrop: true);
-    final loopT = _tracks(loop, loopLength, withDrop: false);
-    final out = StringBuffer();
-    final rules = StringBuffer();
-    final reveal = StringBuffer();
-    final b = _n(buildEnd);
-    final l = _n(loopLength);
-    final sel = '#$rootId .ppc-$key';
-    for (var i = 0; i < build.length; i++) {
-      final suffix = build[i].$1;
-      final target = _targets[suffix]!;
-      final nb = 'ppc-$key-$suffix';
-      final nl = 'ppc-$key-$suffix-l';
-      out
-        ..write(_keyframes(nb, buildEnd, build[i].$2))
-        ..write('\n')
-        ..write(_keyframes(nl, loopLength, loopT[i].$2))
-        ..write('\n');
-      rules.write(
-        '$sel $target{animation:$nb ${b}s linear 0s both,'
-        '$nl ${l}s linear ${b}s infinite}\n',
-      );
-      if (suffix == 'bx' || suffix == 'bf') {
-        reveal.write('$sel.ppc-reveal $target{animation-play-state:paused}\n');
-      } else {
-        reveal.write('$sel.ppc-reveal $target{animation:none}\n');
-      }
-    }
-
-    // The slips of the loop: a box of his slips just before he arrives and
-    // is repaired when he places the block. One keyframes per slipping box.
-    for (var k = 0; k < loop.length; k++) {
-      final t = loop[k];
-      final s = math.max(0.0, t.arriveAt - slipLead);
-      final name = 'ppc-$key-ss$k';
-      const away =
-          'transform:translate(calc(.4*var(--dx)),calc(.4*var(--dy))) rotate(calc(.5*var(--dr)))';
-      const over =
-          'transform:translate(calc(-.06*var(--dx)),calc(-.06*var(--dy))) rotate(calc(-.1*var(--dr)))';
-      out
-        ..write(
-          _keyframes(name, loopLength, [
-            _Stop(0, 'transform:none', null),
-            _Stop(s, 'transform:none', 'ease-out'),
-            _Stop(s + 0.25, away, null),
-            _Stop(t.hitAt - 0.18, away, 'cubic-bezier(.5,0,.9,.5)'),
-            _Stop(t.hitAt, over, 'ease-in-out'),
-            _Stop(t.hitAt + 0.15, 'transform:none', null),
-            _Stop(loopLength, 'transform:none', null),
-          ]),
-        )
-        ..write('\n');
-      rules.write(
-        '$sel .ppc-slip.ppc-ss$k{animation:ppc-draw .3s linear var(--pd) both,'
-        '$name ${l}s linear ${b}s infinite}\n',
-      );
-      reveal.write('$sel.ppc-reveal .ppc-slip.ppc-ss$k{animation:none}\n');
-    }
-    return '$out$rules$reveal';
-  }
+  /// Each element plays the building keyframes once, then the loop keyframes
+  /// forever. When the site reveals, they stop and the stacker lands.
+  String css(String key, String rootId) => _crewCss(key, rootId);
 }
 
 class _Move {
@@ -573,12 +355,4 @@ enum _Ease {
     _Ease.outward => 1 - (1 - u) * (1 - u),
     _Ease.drop => 1 - (1 - u) * (1 - u),
   };
-}
-
-class _Stop {
-  const _Stop(this.t, this.css, this.timing);
-
-  final double t;
-  final String css;
-  final String? timing;
 }

@@ -81,6 +81,12 @@ class TapeRangePicker extends StatefulWidget {
 
 enum _End { from, to }
 
+/// The range at one build: the ends and "now" in recorder ms, and the wall
+/// clock time of a recorder time.
+typedef _Span = ({int from, int to, int hi, DateTime Function(int t) wall});
+
+String _plural(int n, String one) => '$n $one${n == 1 ? '' : 's'}';
+
 class _TapeRangePickerState extends State<TapeRangePicker>
     with TickerProviderStateMixin {
   /// Presets glide the handles.
@@ -327,13 +333,205 @@ class _TapeRangePickerState extends State<TapeRangePicker>
   Widget build(BuildContext context) {
     final tokens = PinPointTokens.of(context);
     _timeControllers(PinPointMotion.of(context));
-    final tapes = widget.tapes;
     final now = widget.clock();
     final from = _from;
     final to = _to;
     final hi = _hi;
     DateTime wall(int t) => now.subtract(Duration(milliseconds: hi - t));
+    final span = (from: from, to: to, hi: hi, wall: wall);
+    return Semantics(
+      container: true,
+      label: 'Replay range',
+      value:
+          'from ${TapeRangePicker.clockTime(wall(from))} to '
+          '${to >= hi ? 'now' : TapeRangePicker.clockTime(wall(to))}',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _titleRow(tokens, to - from),
+          const SizedBox(height: 8),
+          Focus(
+            focusNode: _focus,
+            onKeyEvent: _key,
+            child: LayoutBuilder(
+              builder: (context, constraints) =>
+                  _hoverRegion(constraints.maxWidth, tokens, span),
+            ),
+          ),
+          const SizedBox(height: 6),
+          _endLabels(span),
+          const SizedBox(height: 8),
+          _presetChips(),
+          const SizedBox(height: 8),
+          ..._summary(tokens, span),
+        ],
+      ),
+    );
+  }
 
+  Widget _titleRow(PinPointTokens tokens, int length) => Row(
+    children: [
+      Text('REPLAY RANGE', style: tokens.caps),
+      const Spacer(),
+      _Length(
+        key: TapeRangePicker.lengthKey,
+        text: TapeRangePicker.length(length),
+      ),
+    ],
+  );
+
+  MouseCursor get _cursor {
+    if (!widget.enabled) return SystemMouseCursors.basic;
+    return _held != null
+        ? SystemMouseCursors.grabbing
+        : SystemMouseCursors.grab;
+  }
+
+  Widget _hoverRegion(double width, PinPointTokens tokens, _Span span) =>
+      MouseRegion(
+        cursor: _cursor,
+        onHover: (e) => setState(() => _hoverX = e.localPosition.dx),
+        onExit: (_) => setState(() => _hoverX = null),
+        child: _trackGestures(width, tokens, span),
+      );
+
+  Widget _trackGestures(double width, PinPointTokens tokens, _Span span) {
+    final enabled = widget.enabled;
+    return GestureDetector(
+      key: TapeRangePicker.trackKey,
+      behavior: HitTestBehavior.opaque,
+      // The handle nearest to where the finger went down,
+      // not to where the drag was recognised.
+      dragStartBehavior: DragStartBehavior.down,
+      onHorizontalDragStart: enabled
+          ? (d) => _start(d.localPosition.dx, width)
+          : null,
+      onHorizontalDragUpdate: enabled
+          ? (d) => _update(d.localPosition.dx, width)
+          : null,
+      onHorizontalDragEnd: enabled ? (_) => _end() : null,
+      onHorizontalDragCancel: enabled ? _end : null,
+      onTapUp: enabled ? (d) => _tapTo(d.localPosition.dx, width) : null,
+      child: AnimatedBuilder(
+        animation: Listenable.merge([_glide, _grab, _hatch, _pulse]),
+        builder: (context, _) => _trackCanvas(width, tokens, span),
+      ),
+    );
+  }
+
+  /// A tap glides the nearer handle there.
+  void _tapTo(double x, double width) {
+    final end = _last = _nearest(x, width);
+    _snappedTo = null;
+    _glideFrom0 = _shownFrom;
+    _glideTo0 = _shownTo;
+    _glide.forward(from: 0);
+    _move(end, _snap(x, width));
+  }
+
+  Widget _trackCanvas(double width, PinPointTokens tokens, _Span span) {
+    final tapes = widget.tapes;
+    final glide = PinPointMotion.enter.transform(
+      _glide.isAnimating ? _glide.value : 1,
+    );
+    _shownFrom = _glideFrom0 + (_fraction(span.from) - _glideFrom0) * glide;
+    _shownTo = _glideTo0 + (_fraction(span.to) - _glideTo0) * glide;
+    final heldEnd = _held ?? (_grab.value > 0 ? _last : null);
+    final heldT = heldEnd == _End.from ? span.from : span.to;
+    final snapped = _snappedTo;
+    return CustomPaint(
+      size: Size(width, TapeRangePicker.trackHeight),
+      painter: _TrackPainter(
+        tokens: tokens,
+        fraction: _fraction,
+        from: _shownFrom,
+        to: _shownTo,
+        inputs: tapes.inputs.where((e) => e.t >= _lo),
+        requests: tapes.requestTimes.where((t) => t >= _lo),
+        marks: tapes.marks.where((e) => e.t >= _lo),
+        routes: tapes.routes.where((e) => e.t >= _lo),
+        held: heldEnd,
+        grab: PinPointMotion.spring.transform(_grab.value),
+        hatch: _hatch.value,
+        pulse: _pulse.isAnimating ? _pulse.value : null,
+        snapped: snapped == null ? null : _fraction(snapped),
+        callout: heldEnd == null ? null : _callout(heldT, span),
+        hoverX: _held == null ? _hoverX : null,
+        focused: _focus.hasFocus ? _last : null,
+        enabled: widget.enabled,
+      ),
+    );
+  }
+
+  String _callout(int heldT, _Span span) {
+    final ago = span.hi <= heldT
+        ? 'now'
+        : '−${TapeRangePicker.length(span.hi - heldT)}';
+    return '$ago · ${TapeRangePicker.clockTime(span.wall(heldT))}';
+  }
+
+  String _fromNote(int from, int hi) {
+    if (from > _lo) return '${TapeRangePicker.length(hi - from)} ago';
+    return widget.tapes.canSaveFull ? 'app start' : 'earliest kept';
+  }
+
+  Widget _endLabels(_Span span) {
+    final (:from, :to, :hi, :wall) = span;
+    final toNow = to >= hi;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: _EndLabel(
+            key: TapeRangePicker.fromLabelKey,
+            caption: 'FROM',
+            time: TapeRangePicker.clockTime(wall(from)),
+            note: _fromNote(from, hi),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _EndLabel(
+            key: TapeRangePicker.toLabelKey,
+            caption: 'TO',
+            time: toNow ? 'now' : TapeRangePicker.clockTime(wall(to)),
+            note: toNow
+                ? TapeRangePicker.clockTime(wall(to))
+                : '${TapeRangePicker.length(hi - to)} ago',
+            end: true,
+          ),
+        ),
+      ],
+    );
+  }
+
+  ChipLook _presetLook(
+    ({String key, String label, int? from, int? to}) preset,
+  ) {
+    if (!widget.enabled) return ChipLook.disabled;
+    return _chosen(preset) ? ChipLook.selected : ChipLook.rest;
+  }
+
+  Widget _presetChips() => Wrap(
+    spacing: 6,
+    runSpacing: 6,
+    children: [
+      for (final preset in _presets)
+        DraftChip(
+          key: TapeRangePicker.presetKey(preset.key),
+          label: preset.label,
+          look: _presetLook(preset),
+          onTap: widget.enabled
+              ? () => _set(preset.from, preset.to, glide: true)
+              : null,
+        ),
+    ],
+  );
+
+  /// The kind badge, and how many taps, edits and requests the range holds.
+  List<Widget> _summary(PinPointTokens tokens, _Span span) {
+    final tapes = widget.tapes;
+    final (:from, :to, hi: _, wall: _) = span;
     final inRange = [
       for (final e in tapes.inputs)
         if (e.t >= from && e.t <= to) e,
@@ -346,199 +544,30 @@ class _TapeRangePickerState extends State<TapeRangePicker>
         .where((t) => t >= from && t <= to)
         .length;
     final full = from <= _lo && tapes.canSaveFull;
-
-    String plural(int n, String one) => '$n $one${n == 1 ? '' : 's'}';
-
-    final fromText = from <= _lo
-        ? (tapes.canSaveFull ? 'app start' : 'earliest kept')
-        : '${TapeRangePicker.length(hi - from)} ago';
-    final toText = to >= hi ? 'now' : '${TapeRangePicker.length(hi - to)} ago';
-
-    return Semantics(
-      container: true,
-      label: 'Replay range',
-      value:
-          'from ${TapeRangePicker.clockTime(wall(from))} to '
-          '${to >= hi ? 'now' : TapeRangePicker.clockTime(wall(to))}',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+    return [
+      Row(
+        key: TapeRangePicker.summaryKey,
         children: [
-          Row(
-            children: [
-              Text('REPLAY RANGE', style: tokens.caps),
-              const Spacer(),
-              _Length(
-                key: TapeRangePicker.lengthKey,
-                text: TapeRangePicker.length(to - from),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Focus(
-            focusNode: _focus,
-            onKeyEvent: _key,
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final width = constraints.maxWidth;
-                return MouseRegion(
-                  cursor: widget.enabled
-                      ? (_held != null
-                            ? SystemMouseCursors.grabbing
-                            : SystemMouseCursors.grab)
-                      : SystemMouseCursors.basic,
-                  onHover: (e) => setState(() => _hoverX = e.localPosition.dx),
-                  onExit: (_) => setState(() => _hoverX = null),
-                  child: GestureDetector(
-                    key: TapeRangePicker.trackKey,
-                    behavior: HitTestBehavior.opaque,
-                    // The handle nearest to where the finger went down,
-                    // not to where the drag was recognised.
-                    dragStartBehavior: DragStartBehavior.down,
-                    onHorizontalDragStart: widget.enabled
-                        ? (d) => _start(d.localPosition.dx, width)
-                        : null,
-                    onHorizontalDragUpdate: widget.enabled
-                        ? (d) => _update(d.localPosition.dx, width)
-                        : null,
-                    onHorizontalDragEnd: widget.enabled ? (_) => _end() : null,
-                    onHorizontalDragCancel: widget.enabled ? _end : null,
-                    onTapUp: widget.enabled
-                        ? (d) {
-                            // A tap glides the nearer handle there.
-                            final end = _last = _nearest(
-                              d.localPosition.dx,
-                              width,
-                            );
-                            _snappedTo = null;
-                            _glideFrom0 = _shownFrom;
-                            _glideTo0 = _shownTo;
-                            _glide.forward(from: 0);
-                            _move(end, _snap(d.localPosition.dx, width));
-                          }
-                        : null,
-                    child: AnimatedBuilder(
-                      animation: Listenable.merge([
-                        _glide,
-                        _grab,
-                        _hatch,
-                        _pulse,
-                      ]),
-                      builder: (context, _) {
-                        final glide = PinPointMotion.enter.transform(
-                          _glide.isAnimating ? _glide.value : 1,
-                        );
-                        _shownFrom =
-                            _glideFrom0 +
-                            (_fraction(from) - _glideFrom0) * glide;
-                        _shownTo =
-                            _glideTo0 + (_fraction(to) - _glideTo0) * glide;
-                        final heldEnd =
-                            _held ?? (_grab.value > 0 ? _last : null);
-                        final heldT = heldEnd == _End.from ? from : to;
-                        return CustomPaint(
-                          size: Size(width, TapeRangePicker.trackHeight),
-                          painter: _TrackPainter(
-                            tokens: tokens,
-                            fraction: _fraction,
-                            from: _shownFrom,
-                            to: _shownTo,
-                            inputs: tapes.inputs.where((e) => e.t >= _lo),
-                            requests: tapes.requestTimes.where((t) => t >= _lo),
-                            marks: tapes.marks.where((e) => e.t >= _lo),
-                            routes: tapes.routes.where((e) => e.t >= _lo),
-                            held: heldEnd,
-                            grab: PinPointMotion.spring.transform(_grab.value),
-                            hatch: _hatch.value,
-                            pulse: _pulse.isAnimating ? _pulse.value : null,
-                            snapped: _snappedTo == null
-                                ? null
-                                : _fraction(_snappedTo!),
-                            callout: heldEnd == null
-                                ? null
-                                : '${heldT >= hi ? 'now' : '−${TapeRangePicker.length(hi - heldT)}'}'
-                                      ' · ${TapeRangePicker.clockTime(wall(heldT))}',
-                            hoverX: _held == null ? _hoverX : null,
-                            focused: _focus.hasFocus ? _last : null,
-                            enabled: widget.enabled,
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                );
-              },
+          _KindBadge(full: full),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              full
+                  ? 'Reloads the page and plays from app start'
+                  : 'Plays on the screen as it is then',
+              style: tokens.label.copyWith(fontSize: 11),
+              overflow: TextOverflow.ellipsis,
             ),
-          ),
-          const SizedBox(height: 6),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: _EndLabel(
-                  key: TapeRangePicker.fromLabelKey,
-                  caption: 'FROM',
-                  time: TapeRangePicker.clockTime(wall(from)),
-                  note: fromText,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _EndLabel(
-                  key: TapeRangePicker.toLabelKey,
-                  caption: 'TO',
-                  time: to >= hi ? 'now' : TapeRangePicker.clockTime(wall(to)),
-                  note: to >= hi ? TapeRangePicker.clockTime(wall(to)) : toText,
-                  end: true,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: [
-              for (final preset in _presets)
-                DraftChip(
-                  key: TapeRangePicker.presetKey(preset.key),
-                  label: preset.label,
-                  look: !widget.enabled
-                      ? ChipLook.disabled
-                      : _chosen(preset)
-                      ? ChipLook.selected
-                      : ChipLook.rest,
-                  onTap: widget.enabled
-                      ? () => _set(preset.from, preset.to, glide: true)
-                      : null,
-                ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            key: TapeRangePicker.summaryKey,
-            children: [
-              _KindBadge(full: full),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  full
-                      ? 'Reloads the page and plays from app start'
-                      : 'Plays on the screen as it is then',
-                  style: tokens.label.copyWith(fontSize: 11),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text(
-            '${plural(taps, 'tap')} · ${plural(edits, 'text edit')} · '
-            '${plural(requests, 'request')}',
-            style: tokens.micro,
           ),
         ],
       ),
-    );
+      const SizedBox(height: 4),
+      Text(
+        '${_plural(taps, 'tap')} · ${_plural(edits, 'text edit')} · '
+        '${_plural(requests, 'request')}',
+        style: tokens.micro,
+      ),
+    ];
   }
 }
 
@@ -764,14 +793,39 @@ class _TrackPainter extends CustomPainter {
   static const double _baseline = 46;
   static const double _gripCenter = 57;
 
+  bool _inside(double x, double w) => x >= from * w - 0.5 && x <= to * w + 0.5;
+
   @override
   void paint(Canvas canvas, Size size) {
     final w = size.width;
     final fromX = from * w;
     final toX = to * w;
-    bool inside(double x) => x >= fromX - 0.5 && x <= toX + 0.5;
+    _paintBand(canvas, fromX, toX);
+    _paintBaseline(canvas, w, fromX, toX);
+    _paintInputs(canvas, w);
+    _paintRequests(canvas, w);
+    _paintMarks(canvas, w);
+    _paintRoutes(canvas, w);
+    _paintHover(canvas, w);
+    _handle(
+      canvas,
+      fromX,
+      isHeld: held == _End.from,
+      isFocused: focused == _End.from,
+    );
+    _handle(
+      canvas,
+      toX,
+      isHeld: held == _End.to,
+      isFocused: focused == _End.to,
+    );
+    final heldX = held == _End.from ? fromX : toX;
+    _paintPulse(canvas, heldX);
+    _paintCallout(canvas, w, heldX);
+  }
 
-    // The band: accentBg, moving hatch, accent edges.
+  /// The band: accentBg, moving hatch, accent edges.
+  void _paintBand(Canvas canvas, double fromX, double toX) {
     final band = Rect.fromLTRB(fromX, _laneTop, toX, _baseline);
     canvas.drawRect(band, Paint()..color = tokens.accentBg);
     canvas.save();
@@ -797,8 +851,10 @@ class _TrackPainter extends CustomPainter {
       Offset(toX, _laneTop + 0.5),
       edge,
     );
+  }
 
-    // The baseline: ink inside the band, rule outside.
+  /// The baseline: ink inside the band, rule outside.
+  void _paintBaseline(Canvas canvas, double w, double fromX, double toX) {
     final rule = Paint()
       ..color = tokens.rule
       ..strokeWidth = 1;
@@ -814,11 +870,13 @@ class _TrackPainter extends CustomPainter {
         ..color = tokens.ink
         ..strokeWidth = 1,
     );
+  }
 
-    // Inputs: taps tall, typing short, keys a dot. Ink inside, faint out.
+  /// Inputs: taps tall, typing short, keys a dot. Ink inside, faint out.
+  void _paintInputs(Canvas canvas, double w) {
     for (final e in inputs) {
       final x = (fraction(e.t) * w).clamp(0.5, w - 0.5);
-      final color = inside(x) ? tokens.ink : tokens.faint;
+      final color = _inside(x, w) ? tokens.ink : tokens.faint;
       final paint = Paint()
         ..color = color
         ..strokeWidth = 1;
@@ -843,17 +901,21 @@ class _TrackPainter extends CustomPainter {
           );
       }
     }
+  }
 
-    // Requests: small squares under the line.
+  /// Requests: small squares under the line.
+  void _paintRequests(Canvas canvas, double w) {
     for (final t in requests) {
       final x = (fraction(t) * w).clamp(1.5, w - 1.5);
       canvas.drawRect(
         Rect.fromCenter(center: Offset(x, _baseline + 4), width: 3, height: 3),
-        Paint()..color = inside(x) ? tokens.muted : tokens.rule,
+        Paint()..color = _inside(x, w) ? tokens.muted : tokens.rule,
       );
     }
+  }
 
-    // Marks: an accent flag and a dashed staff.
+  /// Marks: an accent flag and a dashed staff.
+  void _paintMarks(Canvas canvas, double w) {
     for (final m in marks) {
       final x = (fraction(m.t) * w).clamp(0.5, w - 6);
       final staff = Paint()
@@ -875,8 +937,10 @@ class _TrackPainter extends CustomPainter {
         Paint()..color = tokens.accent,
       );
     }
+  }
 
-    // Routes: a tick and the path, when there is room for it.
+  /// Routes: a tick and the path, when there is room for it.
+  void _paintRoutes(Canvas canvas, double w) {
     var free = 0.0;
     for (final r in routes) {
       final x = (fraction(r.t) * w).clamp(0.5, w - 0.5);
@@ -894,72 +958,76 @@ class _TrackPainter extends CustomPainter {
       text.paint(canvas, Offset(x + 3, _routeTop));
       free = x + 3 + text.width + 6;
     }
+  }
 
-    // Hover: a faint hairline where a tap would move a handle.
-    if (enabled && hoverX != null) {
-      final x = hoverX!.clamp(0.0, w);
-      final hair = Paint()
-        ..color = tokens.faint
-        ..strokeWidth = 1;
-      for (var y = _laneTop; y < _baseline; y += 3) {
-        canvas.drawLine(Offset(x, y), Offset(x, y + 1.5), hair);
-      }
-    }
-
-    _handle(canvas, fromX, held == _End.from, focused == _End.from);
-    _handle(canvas, toX, held == _End.to, focused == _End.to);
-
-    // Snap pulse: a square ring opening from the held handle.
-    final p = pulse;
-    final heldX = held == _End.from ? fromX : toX;
-    if (p != null && held != null) {
-      final half = 6 + 10 * Curves.easeOut.transform(p);
-      canvas.drawRect(
-        Rect.fromCenter(
-          center: Offset(heldX, _gripCenter),
-          width: half * 2,
-          height: half * 2,
-        ),
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.5
-          ..color = tokens.accent.withValues(alpha: 1 - p),
-      );
-    }
-
-    // The time over the held handle, rising as it grows.
-    final label = callout;
-    if (label != null && grab > 0) {
-      final text = _text(label, tokens.micro.copyWith(color: tokens.ink));
-      final boxW = text.width + 10;
-      final left = (heldX - boxW / 2).clamp(0.0, w - boxW);
-      final top = _routeTop - 2 - 6 * grab.clamp(0.0, 1.2);
-      final box = Rect.fromLTWH(left, top, boxW, 16);
-      final opacity = grab.clamp(0.0, 1.0);
-      canvas.drawRect(
-        box.shift(const Offset(2, 2)),
-        Paint()
-          ..color = tokens.shadow.withValues(alpha: tokens.shadow.a * opacity),
-      );
-      canvas.drawRect(
-        box,
-        Paint()..color = tokens.paper.withValues(alpha: opacity),
-      );
-      canvas.drawRect(
-        box.deflate(0.5),
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..color = tokens.ink.withValues(alpha: opacity),
-      );
-      final shown = _text(
-        label,
-        tokens.micro.copyWith(color: tokens.ink.withValues(alpha: opacity)),
-      );
-      shown.paint(canvas, Offset(left + 5, top + 1));
+  /// Hover: a faint hairline where a tap would move a handle.
+  void _paintHover(Canvas canvas, double w) {
+    if (!enabled || hoverX == null) return;
+    final x = hoverX!.clamp(0.0, w);
+    final hair = Paint()
+      ..color = tokens.faint
+      ..strokeWidth = 1;
+    for (var y = _laneTop; y < _baseline; y += 3) {
+      canvas.drawLine(Offset(x, y), Offset(x, y + 1.5), hair);
     }
   }
 
-  void _handle(Canvas canvas, double x, bool isHeld, bool isFocused) {
+  /// Snap pulse: a square ring opening from the held handle.
+  void _paintPulse(Canvas canvas, double heldX) {
+    final p = pulse;
+    if (p == null || held == null) return;
+    final half = 6 + 10 * Curves.easeOut.transform(p);
+    canvas.drawRect(
+      Rect.fromCenter(
+        center: Offset(heldX, _gripCenter),
+        width: half * 2,
+        height: half * 2,
+      ),
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5
+        ..color = tokens.accent.withValues(alpha: 1 - p),
+    );
+  }
+
+  /// The time over the held handle, rising as it grows.
+  void _paintCallout(Canvas canvas, double w, double heldX) {
+    final label = callout;
+    if (label == null || grab <= 0) return;
+    final text = _text(label, tokens.micro.copyWith(color: tokens.ink));
+    final boxW = text.width + 10;
+    final left = (heldX - boxW / 2).clamp(0.0, w - boxW);
+    final top = _routeTop - 2 - 6 * grab.clamp(0.0, 1.2);
+    final box = Rect.fromLTWH(left, top, boxW, 16);
+    final opacity = grab.clamp(0.0, 1.0);
+    canvas.drawRect(
+      box.shift(const Offset(2, 2)),
+      Paint()
+        ..color = tokens.shadow.withValues(alpha: tokens.shadow.a * opacity),
+    );
+    canvas.drawRect(
+      box,
+      Paint()..color = tokens.paper.withValues(alpha: opacity),
+    );
+    canvas.drawRect(
+      box.deflate(0.5),
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..color = tokens.ink.withValues(alpha: opacity),
+    );
+    final shown = _text(
+      label,
+      tokens.micro.copyWith(color: tokens.ink.withValues(alpha: opacity)),
+    );
+    shown.paint(canvas, Offset(left + 5, top + 1));
+  }
+
+  void _handle(
+    Canvas canvas,
+    double x, {
+    required bool isHeld,
+    required bool isFocused,
+  }) {
     final scale = isHeld ? 1 + 0.25 * grab : 1.0;
     final color = enabled ? tokens.accent : tokens.faint;
     // The staff, with a paper halo so it reads over the ticks.

@@ -20,20 +20,28 @@ abstract final class ConstructionBlueprint {
   /// The boxes under [root] (a note's widget), relative to [widget], the
   /// widget's visible rect in global logical pixels.
   ///
-  /// Skipped: boxes under [ConstructionBoxes.minSide] px, boxes with the
-  /// same rect as their parent (wrappers like `Padding` around nothing)
-  /// or as the widget, boxes of render objects that are not boxes.
-  ///
-  /// Then a readable outline, not every box: a box over
-  /// [ConstructionBoxes.maxShare] of the widget only frames everything and
-  /// is left out; the rest are taken biggest first, and a near copy of a box
-  /// already taken (over [ConstructionBoxes.maxOverlap] of it inside that
-  /// box, and at least half its size) is skipped, so nested wrappers drop
-  /// out; at most [ConstructionBoxes.maxBoxes], so small thin parts give way
-  /// to the main ones. A busy card (seen live: a "Run details"
-  /// card gave 40 boxes that, broken, filled it) becomes its main parts.
-  /// The result is in paint order, so the same tree gives the same boxes.
+  /// Tiny boxes, boxes that repeat their parent or the widget, and boxes over
+  /// [ConstructionBoxes.maxShare] of the widget are left out. The rest are
+  /// taken biggest first, near copies skipped, at most
+  /// [ConstructionBoxes.maxBoxes]. The result is in paint order.
   static List<ConstructionBox> read(RenderObject root, Rect widget) {
+    final picked = _pick(_walk(root, widget), widget);
+    double r1(double v) => (v * 10).roundToDouble() / 10;
+    return [
+      for (final f in picked)
+        ConstructionBox(
+          r1(f.rect.left - widget.left),
+          r1(f.rect.top - widget.top),
+          r1(f.rect.width),
+          r1(f.rect.height),
+        ),
+    ];
+  }
+
+  static double _area(Rect r) => r.width * r.height;
+
+  /// Every box that passes the size and wrapper filters, in paint order.
+  static List<_Found> _walk(RenderObject root, Rect widget) {
     final found = <_Found>[];
     final byNode = <RenderObject, Rect>{};
     try {
@@ -64,42 +72,36 @@ abstract final class ConstructionBlueprint {
     } catch (_) {
       // A custom render object that throws: use what was read.
     }
+    return found;
+  }
 
+  /// The main boxes of [found]: biggest first, near copies dropped, then
+  /// back in paint order.
+  static List<_Found> _pick(List<_Found> found, Rect widget) {
     final whole = widget.width * widget.height;
-    double area(Rect r) => r.width * r.height;
     final candidates =
         [
           for (final f in found)
-            if (area(f.rect) <= ConstructionBoxes.maxShare * whole) f,
+            if (_area(f.rect) <= ConstructionBoxes.maxShare * whole) f,
         ]..sort((a, b) {
-          final byArea = area(b.rect).compareTo(area(a.rect));
+          final byArea = _area(b.rect).compareTo(_area(a.rect));
           return byArea != 0 ? byArea : a.order.compareTo(b.order);
         });
     final picked = <_Found>[];
     for (final f in candidates) {
       if (picked.length == ConstructionBoxes.maxBoxes) break;
-      final covered = picked.any((p) {
-        final overlap = p.rect.intersect(f.rect);
-        // A near copy: mostly inside a box taken, and at least half its
-        // size. A button inside a row is much smaller: it stays.
-        return !overlap.isEmpty &&
-            area(overlap) > ConstructionBoxes.maxOverlap * area(f.rect) &&
-            area(f.rect) > 0.5 * area(p.rect);
-      });
-      if (!covered) picked.add(f);
+      if (!picked.any((p) => _isNearCopy(f.rect, p.rect))) picked.add(f);
     }
-    picked.sort((a, b) => a.order.compareTo(b.order));
+    return picked..sort((a, b) => a.order.compareTo(b.order));
+  }
 
-    double r1(double v) => (v * 10).roundToDouble() / 10;
-    return [
-      for (final f in picked)
-        ConstructionBox(
-          r1(f.rect.left - widget.left),
-          r1(f.rect.top - widget.top),
-          r1(f.rect.width),
-          r1(f.rect.height),
-        ),
-    ];
+  /// [rect] is mostly inside [taken] and at least half its size. A button
+  /// inside a row is much smaller: it stays.
+  static bool _isNearCopy(Rect rect, Rect taken) {
+    final overlap = taken.intersect(rect);
+    return !overlap.isEmpty &&
+        _area(overlap) > ConstructionBoxes.maxOverlap * _area(rect) &&
+        _area(rect) > 0.5 * _area(taken);
   }
 
   static bool _alike(Rect a, Rect b) =>

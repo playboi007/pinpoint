@@ -21,7 +21,7 @@ abstract interface class MessageHooks {
   void cancel();
 }
 
-/// `input.message` events (PLAN-v2 Milestone 14, step 16), level 1: the
+/// `input.message` events, level 1: the
 /// origin, a hash, and the data clipped to 2 KB. An app that lives in an
 /// iframe gets its session this way, so a tape without its messages would
 /// not replay.
@@ -38,7 +38,7 @@ class MessageSource extends TraceSource {
   /// Most characters of a message's data kept.
   static const int maxChars = 2048;
 
-  /// Keys of the JSON data whose values are masked (rule 16): a session
+  /// Keys of the JSON data whose values are masked: a session
   /// token sent to an iframe is a secret.
   final TraceRedact redact;
 

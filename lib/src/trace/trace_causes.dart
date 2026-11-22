@@ -1,14 +1,14 @@
-// Plain Dart: no `dart:ui` and no `package:flutter` (PLAN-v2 rule 13).
-// `why` and `caused_by` of PLAN-v2 Milestone 14: the agent asks "why did
-// this happen" and "what did this widget start".
+// Plain Dart: no `dart:ui` and no `package:flutter`.
+// `why` and `caused_by`: the agent asks "why did this happen" and "what did
+// this widget start".
 
 import '../model/trace_event.dart';
 import 'cause_zone.dart';
+import 'pointer_phase.dart';
 import 'trace_format.dart';
 import 'trace_recorder.dart';
 
-/// What the cause links can and cannot say, for the tool descriptions
-/// (PLAN-v2 Milestone 14, step 10).
+/// What the cause links can and cannot say, for the tool descriptions.
 const String whyLimits =
     'A post-frame callback runs with the cause of the frame that calls it, '
     'which is right for a callback added during build of the same frame. '
@@ -53,105 +53,138 @@ int _dirtyScore(String kind) {
   return 1;
 }
 
-/// The `why` answer for the event [seq] (PLAN-v2 Milestone 14, tools):
-/// its cause, the entry of that cause, and for a frame the cause that most
-/// likely made it dirty, walked back up to [maxWhyHops] frames. Throws a
-/// [FormatException] when [seq] is not held.
+/// The `why` answer for the event [seq]: its cause, the entry of that cause,
+/// and for a frame the cause that most likely made it dirty, walked back up
+/// to [maxWhyHops] frames. Throws a [FormatException] when [seq] is not held.
 Map<String, Object?> whyAnswer(TraceRecorder recorder, int seq) {
-  final event = recorder.at(seq);
-  if (event == null) {
-    final oldest = recorder.oldest?.seq;
-    throw FormatException(
-      'seq $seq is not held'
-      '${oldest == null ? '' : ' (held: $oldest-${recorder.nextSeq - 1})'}',
-    );
-  }
-  final chain = <String>['event: ${traceLine(event, width: 160)}'];
-  final notes = <String>[];
-  final answer = <String, Object?>{'seq': seq, 'chain': chain};
-  final hint = recorder.causeHint;
-  if (event.cause == null) {
-    if (hint != null) {
+  final event = recorder.at(seq) ?? (throw _notHeld(recorder, seq));
+  final walk = _WhyWalk(recorder)
+    ..chain.add('event: ${traceLine(event, width: 160)}');
+  final answer = <String, Object?>{'seq': seq, 'chain': walk.chain};
+  final causeId = event.cause;
+  if (causeId == null) {
+    if (recorder.causeHint case final hint?) {
       answer['hint'] = hint;
     } else {
-      chain.add('no cause: it ran outside every entry (app start)');
+      walk.chain.add('no cause: it ran outside every entry (app start)');
     }
     return answer;
   }
-  var causeId = event.cause!;
-  var before = seq;
-  final seen = <int>{};
-  final shapes = <String>[];
-  var loop = false;
-  for (var hop = 0; hop <= maxWhyHops; hop++) {
-    if (!seen.add(causeId)) break;
+  walk.follow(causeId, seq);
+  return answer
+    ..['loop'] = walk.loop
+    ..addAll({
+      if (walk.notes.isNotEmpty) 'notes': walk.notes.take(2).toList(),
+      if (recorder.partial) 'partial': true,
+      if (recorder.partial) 'reason': recorder.partialReason,
+    });
+}
+
+FormatException _notHeld(TraceRecorder recorder, int seq) {
+  final oldest = recorder.oldest?.seq;
+  return FormatException(
+    'seq $seq is not held'
+    '${oldest == null ? '' : ' (held: $oldest-${recorder.nextSeq - 1})'}',
+  );
+}
+
+/// The walk back from an event through the causes that led to it.
+final class _WhyWalk {
+  _WhyWalk(this.recorder);
+
+  final TraceRecorder recorder;
+  final List<String> chain = [];
+  final List<String> notes = [];
+  final Set<int> _seen = {};
+  final List<String> _shapes = [];
+  bool loop = false;
+
+  /// Follows [causeId] back, one frame per hop, from the event at [seq].
+  void follow(int causeId, int seq) {
+    var current = (causeId: causeId, before: seq);
+    for (var hop = 0; hop <= maxWhyHops; hop++) {
+      if (!_seen.add(current.causeId)) return;
+      final next = _hop(current.causeId, current.before);
+      if (next == null) return;
+      current = next;
+    }
+  }
+
+  /// One hop. Null when the walk ends here, else the next cause to follow.
+  ({int causeId, int before})? _hop(int causeId, int before) {
     final cause = recorder.causeOf(causeId);
     if (cause == null) {
       chain.add('cause c$causeId: not held any more');
-      break;
+      return null;
     }
     chain.add('cause ${_describe(recorder, cause)}');
     final did = _eventsOf(recorder, cause, before);
     for (final e in did.length <= 4 ? did : did.sublist(did.length - 4)) {
       chain.add('  ${traceLine(e, width: 160)}');
     }
-    if (cause.firstSeq != null) {
-      for (final (a, b) in recorder.rebuildGaps(cause.firstSeq!, before)) {
-        notes.add(
-          'rebuilds not recorded for seq $a-$b, so a build in c${cause.id} '
-          'may be missing; call trace_detail({on: true}) and run it again',
-        );
-        break;
-      }
-    }
+    _noteGap(cause, before);
     if (cause.kind != CauseKind.frame) {
-      final first = cause.firstSeq == null
-          ? null
-          : recorder.at(cause.firstSeq!);
-      chain.add(
-        first == null
-            ? '  entry: ${cause.kind}'
-            : '  entry: ${traceLine(first, width: 160)}',
-      );
-      break;
+      chain.add(_entryLine(cause));
+      return null;
     }
-    // The same work in this frame as in the one after it: a loop.
-    final shape = [for (final e in did) traceFoldKey(e)].join('|');
-    if (shape.isNotEmpty && shapes.contains(shape)) {
+    if (_seenShapeBefore(did)) {
       loop = true;
       chain.add('  the same work as in the frame after it: a loop');
-      break;
+      return null;
     }
-    shapes.add(shape);
     final next = _dirtiedBy(recorder, cause);
     if (next == null) {
-      chain.add(
-        cause.after.isEmpty
-            ? '  no recorded cause ran since the frame before'
-            : '  ran since the frame before: '
-                  '${[for (final id in cause.after) 'c$id'].join(', ')} '
-                  '(no events recorded)',
-      );
-      break;
+      chain.add(_noCauseLine(cause));
+      return null;
     }
+    chain.add(_madeDirtyLine(cause, next));
+    return (causeId: next.id, before: cause.firstSeq ?? before);
+  }
+
+  void _noteGap(TraceCause cause, int before) {
+    final first = cause.firstSeq;
+    if (first == null) return;
+    if (recorder.rebuildGaps(first, before).firstOrNull case (
+      final a,
+      final b,
+    )) {
+      notes.add(
+        'rebuilds not recorded for seq $a-$b, so a build in c${cause.id} '
+        'may be missing; call trace_detail({on: true}) and run it again',
+      );
+    }
+  }
+
+  String _entryLine(TraceCause cause) {
+    final first = cause.firstSeq == null ? null : recorder.at(cause.firstSeq!);
+    return first == null
+        ? '  entry: ${cause.kind}'
+        : '  entry: ${traceLine(first, width: 160)}';
+  }
+
+  /// Records the work of this frame and says whether the frame after it did
+  /// the same work: a loop.
+  bool _seenShapeBefore(List<TraceEvent> did) {
+    final shape = [for (final e in did) traceFoldKey(e)].join('|');
+    if (shape.isNotEmpty && _shapes.contains(shape)) return true;
+    _shapes.add(shape);
+    return false;
+  }
+
+  static String _noCauseLine(TraceCause frame) => frame.after.isEmpty
+      ? '  no recorded cause ran since the frame before'
+      : '  ran since the frame before: '
+            '${[for (final id in frame.after) 'c$id'].join(', ')} '
+            '(no events recorded)';
+
+  static String _madeDirtyLine(TraceCause frame, TraceCause next) {
     final others = [
-      for (final id in cause.after)
+      for (final id in frame.after)
         if (id != next.id) 'c$id',
     ];
-    chain.add(
-      '  made dirty by c${next.id} (${next.kind})'
-      '${others.isEmpty ? '' : '; also ran: ${others.join(', ')}'}',
-    );
-    causeId = next.id;
-    before = cause.firstSeq ?? before;
+    return '  made dirty by c${next.id} (${next.kind})'
+        '${others.isEmpty ? '' : '; also ran: ${others.join(', ')}'}';
   }
-  answer['loop'] = loop;
-  if (notes.isNotEmpty) answer['notes'] = notes.take(2).toList();
-  if (recorder.partial) {
-    answer['partial'] = true;
-    answer['reason'] = recorder.partialReason;
-  }
-  return answer;
 }
 
 /// `c37 frame f233, started 0.4 s ago`.
@@ -163,9 +196,8 @@ String _describe(TraceRecorder recorder, TraceCause cause) {
   final t = cause.t;
   if (t == null) return 'c${cause.id} ${cause.kind}$frame';
   final age = recorder.now - t;
-  // Watch out for: a periodic timer keeps its first cause forever. Show
-  // the age, so a chain that starts at app start is not read as "the
-  // first tap did it".
+  // A periodic timer keeps its first cause forever. The age keeps a chain
+  // that starts at app start from reading as "the first tap did it".
   final old = age > 60000 && cause.kind != CauseKind.frame
       ? ' (a timer or stream made then keeps the cause while it runs)'
       : '';
@@ -222,8 +254,8 @@ TraceCause? _dirtiedBy(TraceRecorder recorder, TraceCause frame) {
   return pick;
 }
 
-/// The `caused_by` answer (PLAN-v2 Milestone 14, tools): everything the
-/// subtree of a widget started, as counts and the first few of each.
+/// The `caused_by` answer: everything the subtree of a widget started, as
+/// counts and the first few of each.
 ///
 /// [sources] are the creation locations (`file:line:column`) of the local
 /// widgets in the subtree. A cause counts when its input landed on one of
@@ -237,16 +269,11 @@ Map<String, Object?> causedByAnswer(
   TraceBound? since,
 }) {
   final now = recorder.now;
-  int? fromSeq;
-  int? fromT;
-  switch (since ?? const SecondsBound(10)) {
-    case SeqBound(:final seq):
-      fromSeq = seq;
-    case SecondsBound(:final seconds):
-      fromT = now - (seconds * 1000).round();
-    case MarkBound():
-      fromSeq = recorder.lastOf(TraceKind.mark)?.seq ?? recorder.nextSeq;
-  }
+  final (:fromSeq, :fromT) = _windowStartOf(
+    since ?? const SecondsBound(10),
+    recorder,
+    now,
+  );
   bool inWindow(TraceEvent e) =>
       (fromSeq == null || e.seq >= fromSeq) && (fromT == null || e.t >= fromT);
 
@@ -254,10 +281,75 @@ Map<String, Object?> causedByAnswer(
     for (final e in recorder.events)
       if (inWindow(e)) e,
   ];
+  final scan = _scanSubtree(recorder, sources, inWindow);
+  final work = _workOf(window, scan.roots);
+  final timers = scan.roots.fold<int>(
+    0,
+    (sum, id) => sum + (recorder.causeOf(id)?.timers ?? 0),
+  );
+  final parts = [
+    if (work.requests.isNotEmpty) '${work.requests.length} requests',
+    if (scan.rebuilds > 0) '${scan.rebuilds} rebuilds',
+    if (work.state.isNotEmpty) '${work.state.length} state changes',
+    if (timers > 0) '$timers timers',
+    if (work.errors.isNotEmpty) '${work.errors.length} errors',
+  ];
+  final windowText = fromT != null
+      ? 'in the last ${((now - fromT) / 1000).toStringAsFixed(0)} s'
+      : 'since seq $fromSeq';
+  final notes = _causedByNotes(recorder, window, scan);
+  return {
+    'widget': widget,
+    'summary': parts.isEmpty
+        ? 'nothing recorded for $widget in the window'
+        : '${parts.join(', ')} $windowText',
+    'causes': scan.roots.length,
+    'counts': {
+      'requests': work.requests.length,
+      'rebuilds': scan.rebuilds,
+      'state': work.state.length,
+      'timers': timers,
+      'errors': work.errors.length,
+      'taps': scan.taps,
+    },
+    'first': {
+      if (work.requests.isNotEmpty) 'requests': _firstLines(work.requests),
+      if (work.state.isNotEmpty) 'state': _firstLines(work.state),
+      if (work.errors.isNotEmpty) 'errors': _firstLines(work.errors),
+    },
+    if (notes.isNotEmpty) 'notes': notes,
+    if (recorder.partial) 'partial': true,
+  };
+}
+
+/// Where the window of [bound] starts: at a seq, or at a recorder time.
+({int? fromSeq, int? fromT}) _windowStartOf(
+  TraceBound bound,
+  TraceRecorder recorder,
+  int now,
+) => switch (bound) {
+  SeqBound(:final seq) => (fromSeq: seq, fromT: null),
+  SecondsBound(:final seconds) => (
+    fromSeq: null,
+    fromT: now - (seconds * 1000).round(),
+  ),
+  MarkBound() => (
+    fromSeq: recorder.lastOf(TraceKind.mark)?.seq ?? recorder.nextSeq,
+    fromT: null,
+  ),
+};
+
+/// The causes that started work in the subtree: [roots], with the number of
+/// [rebuilds] and [taps] inside the window.
+({Set<int> roots, int rebuilds, int taps}) _scanSubtree(
+  TraceRecorder recorder,
+  Set<String> sources,
+  bool Function(TraceEvent event) inWindow,
+) {
   final roots = <int>{};
-  final taps = <int>{};
+  final tapCauses = <int>{};
   var rebuilds = 0;
-  var taps0 = 0;
+  var taps = 0;
   // Roots come from every event held: a request in the window may come
   // from a frame whose build was just before it.
   for (final e in recorder.events) {
@@ -267,86 +359,67 @@ Map<String, Object?> causedByAnswer(
         final n = e.data['n'];
         rebuilds += n is int ? n : 1;
       }
-      if (e.kind == TraceKind.pointer && e.data['phase'] == 'down') taps0++;
+      if (e.kind == TraceKind.pointer && e.pointerPhase == PointerPhase.down) {
+        taps++;
+      }
     }
     final c = e.cause;
     if (c == null) continue;
     roots.add(c);
-    if (TraceKind.isInput(e.kind)) taps.add(c);
+    if (TraceKind.isInput(e.kind)) tapCauses.add(c);
   }
   // A frame that followed a tap on the subtree is its work too.
   for (final cause in recorder.causes) {
-    if (cause.kind == CauseKind.frame && cause.after.any(taps.contains)) {
+    if (cause.kind == CauseKind.frame && cause.after.any(tapCauses.contains)) {
       roots.add(cause.id);
     }
   }
-  final requests = <TraceEvent>[];
-  final state = <TraceEvent>[];
-  final errors = <TraceEvent>[];
-  for (final e in window) {
-    if (e.cause == null || !roots.contains(e.cause)) continue;
-    switch (e.kind) {
-      case TraceKind.netRequest:
-        requests.add(e);
-      case TraceKind.state:
-        state.add(e);
-      case TraceKind.error || TraceKind.netError:
-        errors.add(e);
-    }
-  }
-  var timers = 0;
-  for (final id in roots) {
-    timers += recorder.causeOf(id)?.timers ?? 0;
-  }
-  final counts = <String, Object?>{
-    'requests': requests.length,
-    'rebuilds': rebuilds,
-    'state': state.length,
-    'timers': timers,
-    'errors': errors.length,
-    'taps': taps0,
-  };
-  final parts = [
-    if (requests.isNotEmpty) '${requests.length} requests',
-    if (rebuilds > 0) '$rebuilds rebuilds',
-    if (state.isNotEmpty) '${state.length} state changes',
-    if (timers > 0) '$timers timers',
-    if (errors.isNotEmpty) '${errors.length} errors',
+  return (roots: roots, rebuilds: rebuilds, taps: taps);
+}
+
+/// What the [roots] started inside [window].
+({List<TraceEvent> requests, List<TraceEvent> state, List<TraceEvent> errors})
+_workOf(List<TraceEvent> window, Set<int> roots) {
+  final mine = [
+    for (final e in window)
+      if (e.cause != null && roots.contains(e.cause)) e,
   ];
-  final windowText = fromT != null
-      ? 'in the last ${((now - fromT) / 1000).toStringAsFixed(0)} s'
-      : 'since seq $fromSeq';
-  List<String> firstLines(List<TraceEvent> events) => [
-    for (final e in events.take(3)) traceLine(e, width: 160),
-  ];
-  final notes = <String>[
+  return (
+    requests: [
+      for (final e in mine)
+        if (e.kind == TraceKind.netRequest) e,
+    ],
+    state: [
+      for (final e in mine)
+        if (e.kind == TraceKind.state) e,
+    ],
+    errors: [
+      for (final e in mine)
+        if (e.kind == TraceKind.error || e.kind == TraceKind.netError) e,
+    ],
+  );
+}
+
+List<String> _firstLines(List<TraceEvent> events) => [
+  for (final e in events.take(3)) traceLine(e, width: 160),
+];
+
+List<String> _causedByNotes(
+  TraceRecorder recorder,
+  List<TraceEvent> window,
+  ({Set<int> roots, int rebuilds, int taps}) scan,
+) {
+  final gaps = recorder.rebuildGaps(
+    window.isEmpty ? recorder.nextSeq : window.first.seq,
+    recorder.nextSeq - 1,
+  );
+  return [
     ?recorder.causeHint,
-    if (rebuilds == 0 &&
-        recorder
-            .rebuildGaps(
-              window.isEmpty ? recorder.nextSeq : window.first.seq,
-              recorder.nextSeq - 1,
-            )
-            .isNotEmpty)
+    if (scan.rebuilds == 0 && gaps.isNotEmpty)
       'rebuilds not recorded for part of the window; call '
           'trace_detail({on: true}) to record them',
-    if (roots.isNotEmpty)
+    if (scan.roots.isNotEmpty)
       'a frame is shared: work in a frame where this subtree rebuilt '
           'counts here even if another widget started it',
   ];
-  return {
-    'widget': widget,
-    'summary': parts.isEmpty
-        ? 'nothing recorded for $widget in the window'
-        : '${parts.join(', ')} $windowText',
-    'causes': roots.length,
-    'counts': counts,
-    'first': {
-      if (requests.isNotEmpty) 'requests': firstLines(requests),
-      if (state.isNotEmpty) 'state': firstLines(state),
-      if (errors.isNotEmpty) 'errors': firstLines(errors),
-    },
-    if (notes.isNotEmpty) 'notes': notes,
-    if (recorder.partial) 'partial': true,
-  };
 }

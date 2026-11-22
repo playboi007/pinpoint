@@ -21,9 +21,9 @@ class TapeStoreException implements Exception {
 }
 
 /// Tapes on disk: `<dir>/tapes/<id>.json` and the bodies in
-/// `<dir>/tapes/<id>/bodies/<n>.bin` (PLAN-v2 Milestone 15).
+/// `<dir>/tapes/<id>/bodies/<n>.bin`.
 ///
-/// A tape is personal data (watch out for). `<dir>` (`.pinpoint/`) holds a
+/// A tape is personal data. `<dir>` (`.pinpoint/`) holds a
 /// `.gitignore` of `*` from `setup`, which covers `tapes/` and `runs/`, and
 /// the bridge serves them on loopback only (or to origins named with
 /// `--allow-origin`).

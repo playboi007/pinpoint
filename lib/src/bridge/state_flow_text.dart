@@ -1,12 +1,12 @@
 // Plain Dart with `dart:io` (through [SourceLookup]): no `dart:ui` and no
 // `package:flutter`, so `dart run pinpoint:bridge` can run it.
 //
-// The text of the `state_flow` tool (PLAN-v3 Milestone 21, step 8, and the
-// story of Milestone 21b): what the widget reads, then the story of changes
+// The text of the `state_flow` tool: what the widget reads, then the story of changes
 // per cause, with the code line under each row and the declaration of each
 // state type, from the project's source on this side. The story is the same
 // [Story] the watch card shows ([storyLines] in `story_text.dart`).
 
+import '../model/json_read.dart';
 import '../trace/story.dart';
 import '../trace/story_names.dart';
 import 'source_lookup.dart';
@@ -36,7 +36,7 @@ Future<String> stateFlowText(
     return declarations[type] = found;
   }
 
-  final target = _map(result['target']);
+  final target = asJsonMap(result['target']);
   final targetText =
       '${target['type'] ?? '?'}'
       '${target['source'] == null ? '' : ' (${target['source']})'}';
@@ -48,7 +48,7 @@ Future<String> stateFlowText(
 
   // ----------------------------------------------------------- static part
   final readers = [
-    for (final r in _list(result['readers']))
+    for (final r in asJsonList(result['readers']))
       if (r is Map<String, Object?>) r,
   ];
   final story = Story.fromJson(result['story']);
@@ -107,7 +107,7 @@ Future<String> stateFlowText(
       'Note: ${story.droppedStacks} setState stacks were dropped (the cap).',
     );
   }
-  for (final note in _list(result['notes'])) {
+  for (final note in asJsonList(result['notes'])) {
     tail.add('Note: $note');
   }
 
@@ -137,7 +137,7 @@ Future<String> _readsText(
       '  ${reader['type']} (${reader['kind']}'
       '${_at(reader['source'], ', ')})',
     );
-    final dependencies = _list(reader['dependencies']);
+    final dependencies = asJsonList(reader['dependencies']);
     if (dependencies.isEmpty) {
       out.add('    no state object read');
     }
@@ -152,7 +152,7 @@ Future<String> _readsText(
       );
     }
     final own = '${reader['type']}';
-    if (_list(reader['dependencies']).isEmpty && own.isNotEmpty) {
+    if (asJsonList(reader['dependencies']).isEmpty && own.isNotEmpty) {
       final decl = await declaration(_baseType(own));
       if (decl != null) out.add('    class at ${decl.file}:${decl.line}');
     }
@@ -173,9 +173,3 @@ String _baseType(String type) {
   final open = type.indexOf('<');
   return open < 0 ? type : type.substring(0, open);
 }
-
-Map<String, Object?> _map(Object? value) =>
-    value is Map<String, Object?> ? value : const <String, Object?>{};
-
-List<Object?> _list(Object? value) =>
-    value is List<Object?> ? value : const <Object?>[];

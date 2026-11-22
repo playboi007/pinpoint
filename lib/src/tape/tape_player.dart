@@ -6,10 +6,12 @@ import 'package:flutter/widgets.dart';
 
 import '../agent/synthetic_input.dart';
 import '../model/annotation.dart' show NoteAnchor;
+import '../model/json_read.dart';
 import '../model/tape.dart';
 import '../model/trace_event.dart';
 import '../overlay/replay_blocker.dart';
 import '../search/render_search.dart';
+import '../trace/pointer_phase.dart';
 import '../trace/sources/network_source.dart';
 import '../trace/trace_session.dart';
 import 'net_matcher.dart';
@@ -36,7 +38,7 @@ class ReplayHost {
   final String? Function(Offset position) widgetAt;
 
   /// Gets the app ready for synthetic input: leaves picking mode, whose
-  /// pointer trap would take the player's events (watch out for).
+  /// pointer trap would take the player's events.
   final Future<void> Function() prepare;
 
   /// Sends a `message` event to the page (web).
@@ -51,7 +53,7 @@ class ReplayHost {
   }
 }
 
-/// Where a replay holds (step 15).
+/// Where a replay holds.
 class ReplayUntil {
   const ReplayUntil._({this.mark, this.step});
 
@@ -113,18 +115,19 @@ class _Diverged implements Exception {
   final String reason;
 }
 
-/// Plays a tape's inputs into the running app (PLAN-v2 Milestone 15,
-/// steps 8 to 15) while the network source answers from it.
+/// Plays a tape's inputs into the running app while the network source
+/// answers from it.
 ///
-/// Inputs go by **logical order**, not by the clock (step 10). Each input
+/// Inputs go by **logical order**, not by the clock. Each input
 /// waits for three things: its recorded delay divided by [speed]; every
 /// answer in its `after` to be delivered again; and its target to be ready
 /// (built, laid out, on screen). A slow machine or a changed layout then
 /// does not break the tape.
 ///
-/// It forces frames only through the input it sends (the exception rule 15
-/// allows), blocks real pointer input, shows a banner, stops on Esc, and
-/// restores the network source and the input when it ends.
+/// It forces frames only through the input it sends (the one exception to
+/// "no frames while an agent works"), blocks real pointer input, shows a
+/// banner, stops on Esc, and restores the network source and the input when
+/// it ends.
 class TapePlayer {
   TapePlayer({
     required this.tape,
@@ -147,7 +150,7 @@ class TapePlayer {
 
   final NetReplay? _givenNet;
 
-  /// Sends a batch of the run's events to the bridge (step 14): a reload
+  /// Sends a batch of the run's events to the bridge: a reload
   /// clears the app's memory, so the bridge is where a run lives. Null: no
   /// streaming (no bridge).
   final Future<void> Function(List<Map<String, Object?>> events)? stream;
@@ -160,7 +163,7 @@ class TapePlayer {
   final Future<void> Function(Map<String, Object?> status)? report;
 
   /// How often events go to the bridge while the replay runs. A timer that
-  /// only posts: it forces no frame (rule 2).
+  /// only posts: it forces no frame.
   static const Duration streamEvery = Duration(milliseconds: 500);
 
   Timer? _streamTimer;
@@ -300,7 +303,7 @@ class TapePlayer {
   /// Inputs in the tape.
   int get total => tape.inputs.length;
 
-  /// The first difference from the tape, or null (step 13).
+  /// The first difference from the tape, or null.
   Map<String, Object?>? get firstDifference => _firstDifference;
 
   /// Starts the replay. Completes when it holds or ends, with [result].
@@ -512,8 +515,8 @@ class TapePlayer {
         final data = input.data['data'];
         final origin = input.data['origin'];
         if (data is String && origin is String) {
-          // The recorded data is masked and clipped (rule 16): a masked
-          // key arrives as "***".
+          // The recorded data is masked and clipped: a masked key arrives
+          // as "***".
           host.postMessage(data, origin);
         }
       default:
@@ -530,80 +533,122 @@ class TapePlayer {
 
   Future<void> _pointer(TapeInput input) async {
     final data = input.data;
-    final phase = data['phase'];
-    final recordedId = data['pointer'] is int ? data['pointer']! as int : 0;
-    final recorded = Offset(_num(data['x']), _num(data['y']));
+    final recordedId = asInt(data['pointer']) ?? 0;
+    final recorded = Offset(asDouble(data['x']) ?? 0, asDouble(data['y']) ?? 0);
     _lastAt[recordedId] = recorded;
-    switch (phase) {
-      case 'down':
-        final position = await _downPosition(input, recorded);
-        final kind = _kind(data['device']);
-        final id = _device(kind, position);
-        _pointers[recordedId] = (id, position - recorded, kind);
-        SyntheticInput.send(
-          PointerDownEvent(
-            viewId: _viewId,
-            timeStamp: SyntheticInput.stamp(),
-            pointer: id,
-            device: id,
-            kind: kind,
-            position: position,
-          ),
-        );
-      case 'move':
-        final down = _pointers[recordedId];
-        if (down == null) return;
-        final (id, offset, kind) = down;
-        SyntheticInput.send(
-          PointerMoveEvent(
-            viewId: _viewId,
-            timeStamp: SyntheticInput.stamp(),
-            pointer: id,
-            device: id,
-            kind: kind,
-            position: recorded + offset,
-          ),
-        );
-      case 'up' || 'cancel':
-        final down = _pointers.remove(recordedId);
-        if (down == null) return;
-        final (id, offset, kind) = down;
-        final position = recorded + offset;
-        SyntheticInput.send(
-          phase == 'up'
-              ? PointerUpEvent(
-                  viewId: _viewId,
-                  timeStamp: SyntheticInput.stamp(),
-                  pointer: id,
-                  device: id,
-                  kind: kind,
-                  position: position,
-                )
-              : PointerCancelEvent(
-                  viewId: _viewId,
-                  timeStamp: SyntheticInput.stamp(),
-                  pointer: id,
-                  device: id,
-                  kind: kind,
-                  position: position,
-                ),
-        );
-      case 'scroll':
-        // Watch out for: a list restores nothing after a restart, so a
-        // scroll replays as the signal that made it, never as an offset.
-        // A drag replays as its down, moves and up.
-        final id = _device(PointerDeviceKind.mouse, recorded);
-        SyntheticInput.send(
-          PointerScrollEvent(
-            viewId: _viewId,
-            timeStamp: SyntheticInput.stamp(),
-            device: id,
-            kind: PointerDeviceKind.mouse,
-            position: recorded,
-            scrollDelta: Offset(_num(data['dx']), _num(data['dy'])),
-          ),
-        );
+    switch (PointerPhase.fromWire(data['phase'])) {
+      case PointerPhase.down:
+        await _pointerDown(input, recordedId, recorded);
+      case PointerPhase.move:
+        _pointerMove(recordedId, recorded);
+      case PointerPhase.up:
+        _pointerUp(recordedId, recorded);
+      case PointerPhase.cancel:
+        _pointerCancel(recordedId, recorded);
+      case PointerPhase.scroll:
+        _pointerScroll(input.data, recorded);
+      case PointerPhase.hover || PointerPhase.drag:
+        break;
     }
+  }
+
+  Future<void> _pointerDown(
+    TapeInput input,
+    int recordedId,
+    Offset recorded,
+  ) async {
+    final position = await _downPosition(input, recorded);
+    final kind = _kind(input.data['device']);
+    final id = _device(kind, position);
+    _pointers[recordedId] = (id, position - recorded, kind);
+    SyntheticInput.send(
+      PointerDownEvent(
+        viewId: _viewId,
+        timeStamp: SyntheticInput.stamp(),
+        pointer: id,
+        device: id,
+        kind: kind,
+        position: position,
+      ),
+    );
+  }
+
+  void _pointerMove(int recordedId, Offset recorded) {
+    final down = _pointers[recordedId];
+    if (down == null) return;
+    final (id, offset, kind) = down;
+    SyntheticInput.send(
+      PointerMoveEvent(
+        viewId: _viewId,
+        timeStamp: SyntheticInput.stamp(),
+        pointer: id,
+        device: id,
+        kind: kind,
+        position: recorded + offset,
+      ),
+    );
+  }
+
+  void _pointerUp(int recordedId, Offset recorded) {
+    final released = _release(recordedId, recorded);
+    if (released == null) return;
+    SyntheticInput.send(
+      PointerUpEvent(
+        viewId: _viewId,
+        timeStamp: SyntheticInput.stamp(),
+        pointer: released.id,
+        device: released.id,
+        kind: released.kind,
+        position: released.position,
+      ),
+    );
+  }
+
+  void _pointerCancel(int recordedId, Offset recorded) {
+    final released = _release(recordedId, recorded);
+    if (released == null) return;
+    SyntheticInput.send(
+      PointerCancelEvent(
+        viewId: _viewId,
+        timeStamp: SyntheticInput.stamp(),
+        pointer: released.id,
+        device: released.id,
+        kind: released.kind,
+        position: released.position,
+      ),
+    );
+  }
+
+  /// Forgets the down of [recordedId] and says where its pointer is now.
+  /// Null when that pointer never went down.
+  ({int id, Offset position, PointerDeviceKind kind})? _release(
+    int recordedId,
+    Offset recorded,
+  ) {
+    final down = _pointers.remove(recordedId);
+    if (down == null) return null;
+    final (id, offset, kind) = down;
+    return (id: id, position: recorded + offset, kind: kind);
+  }
+
+  // A list restores nothing after a restart, so a scroll replays as the
+  // signal that made it, never as an offset. A drag replays as its down,
+  // moves and up.
+  void _pointerScroll(Map<String, Object?> data, Offset recorded) {
+    final id = _device(PointerDeviceKind.mouse, recorded);
+    SyntheticInput.send(
+      PointerScrollEvent(
+        viewId: _viewId,
+        timeStamp: SyntheticInput.stamp(),
+        device: id,
+        kind: PointerDeviceKind.mouse,
+        position: recorded,
+        scrollDelta: Offset(
+          asDouble(data['dx']) ?? 0,
+          asDouble(data['dy']) ?? 0,
+        ),
+      ),
+    );
   }
 
   int get _viewId =>
@@ -611,7 +656,7 @@ class TapePlayer {
 
   /// A synthetic device for one pointer of the tape, added once. Ids are
   /// at or above [SyntheticInput.deviceBase], so the pointer source tags
-  /// them `agent` and no new tape records them (watch out for).
+  /// them `agent` and no new tape records them.
   int _device(PointerDeviceKind kind, Offset position) {
     final id = SyntheticInput.deviceBase + 0x100 + (_nextDevice++ % 0xFF);
     if (_addedDevices.add(id)) {
@@ -630,16 +675,10 @@ class TapePlayer {
     return id;
   }
 
-  static PointerDeviceKind _kind(Object? name) {
-    for (final kind in PointerDeviceKind.values) {
-      if (kind.name == name) return kind;
-    }
-    return PointerDeviceKind.touch;
-  }
+  static PointerDeviceKind _kind(Object? name) =>
+      asEnum(PointerDeviceKind.values, name) ?? PointerDeviceKind.touch;
 
-  static double _num(Object? value) => value is num ? value.toDouble() : 0;
-
-  /// Where a down lands now (step 11): its anchor resolved to the widget
+  /// Where a down lands now: its anchor resolved to the widget
   /// now, at the stored fraction. Without an anchor, the recorded spot.
   /// When the anchor does not resolve, the recorded spot only when a widget
   /// of the same type is there; otherwise the replay diverges.
@@ -711,7 +750,7 @@ class TapePlayer {
   }
 
   /// Text replays into the focused field through
-  /// `userUpdateTextEditingValue` (Milestone 12, step 5), so the app's
+  /// `userUpdateTextEditingValue`, so the app's
   /// formatters and `onChanged` run as for the user.
   Future<void> _text(TapeInput input) async {
     final value = input.data['value'];
@@ -728,7 +767,7 @@ class TapePlayer {
     final deadline = _Deadline(readyTimeout);
     while (true) {
       final context = FocusManager.instance.primaryFocus?.context;
-      // Not `.of`: nothing here may subscribe an element (rule 3).
+      // Not `.of`: nothing here may subscribe an element.
       final field = context?.findAncestorStateOfType<EditableTextState>();
       if (field != null && field.mounted) {
         field.userUpdateTextEditingValue(
@@ -754,7 +793,7 @@ class TapePlayer {
     throw _Diverged('step ${input.step}: no text field has focus');
   }
 
-  // ---- differences (step 13) ----
+  // ---- differences ----
 
   void _differ(Object step, String what, Object? expected, Object? got) {
     _firstDifference ??= {
@@ -857,7 +896,7 @@ class TapePlayer {
       );
     }
     _addedDevices.clear();
-    // Restore everything the replay changed (rule 15): the network, the
+    // Restore everything the replay changed: the network, the
     // tape store, the input gate and the banner.
     host.network?.replay = null;
     net.close();

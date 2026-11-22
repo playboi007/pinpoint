@@ -7,7 +7,7 @@ import 'package:flutter/widgets.dart';
 import 'agent_control.dart';
 
 /// Taps and long presses made up by Pinpoint, sent through the same
-/// pipeline as real pointer events (plan Milestone 12, step 4).
+/// pipeline as real pointer events.
 abstract final class SyntheticInput {
   /// The first device id Pinpoint uses: far above the ids the engine gives
   /// real devices, so a synthetic pointer never collides with one.
@@ -28,8 +28,7 @@ abstract final class SyntheticInput {
   static Duration _last = Duration.zero;
 
   /// Whether a synthetic event is being dispatched now. The replay gate
-  /// lets only these through while it blocks real input (PLAN-v2
-  /// Milestone 15, step 17). Dispatch and hit test are synchronous, and a
+  /// lets only these through while it blocks real input. Dispatch and hit test are synchronous, and a
   /// real event never arrives in the middle of one.
   static bool dispatching = false;
 
@@ -105,7 +104,7 @@ abstract final class SyntheticInput {
     final id = deviceBase + (_next++ % 0xFF);
     // Touch, not mouse: a tap is all most checks need. Hover and focus
     // effects need mouse-kind events and a PointerHoverEvent, which touch
-    // skips (watch out for); a check on a hover state needs a hover tool
+    // skips; a check on a hover state needs a hover tool
     // later.
     const kind = PointerDeviceKind.touch;
     Duration now() => _stamp();
@@ -172,7 +171,7 @@ abstract final class SyntheticInput {
   }
 
   /// The id of the view [renderObject] is drawn in. Pinpoint assumes a
-  /// single view (PLAN.md risks).
+  /// single view.
   static int viewIdOf(RenderObject renderObject) {
     RenderObject? current = renderObject;
     while (current != null) {

@@ -273,7 +273,7 @@ class PickResult {
 
   /// This result with [globalRect] read again from the render tree.
   ///
-  /// Null when the picked or the selected element is no longer mounted. The
+  /// Null when the picked or the selected element is unmounted. The
   /// same instance when nothing has changed, or the rect cannot be read
   /// right now (for example a scale of 0 mid-animation).
   PickResult? refreshed() {

@@ -67,8 +67,8 @@ class DetectorHooks {
 
   /// The rebuild hot spots, when tracking is on. A slot DevTools cleared
   /// since (it turned its tracking off) is taken back; one another tool
-  /// wrote over the hook is left to it, and tracking turns off (watch out
-  /// for: DevTools replaces or clears the hook).
+  /// wrote over the hook is left to it, and tracking turns off (DevTools replaces
+  /// or clears the hook).
   List<Finding> rebuildFindings(FindingLocator locator) {
     if (!rebuilds.installed) return const <Finding>[];
     if (rebuilds.takenOver && !rebuilds.reclaim()) {

@@ -157,7 +157,7 @@ CapturePlan? planCapture(
   var source = pixelRectFor(crop, ratio, fullImageSize(bounds, ratio));
   if (maxWidth != null && source.width > maxWidth) {
     // Rounding outward adds less than a pixel on each side. Take two off
-    // the target width and it can no longer go over.
+    // the target width and it cannot go over.
     ratio = math.max(maxWidth - 2, 1) / crop.width;
     source = pixelRectFor(crop, ratio, fullImageSize(bounds, ratio));
   }
@@ -236,7 +236,7 @@ Future<Screenshot?> captureScreenshot(
 
   // Global to the boundary's own logical pixels. Today the boundary fills
   // the view from the origin, so this is the identity. With a what-if
-  // viewport (Milestone 9) the boundary moves and scales; converting here
+  // viewport the boundary moves and scales; converting here
   // keeps the crop on the target either way.
   final toGlobal = boundary.getTransformTo(null);
   final toLocal = Matrix4.tryInvert(toGlobal);

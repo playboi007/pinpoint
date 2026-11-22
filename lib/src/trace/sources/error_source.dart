@@ -7,7 +7,7 @@ import '../cause_zone.dart';
 import '../trace_recorder.dart';
 import '../trace_source.dart';
 
-/// `error` events (level 1), from `ErrorCapture` of Milestone 10 while the
+/// `error` events (level 1), from `ErrorCapture` while the
 /// user has "Capture errors" on (the default). It adds no handler of its
 /// own: `ErrorCapture` tells it of each error inside its guarded handler.
 ///

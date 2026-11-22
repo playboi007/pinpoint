@@ -63,10 +63,10 @@ class CommentDraft extends ChangeNotifier {
   // is undefined after a web hot reload (api-notes item 29).
   bool? _attachTape;
 
-  /// "Attach what happened" (PLAN-v2 Milestone 15, step 16): a tape of the
+  /// "Attach what happened": a tape of the
   /// run goes to the bridge with the note. On by default; the tape stays
   /// on this machine, in `.pinpoint/tapes/`.
-  bool get attachTape => _attachTape != false;
+  bool get attachTape => _attachTape ?? true;
   set attachTape(bool value) {
     if (value == attachTape) return;
     _attachTape = value;
@@ -94,7 +94,7 @@ class CommentDraft extends ChangeNotifier {
 
   List<Map<String, Object?>> _checks = const <Map<String, Object?>>[];
 
-  /// What Milestone 12's `verify_note` will measure on this note, chosen
+  /// What `verify_note` will measure on this note, chosen
   /// from the form's menu. Cleared with the text after a send.
   List<Map<String, Object?>> get checks => _checks;
 
@@ -283,6 +283,8 @@ class PinPointController extends ChangeNotifier {
   ValueListenable<bool> get measuring => _measuring;
 
   /// Records whether Alt is held. Ignored in idle.
+  // Tests call it with a positional value.
+  // ignore: avoid_positional_boolean_parameters
   void setMeasuring(bool held) {
     _measuring.value = held && isActive;
   }
@@ -298,7 +300,7 @@ class PinPointController extends ChangeNotifier {
   /// Accept: the panel shows, but the app keeps its clicks (no pointer
   /// trap, no hover) and its semantics, and closing the note goes back to
   /// idle, not to picking.
-  bool get reviewing => _reviewing == true;
+  bool get reviewing => _reviewing ?? false;
 
   // Nullable on purpose: on web a hot reload leaves a new field undefined
   // in a controller that already exists (docs/api-notes.md, item 29), and

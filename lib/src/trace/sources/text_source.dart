@@ -7,11 +7,11 @@ import '../trace_source.dart';
 
 /// `input.text` events (level 1): the focused `EditableTextState`, read
 /// after each frame, recorded when its value changed. Masked for
-/// `obscureText` when recorded (rule 16).
+/// `obscureText` when recorded.
 ///
 /// Reads nothing while the app draws no frames, and never subscribes an
 /// element (engineering rule 3). Pinpoint's own fields, outside the app's
-/// content, are left out (rule 14).
+/// content, are left out.
 class TextSource extends TraceSource with FrameWork {
   TextSource({
     required this.contentKey,
@@ -89,7 +89,7 @@ class TextSource extends TraceSource with FrameWork {
     if (context is! Element || !context.mounted || content is! Element) {
       return;
     }
-    // Not `.of`: nothing here may subscribe an element (rule 3).
+    // Not `.of`: nothing here may subscribe an element.
     final field = context.findAncestorStateOfType<EditableTextState>();
     if (field == null) return;
     // A field outside the app's content is Pinpoint's own.

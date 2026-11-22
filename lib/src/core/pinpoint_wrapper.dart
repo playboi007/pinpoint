@@ -159,8 +159,8 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
     _startTrace();
   }
 
-  /// Starts the flight recorder and its level 1 sources (PLAN-v2
-  /// Milestone 13), unless `TraceConfig.enabled` is false. A wrapper
+  /// Starts the flight recorder and its level 1 sources, unless
+  /// `TraceConfig.enabled` is false. A wrapper
   /// mounted again keeps the record of the one before it.
   void _startTrace() {
     final hooks = _hooks;
@@ -207,11 +207,11 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
     );
     session.thumbnail = _thumbnail;
     // A page a replay restarted: answer requests from the tape now, before
-    // the app's first build makes any (PLAN-v2 Milestone 15, step 7).
+    // the app's first build makes any.
     TapePlayer.bootNetwork(session, storage: widget.config.trace.storage);
   }
 
-  /// The page now, for the start of a tape (PLAN-v2 Milestone 15, step 1).
+  /// The page now, for the start of a tape.
   /// Storage is copied only at app start ([t] 0) and only with
   /// `TraceConfig.storage`: it holds session tokens.
   TapeStart _pageStart({required int t, required int seq}) {
@@ -237,7 +237,7 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
   }
 
   /// The bridge's origin: its traffic (pins, drafts, the long poll) is
-  /// Pinpoint's own and never recorded (rule 14).
+  /// Pinpoint's own and never recorded.
   Set<String> _bridgeOrigins() {
     final bridge = BridgeClient.find(
       url: widget.config.bridgeUrl,
@@ -434,7 +434,7 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
       alignment: Alignment.topLeft,
       children: [
         // With no viewport the frame passes the Stack's constraints
-        // straight on. With one, the app's boundary is no longer at the
+        // straight on. With one, the app's boundary is not at the
         // screen origin and may be scaled: every rect is global and goes
         // through the frame's paint transform (engineering rule 7).
         ListenableBuilder(
@@ -480,7 +480,7 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
                           _controller.isActive &&
                           !_controller.reviewing &&
                           readers == 0,
-                      child: child!,
+                      child: child,
                     ),
                     child: child,
                   ),
@@ -492,7 +492,7 @@ class _PinPointWrapperState extends State<PinPointWrapper> {
           ),
         ),
         // Over the app, under Pinpoint's UI: takes real pointer input while
-        // a replay runs (PLAN-v2 Milestone 15, step 17). Always present.
+        // a replay runs. Always present.
         // In the user's palette: it sits outside the overlay's own Theme.
         ValueListenableBuilder<PinPointPalette>(
           valueListenable: _controller.palette,

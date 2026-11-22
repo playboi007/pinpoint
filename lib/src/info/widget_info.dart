@@ -19,7 +19,7 @@ import 'extractors/wrap_extractor.dart';
 /// when the render object is not of its type.
 typedef InfoExtractor = InfoSection? Function(RenderObject renderObject);
 
-/// How the Tweak tab edits a property (Milestone 11).
+/// How the Tweak tab edits a property.
 sealed class PropertyEditor {
   const PropertyEditor();
 }
@@ -338,8 +338,7 @@ String formatColor(Color color) {
 }
 
 /// [text] cut to [WidgetInfo.maxTextLength] characters, ending in "…" when
-/// cut. Milestone 4 truncates again on the way out of the app (engineering
-/// rule 9); this keeps the panel readable.
+/// cut. The text is truncated again on the way out of the app; this keeps the panel readable.
 String truncateText(String text) => text.length <= WidgetInfo.maxTextLength
     ? text
     : '${text.substring(0, WidgetInfo.maxTextLength)}…';

@@ -20,7 +20,7 @@ typedef CommandHandler =
 ///
 /// A browser app cannot accept connections, so the default,
 /// [LongPollTransport], asks the bridge for work. The service-extension
-/// spike (step 6) is a second implementation.
+/// spike is a second implementation.
 abstract class CommandTransport {
   /// Starts handing commands to [handler]. Does nothing while running.
   void start(CommandHandler handler);
@@ -74,8 +74,8 @@ class LongPollTransport implements CommandTransport {
   void start(CommandHandler handler) {
     if (_running) return;
     _running = true;
-    // Pinpoint's own work: its awaits are not entries and make no cause
-    // (rule 14). Each command it runs is a cause of its own.
+    // Pinpoint's own work: its awaits are not entries and make no cause.
+    // Each command it runs is a cause of its own.
     unawaited(CauseZone.internal(() => _loop(++_generation, handler)));
   }
 
@@ -84,7 +84,7 @@ class LongPollTransport implements CommandTransport {
     if (!_running) return;
     _running = false;
     _generation++;
-    // Watch out for: a poll held open for 25 seconds must end on dispose
+    // A poll held open for 25 seconds must end on dispose
     // and when the tab is hidden. Closing its client aborts it (on web,
     // the XHR); a test client that cannot abort is answered by the
     // bridge's control-off instead.
@@ -154,7 +154,7 @@ class LongPollTransport implements CommandTransport {
 bool get debugRegisteredPinpointExtension =>
     ServiceExtensionTransport._registered;
 
-/// A spike (plan Milestone 12, step 2): commands as a VM service extension,
+/// A spike: commands as a VM service extension,
 /// `ext.pinpoint.command`, which the bridge would call over the debug
 /// connection. No polling and no CORS, but it needs the debug service
 /// address, and on web it is registered only while a debugger is attached

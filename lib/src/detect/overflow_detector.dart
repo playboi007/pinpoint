@@ -13,7 +13,7 @@ class OverflowDetector extends Detector {
   const OverflowDetector();
 
   /// Rounding makes children a fraction of a pixel too wide; below this it
-  /// is not an overflow (watch out for: false errors without a tolerance).
+  /// is not an overflow.
   static const double tolerance = 0.5;
 
   @override
@@ -44,7 +44,10 @@ class OverflowDetector extends Detector {
     final side = horizontal
         ? (flex.textDirection == TextDirection.rtl ? 'left' : 'right')
         : (flex.verticalDirection == VerticalDirection.up ? 'top' : 'bottom');
-    final widget = _widgetName(context.elementOf(flex)?.widget, horizontal);
+    final widget = _widgetName(
+      context.elementOf(flex)?.widget,
+      horizontal: horizontal,
+    );
     final amount = (overflow * 10).roundToDouble() / 10;
     return [
       context.finding(
@@ -64,7 +67,7 @@ class OverflowDetector extends Detector {
     ];
   }
 
-  static String _widgetName(Object? widget, bool horizontal) {
+  static String _widgetName(Object? widget, {required bool horizontal}) {
     final name = widget?.runtimeType.toString();
     if (name != null && !name.startsWith('_')) return name;
     return horizontal ? 'Row' : 'Column';

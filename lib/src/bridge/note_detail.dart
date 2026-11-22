@@ -2,6 +2,7 @@
 // tools format notes with this.
 
 import '../model/annotation.dart' show clipText;
+import '../model/json_read.dart';
 import '../model/note_round.dart';
 import '../sink/markdown_formatter.dart';
 
@@ -48,14 +49,16 @@ String inspectText(
   Map<String, Object?> note,
   NoteDetail detail,
 ) {
-  final target = _map(note['target']);
-  final name = _string(target['widget']) ?? '?';
+  final target = asJsonMap(note['target']);
+  final name = asString(target['widget']) ?? '?';
   final body = switch (detail) {
     NoteDetail.compact => _location(note),
     NoteDetail.standard => _standard(note).split('\n').skip(2).toList(),
     NoteDetail.full => [
       ..._standard(note).split('\n').skip(2),
-      for (final MapEntry(:key, :value) in _map(target['properties']).entries)
+      for (final MapEntry(:key, :value) in asJsonMap(
+        target['properties'],
+      ).entries)
         if (value is String) '  $key: ${_line(value)}',
       if (subtreeLines(note) case final rows when rows.isNotEmpty) ...[
         'Subtree:',
@@ -67,15 +70,14 @@ String inspectText(
 }
 
 String _header(Map<String, Object?> note) {
-  final id = _string(note['id']) ?? '?';
+  final id = asString(note['id']) ?? '?';
   final reopened = note['reopened'];
   final parts = [
-    ?_string(note['intent']),
-    ?_string(note['status']),
+    ?asString(note['intent']),
+    ?asString(note['status']),
     if (reopened is int && reopened > 0)
-      reopened == 1 ? 'reopened' : 'reopened $reopened times',
-    // PLAN-v2 Milestone 15, step 18: the agent can replay what the user
-    // did.
+      if (reopened == 1) 'reopened' else 'reopened $reopened times',
+    // The agent can replay what the user did.
     if (note['tape'] is Map<String, Object?>) 'has tape',
   ];
   return parts.isEmpty ? id : '$id (${parts.join(', ')})';
@@ -86,24 +88,24 @@ String _header(Map<String, Object?> note) {
 List<String> _reopenedLines(Map<String, Object?> note) {
   final reopened = note['reopened'];
   if (reopened is! int || reopened < 1) return const [];
-  for (final m in _list(note['messages']).reversed) {
-    final message = _map(m);
-    if (_string(message['from']) != 'user') continue;
-    final text = _string(message['text']);
+  for (final m in asJsonList(note['messages']).reversed) {
+    final message = asJsonMap(m);
+    if (asString(message['from']) != 'user') continue;
+    final text = asString(message['text']);
     if (text != null) return ['User: ${_line(clipText(text, 200))}'];
   }
   return const [];
 }
 
 List<String> _location(Map<String, Object?> note) {
-  final target = _map(note['target']);
-  final rect = _map(target['rect']);
-  final x = _number(rect['x']);
-  final y = _number(rect['y']);
-  final w = _number(rect['w']);
-  final h = _number(rect['h']);
+  final target = asJsonMap(note['target']);
+  final rect = asJsonMap(target['rect']);
+  final x = jsonNumberText(rect['x']);
+  final y = jsonNumberText(rect['y']);
+  final w = jsonNumberText(rect['w']);
+  final h = jsonNumberText(rect['h']);
   final description =
-      _string(target['description']) ?? _string(target['widget']);
+      asString(target['description']) ?? asString(target['widget']);
   return [
     if (description != null) 'Target: ${_line(clipText(description, 120))}',
     'Source: ${_where(target['source'], root: projectRootOf(note)) ?? 'unavailable'}',
@@ -112,7 +114,7 @@ List<String> _location(Map<String, Object?> note) {
 }
 
 String _compact(Map<String, Object?> note) {
-  final comment = _line(_string(note['comment']) ?? '');
+  final comment = _line(asString(note['comment']) ?? '');
   String build(String text) => [
     _header(note),
     'Comment: $text',
@@ -128,25 +130,25 @@ String _compact(Map<String, Object?> note) {
 
 String _standard(Map<String, Object?> note) => _standardLines(note).join('\n');
 
-/// The standard text, one line per entry. PLAN-v3 Milestone 19, step 9:
+/// The standard text, one line per entry:
 /// what finds and explains the problem, and no more. The properties, the
 /// subtree, the state owners and the environment are [NoteDetail.full].
 ///
 /// [onDisk] is for the `.md` next to the note's files: there the screenshot
 /// is the full-size file beside it, not the MCP attachment.
 List<String> _standardLines(Map<String, Object?> note, {bool onDisk = false}) {
-  final target = _map(note['target']);
-  final page = _map(note['page']);
-  final siblings = _map(note['siblings']);
-  final shot = _map(note['screenshot']);
+  final target = asJsonMap(note['target']);
+  final page = asJsonMap(note['page']);
+  final siblings = asJsonMap(note['siblings']);
+  final shot = asJsonMap(note['screenshot']);
   final root = projectRootOf(note);
   final description =
-      _string(target['description']) ?? _string(target['widget']);
-  final text = _string(target['text']);
+      asString(target['description']) ?? asString(target['widget']);
+  final text = asString(target['text']);
   final reopened = note['reopened'];
   final lines = <String>[
     _header(note),
-    'Comment: ${_block(_string(note['comment']) ?? '')}',
+    'Comment: ${_block(asString(note['comment']) ?? '')}',
     // The reason is the last reply; a file reader must not take a
     // reopened note for new work.
     if (reopened is int && reopened > 0)
@@ -161,31 +163,32 @@ List<String> _standardLines(Map<String, Object?> note, {bool onDisk = false}) {
     'Source: ${_where(target['source'], root: root) ?? 'unavailable'}',
   ];
   if (enclosingLine(note, max: 6) case final enclosing?) lines.add(enclosing);
-  final rect = _map(target['rect']);
-  final x = _number(rect['x']);
-  final y = _number(rect['y']);
-  final w = _number(rect['w']);
-  final h = _number(rect['h']);
-  final constraints = _string(target['constraints']);
-  final parent = _string(siblings['parent']);
+  final rect = asJsonMap(target['rect']);
+  final x = jsonNumberText(rect['x']);
+  final y = jsonNumberText(rect['y']);
+  final w = jsonNumberText(rect['w']);
+  final h = jsonNumberText(rect['h']);
+  final constraints = asString(target['constraints']);
+  final parent = asString(siblings['parent']);
   final index = siblings['index'];
   final count = siblings['count'];
   final layout = [
     if (x != null && y != null && w != null && h != null) 'rect $x,$y ${w}x$h',
     if (constraints != null) 'constraints ${compactConstraints(constraints)}',
-    ?_string(target['renderObject']),
+    ?asString(target['renderObject']),
     if (parent != null)
-      index is int && count is int
-          ? 'parent $parent, child ${index + 1} of $count'
-          : 'parent $parent',
+      if (index is int && count is int)
+        'parent $parent, child ${index + 1} of $count'
+      else
+        'parent $parent',
   ];
   if (layout.isNotEmpty) lines.add('Layout: ${_line(layout.join('  '))}');
-  final viewport = _map(page['viewport']);
+  final viewport = asJsonMap(page['viewport']);
   final pageParts = [
-    ?_string(page['route']) ?? _string(page['url']),
-    if (_number(viewport['width']) case final w?)
-      if (_number(viewport['height']) case final h?) 'viewport ${w}x$h',
-    ?_string(page['brightness']),
+    ?asString(page['route']) ?? asString(page['url']),
+    if (jsonNumberText(viewport['width']) case final w?)
+      if (jsonNumberText(viewport['height']) case final h?) 'viewport ${w}x$h',
+    ?asString(page['brightness']),
   ];
   if (pageParts.isNotEmpty) lines.add('Page: ${_line(pageParts.join('  '))}');
   // From standard up, not only at full as the plan says: a note filed at
@@ -194,7 +197,7 @@ List<String> _standardLines(Map<String, Object?> note, {bool onDisk = false}) {
   lines.addAll(findingLines(note));
   lines.addAll(tweakLines(note));
   lines.addAll(verificationLines(note));
-  if (_string(shot['file']) case final file?) {
+  if (asString(shot['file']) case final file?) {
     lines.add(
       'Screenshot: $file'
       '${onDisk ? '' : ' (attached, at most 800 px wide)'}'
@@ -212,27 +215,29 @@ List<String> _standardLines(Map<String, Object?> note, {bool onDisk = false}) {
 
 /// The standard text and what only [NoteDetail.full] shows.
 String _full(Map<String, Object?> note) {
-  final app = _map(note['app']);
-  final page = _map(note['page']);
-  final inherited = _map(note['inherited']);
+  final app = asJsonMap(note['app']);
+  final page = asJsonMap(note['page']);
+  final inherited = asJsonMap(note['inherited']);
   final environment = [
-    ?_string(app['buildMode']),
-    ?_string(app['platform']),
-    if (_number(page['devicePixelRatio']) case final dpr?) 'dpr $dpr',
-    if (_number(page['textScale']) case final scale?) 'textScale $scale',
-    ?_string(page['locale']),
-    if (_string(inherited['themeBrightness']) case final b?) 'theme $b',
+    ?asString(app['buildMode']),
+    ?asString(app['platform']),
+    if (jsonNumberText(page['devicePixelRatio']) case final dpr?) 'dpr $dpr',
+    if (jsonNumberText(page['textScale']) case final scale?) 'textScale $scale',
+    ?asString(page['locale']),
+    if (asString(inherited['themeBrightness']) case final b?) 'theme $b',
     if (inherited['useMaterial3'] == true) 'Material 3',
-    ?_string(inherited['textDirection']),
+    ?asString(inherited['textDirection']),
   ];
   final properties = [
-    for (final MapEntry(:key, :value) in _map(
-      _map(note['target'])['properties'],
+    for (final MapEntry(:key, :value) in asJsonMap(
+      asJsonMap(note['target'])['properties'],
     ).entries)
-      if (_string(value) case final v?) '$key=$v',
+      if (asString(value) case final v?) '$key=$v',
   ];
-  final errors = [for (final e in _list(note['errors'])) ?_string(e)];
-  final truncated = [for (final t in _list(note['truncated'])) ?_string(t)];
+  final errors = [for (final e in asJsonList(note['errors'])) ?asString(e)];
+  final truncated = [
+    for (final t in asJsonList(note['truncated'])) ?asString(t),
+  ];
   final subtree = subtreeLines(note);
   return [
     ..._standardLines(note),
@@ -246,36 +251,36 @@ String _full(Map<String, Object?> note) {
   ].join('\n');
 }
 
-/// One line for each state owner that reads state objects (PLAN-v3
-/// Milestone 21, step 1), for example `Reads: _CartState: provider CartModel
+/// One line for each state owner that reads state objects, for example `Reads:
+/// _CartState: provider CartModel
 /// #a1 (lib/cart_model.dart:9), inherited Flags #a2`. The same tag on two
 /// lines is one object.
 List<String> dependencyLines(Map<String, Object?> note) {
   final root = projectRootOf(note);
   return [
-    for (final o in _list(note['stateOwners']))
-      if (_map(o) case final owner)
+    for (final o in asJsonList(note['stateOwners']))
+      if (asJsonMap(o) case final owner)
         if ([
-              for (final d in _list(owner['dependencies']))
-                if (_map(d) case final dep
-                    when _string(dep['kind']) != null &&
-                        _string(dep['type']) != null)
-                  '${_line(_string(dep['kind'])!)} ${_line(_string(dep['type'])!)}'
-                      '${_string(dep['tag']) == null ? '' : ' ${_line(_string(dep['tag'])!)}'}'
+              for (final d in asJsonList(owner['dependencies']))
+                if (asJsonMap(d) case final dep
+                    when asString(dep['kind']) != null &&
+                        asString(dep['type']) != null)
+                  '${_line(asString(dep['kind'])!)} ${_line(asString(dep['type'])!)}'
+                      '${asString(dep['tag']) == null ? '' : ' ${_line(asString(dep['tag'])!)}'}'
                       '${_where(dep['source'], root: root) == null ? '' : ' (${_where(dep['source'], root: root)})'}',
             ]
             case final deps when deps.isNotEmpty)
-          'Reads: ${_line(_string(owner['type']) ?? '?')}: ${deps.join(', ')}',
+          'Reads: ${_line(asString(owner['type']) ?? '?')}: ${deps.join(', ')}',
   ];
 }
 
-/// One short line for each round the agent closed (PLAN-v3 Milestone 20),
+/// One short line for each round the agent closed,
 /// for example `Round 2 (undone by user: c1; kept: c2)`. A round the user
 /// did not undo says what changed: `Round 1 (changed: c1, c2)`. After a
 /// request the agent has to do, it says `undo requested of: c1`.
 List<String> roundLines(Map<String, Object?> note) {
   final lines = <String>[];
-  for (final json in _list(note['rounds'])) {
+  for (final json in asJsonList(note['rounds'])) {
     final round = json is Map<String, Object?>
         ? NoteRound.fromJson(json)
         : null;
@@ -302,21 +307,21 @@ List<String> roundLines(Map<String, Object?> note) {
 /// The `.md` the bridge writes beside a note's JSON: the standard text,
 /// and one line that says where the rest is.
 String noteMarkdown(Map<String, Object?> note) {
-  final id = _string(note['id']) ?? '<id>';
+  final id = asString(note['id']) ?? '<id>';
   return '${_standardLines(note, onDisk: true).join('\n')}\n'
       'More: get_note detail full, or $id.json\n';
 }
 
 List<String> _replies(Map<String, Object?> note) => [
-  for (final m in _list(note['messages']))
-    if (_map(m) case final message when _string(message['text']) != null)
-      '- ${_string(message['from']) ?? 'agent'}: '
-          '${_block(_string(message['text'])!)}',
+  for (final m in asJsonList(note['messages']))
+    if (asJsonMap(m) case final message when asString(message['text']) != null)
+      '- ${asString(message['from']) ?? 'agent'}: '
+          '${_block(asString(message['text'])!)}',
 ];
 
 String? _where(Object? source, {String? root}) {
-  final s = _map(source);
-  final file = _string(s['file']);
+  final s = asJsonMap(source);
+  final file = asString(s['file']);
   final line = s['line'];
   if (file == null || line is! int) return null;
   final column = s['column'];
@@ -324,24 +329,12 @@ String? _where(Object? source, {String? root}) {
   return column is int ? '$name:$line:$column' : '$name:$line';
 }
 
-Map<String, Object?> _map(Object? value) =>
-    value is Map<String, Object?> ? value : const <String, Object?>{};
-
-List<Object?> _list(Object? value) =>
-    value is List<Object?> ? value : const <Object?>[];
-
-String? _string(Object? value) => value is String ? value : null;
-
-String? _number(Object? value) => switch (value) {
-  final int n => '$n',
-  final double n when n.isFinite =>
-    n == n.truncateToDouble() ? '${n.toInt()}' : '$n',
-  _ => null,
-};
-
 String _line(String text) => text.replaceAll(RegExp(r'\s*[\r\n]+\s*'), ' ');
 
 String _block(String text) => [
   for (final (i, line) in text.split(RegExp(r'\r\n?|\n')).indexed)
-    i == 0 || line.trim().isEmpty ? line.trimRight() : '  ${line.trimRight()}',
+    if (i == 0 || line.trim().isEmpty)
+      line.trimRight()
+    else
+      '  ${line.trimRight()}',
 ].join('\n');

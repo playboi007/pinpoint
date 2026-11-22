@@ -27,7 +27,7 @@ class StoryKeys {
   /// The one hint at the top when changes have no cause.
   static const Key noCause = ValueKey<String>('pinpoint.story.noCause');
 
-  /// "12 earlier blocks not shown".
+  /// The line for blocks the story dropped.
   static const Key dropped = ValueKey<String>('pinpoint.story.dropped');
 
   /// The time of block [id].
@@ -51,7 +51,7 @@ class StoryKeys {
   static Key end(int index) => ValueKey<String>('pinpoint.story.end$index');
 }
 
-/// The story of a watch (PLAN-v3 Milestone 21b): blocks in time order,
+/// The story of a watch: blocks in time order,
 /// oldest first. Each block is one cause (its label and time), the rows it
 /// changed (the name, the change in a few words, the method and its folder
 /// button, the code line), the widgets that rebuilt, and one hint.
@@ -96,88 +96,87 @@ class _StoryViewState extends State<StoryView> {
   @override
   Widget build(BuildContext context) {
     final tokens = PinPointTokens.of(context);
-    final story = widget.story;
-    final filter = widget.filter;
     // The cache tells when lines and names arrive, and only then.
     return ListenableBuilder(
       listenable: widget.cache,
-      builder: (context, _) {
-        final children = <Widget>[
-          DraftCheckbox(
-            key: StoryKeys.onlyMine,
-            value: filter.onlyMine,
-            label: 'Only my state',
-            onChanged: (value) =>
-                widget.onFilter(filter.copyWith(onlyMine: value)),
-          ),
-          const SizedBox(height: 6),
-        ];
-        final hint = story.noCauseHint;
-        if (hint != null) {
-          children.add(
-            Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: Text(hint, key: StoryKeys.noCause, style: tokens.micro),
-            ),
-          );
-        }
-        final hidden = hiddenLine(story);
-        if (hidden != null) {
-          children.add(_fold(tokens, hidden, story, filter));
-        } else if (filter.showHover || filter.showControllers) {
-          children.add(
-            Align(
-              alignment: Alignment.centerLeft,
-              child: DraftButton.link(
-                key: StoryKeys.foldHide,
-                label: 'hide hover and controller changes',
-                onPressed: () => widget.onFilter(
-                  filter.copyWith(showHover: false, showControllers: false),
-                ),
-              ),
-            ),
-          );
-        }
-        if (story.droppedBlocks > 0) {
-          children.add(
-            Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: Text(
-                '${story.droppedBlocks} earlier blocks not shown',
-                key: StoryKeys.dropped,
-                style: tokens.micro,
-              ),
-            ),
-          );
-        }
-        if (!story.hasChanges) {
-          children.add(
-            Text('Nothing changed yet — use the app', style: tokens.label),
-          );
-        }
-        var endIndex = 0;
-        for (final item in story.timeline) {
-          if (item is StoryEnd) {
-            children.add(_end(tokens, item, endIndex++));
-          } else if (item is StoryBlock) {
-            children.add(_block(tokens, story, item));
-          }
-        }
-        if (story.droppedStacks > 0) {
-          children.add(
-            Text(
-              '${story.droppedStacks} setState stacks dropped (cap)',
-              style: tokens.micro,
-            ),
-          );
-        }
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: children,
-        );
-      },
+      builder: (context, _) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ..._header(tokens),
+          ..._timeline(tokens),
+          ..._footer(tokens),
+        ],
+      ),
     );
   }
+
+  /// The check box, the hints, the fold line and "nothing changed".
+  List<Widget> _header(PinPointTokens tokens) {
+    final story = widget.story;
+    final filter = widget.filter;
+    final hint = story.noCauseHint;
+    final hidden = hiddenLine(story);
+    return [
+      DraftCheckbox(
+        key: StoryKeys.onlyMine,
+        value: filter.onlyMine,
+        label: 'Only my state',
+        onChanged: (value) => widget.onFilter(filter.copyWith(onlyMine: value)),
+      ),
+      const SizedBox(height: 6),
+      if (hint != null)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: Text(hint, key: StoryKeys.noCause, style: tokens.micro),
+        ),
+      if (hidden != null)
+        _fold(tokens, hidden, story, filter)
+      else if (filter.showHover || filter.showControllers)
+        _foldHide(filter),
+      if (story.droppedBlocks > 0)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: Text(
+            '${story.droppedBlocks} earlier blocks not shown',
+            key: StoryKeys.dropped,
+            style: tokens.micro,
+          ),
+        ),
+      if (!story.hasChanges)
+        Text('Nothing changed yet — use the app', style: tokens.label),
+    ];
+  }
+
+  Widget _foldHide(StoryFilter filter) => Align(
+    alignment: Alignment.centerLeft,
+    child: DraftButton.link(
+      key: StoryKeys.foldHide,
+      label: 'hide hover and controller changes',
+      onPressed: () => widget.onFilter(
+        filter.copyWith(showHover: false, showControllers: false),
+      ),
+    ),
+  );
+
+  List<Widget> _timeline(PinPointTokens tokens) {
+    final story = widget.story;
+    var endIndex = 0;
+    return [
+      for (final item in story.timeline)
+        if (item is StoryEnd)
+          _end(tokens, item, endIndex++)
+        else if (item is StoryBlock)
+          _block(tokens, story, item),
+    ];
+  }
+
+  List<Widget> _footer(PinPointTokens tokens) => [
+    if (widget.story.droppedStacks > 0)
+      Text(
+        '${widget.story.droppedStacks} setState stacks dropped (cap)',
+        style: tokens.micro,
+      ),
+  ];
 
   Widget _fold(
     PinPointTokens tokens,
@@ -215,14 +214,6 @@ class _StoryViewState extends State<StoryView> {
   );
 
   Widget _block(PinPointTokens tokens, Story story, StoryBlock block) {
-    final wall = block.wall;
-    Widget time = Text(
-      blockTime(block),
-      key: StoryKeys.time(block.id),
-      style: tokens.micro.copyWith(color: tokens.ink),
-    );
-    // The clock shows on hover.
-    if (wall != null) time = Tooltip(message: formatClockMs(wall), child: time);
     var notifyIndex = 0;
     var stateIndex = 0;
     final rows = <Widget>[];
@@ -233,30 +224,11 @@ class _StoryViewState extends State<StoryView> {
           '${row.kind == 'notify' ? notifyIndex++ : stateIndex++}';
       rows.add(_row(tokens, block, row, i, id));
     }
-    final hint = block.hint;
     return Column(
       key: StateChain.causeKey(block.id),
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Container(
-          color: tokens.field,
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              time,
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  causeLine(block),
-                  style: tokens.caps,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          ),
-        ),
+        _blockHeader(tokens, block),
         ...rows,
         if (block.droppedRows > 0)
           Padding(
@@ -267,24 +239,53 @@ class _StoryViewState extends State<StoryView> {
             ),
           ),
         _rebuilt(tokens, story, block),
-        if (hint != null)
-          Container(
-            key: StateChain.hintKey(block.id),
-            margin: const EdgeInsets.only(top: 6),
-            padding: const EdgeInsets.fromLTRB(8, 4, 6, 4),
-            decoration: BoxDecoration(
-              color: tokens.accentBg,
-              border: Border(left: BorderSide(color: tokens.accent, width: 2)),
-            ),
-            child: Text(
-              hint,
-              style: tokens.body.copyWith(color: tokens.accentInk),
-            ),
-          ),
+        if (block.hint case final hint?) _blockHint(tokens, block, hint),
         const SizedBox(height: 10),
       ],
     );
   }
+
+  Widget _blockHeader(PinPointTokens tokens, StoryBlock block) {
+    final wall = block.wall;
+    Widget time = Text(
+      blockTime(block),
+      key: StoryKeys.time(block.id),
+      style: tokens.micro.copyWith(color: tokens.ink),
+    );
+    // The clock shows on hover.
+    if (wall != null) time = Tooltip(message: formatClockMs(wall), child: time);
+    return Container(
+      color: tokens.field,
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          time,
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              causeLine(block),
+              style: tokens.caps,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _blockHint(PinPointTokens tokens, StoryBlock block, String hint) =>
+      Container(
+        key: StateChain.hintKey(block.id),
+        margin: const EdgeInsets.only(top: 6),
+        padding: const EdgeInsets.fromLTRB(8, 4, 6, 4),
+        decoration: BoxDecoration(
+          color: tokens.accentBg,
+          border: Border(left: BorderSide(color: tokens.accent, width: 2)),
+        ),
+        child: Text(hint, style: tokens.body.copyWith(color: tokens.accentInk)),
+      );
 
   Widget _row(
     PinPointTokens tokens,
@@ -298,57 +299,14 @@ class _StoryViewState extends State<StoryView> {
       cache.needName(row.src, row.srcArg, widget.bridge);
     }
     cache.need(row.file, row.line, widget.bridge);
-    final name = storyName(row, expression: cache.nameAt(row.src, row.srcArg));
-    final method = storyMethod(row.method);
     final change = changesText(row);
-    final muted = tokens.value.copyWith(color: tokens.muted, fontSize: 11);
-    final where = row.file == null || row.file!.isEmpty
-        ? null
-        : SourceLocationButton(
-            key: StateChain.locationKey(locationId),
-            path: shortSourcePath(whereLabel(row.file, null)),
-            line: row.line != null && row.line! > 0 ? row.line : null,
-            onToast: widget.onToast,
-            tipKey: StateChain.locationTipKey,
-            popoverKey: StateChain.locationPopoverKey,
-            copyKey: StateChain.locationCopyKey,
-          );
-    final openId = '${block.id}.$index';
-    final open = _open.contains(openId);
     return Padding(
       key: StoryKeys.row(block.id, index),
       padding: const EdgeInsets.only(top: 6),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          locatedRow(
-            where,
-            Text.rich(
-              TextSpan(
-                children: [
-                  TextSpan(
-                    text: row.kind == 'setState' ? row.owner : name.text,
-                    style: tokens.value.copyWith(fontWeight: FontWeight.w500),
-                  ),
-                  if (row.kind == 'setState')
-                    const TextSpan(text: ' setState')
-                  else if (name.rung == 2)
-                    TextSpan(text: ' (${shortType(row.owner)})', style: muted),
-                  if (row.verb != null) TextSpan(text: ' ${verbText(row)}'),
-                  if (row.count > 1)
-                    TextSpan(text: ' ×${row.count}', style: muted),
-                  if (row.afterMs != null)
-                    TextSpan(
-                      text: ' ${formatAfterMs(row.afterMs!)}',
-                      style: muted,
-                    ),
-                  if (method.isNotEmpty)
-                    TextSpan(text: '  $method', style: muted),
-                ],
-              ),
-              style: tokens.label,
-            ),
-          ),
+          locatedRow(_where(row, locationId), _rowTitle(tokens, row)),
           if (change.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 2),
@@ -360,10 +318,53 @@ class _StoryViewState extends State<StoryView> {
               ),
             ),
           if (row.instances.isNotEmpty)
-            _instances(tokens, block, row, index, open, openId),
+            _instances(tokens, block, row, index, '${block.id}.$index'),
           _codeBox(tokens, row.file, row.line),
         ],
       ),
+    );
+  }
+
+  Widget? _where(StoryRow row, String locationId) {
+    final file = row.file;
+    if (file == null || file.isEmpty) return null;
+    return SourceLocationButton(
+      key: StateChain.locationKey(locationId),
+      path: shortSourcePath(whereLabel(file, null)),
+      line: row.line != null && row.line! > 0 ? row.line : null,
+      onToast: widget.onToast,
+      tipKey: StateChain.locationTipKey,
+      popoverKey: StateChain.locationPopoverKey,
+      copyKey: StateChain.locationCopyKey,
+    );
+  }
+
+  Widget _rowTitle(PinPointTokens tokens, StoryRow row) {
+    final name = storyName(
+      row,
+      expression: widget.cache.nameAt(row.src, row.srcArg),
+    );
+    final method = storyMethod(row.method);
+    final muted = tokens.value.copyWith(color: tokens.muted, fontSize: 11);
+    return Text.rich(
+      TextSpan(
+        children: [
+          TextSpan(
+            text: row.kind == 'setState' ? row.owner : name.text,
+            style: tokens.value.copyWith(fontWeight: FontWeight.w500),
+          ),
+          if (row.kind == 'setState')
+            const TextSpan(text: ' setState')
+          else if (name.rung == 2)
+            TextSpan(text: ' (${shortType(row.owner)})', style: muted),
+          if (row.verb != null) TextSpan(text: ' ${verbText(row)}'),
+          if (row.count > 1) TextSpan(text: ' ×${row.count}', style: muted),
+          if (row.afterMs != null)
+            TextSpan(text: ' ${formatAfterMs(row.afterMs!)}', style: muted),
+          if (method.isNotEmpty) TextSpan(text: '  $method', style: muted),
+        ],
+      ),
+      style: tokens.label,
     );
   }
 
@@ -372,9 +373,9 @@ class _StoryViewState extends State<StoryView> {
     StoryBlock block,
     StoryRow row,
     int index,
-    bool open,
     String openId,
   ) {
+    final isOpen = _open.contains(openId);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -382,13 +383,13 @@ class _StoryViewState extends State<StoryView> {
           alignment: Alignment.centerLeft,
           child: DraftButton.link(
             key: StoryKeys.instances(block.id, index),
-            label: '${row.instanceCount} instances ${open ? '▾' : '▸'}',
+            label: '${row.instanceCount} instances ${isOpen ? '▾' : '▸'}',
             onPressed: () => setState(() {
               if (!_open.remove(openId)) _open.add(openId);
             }),
           ),
         ),
-        if (open)
+        if (isOpen)
           Padding(
             key: StoryKeys.instanceList(block.id, index),
             padding: const EdgeInsets.only(left: 6),

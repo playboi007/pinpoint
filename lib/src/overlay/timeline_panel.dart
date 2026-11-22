@@ -12,15 +12,15 @@ import '../trace/trace_session.dart';
 import 'panel_keys.dart';
 import 'rail.dart';
 
-/// The Timeline (PLAN-v2 Milestone 13, step 11): the flight recorder's
-/// events, newest first, grouped by cause (Milestone 14) or, without
+/// The Timeline: the flight recorder's
+/// events, newest first, grouped by cause or, without
 /// `PinPoint.run`, by frame, with a filter chip per kind. A
 /// click on an event flashes its widget. Marks are rows the user can name.
 ///
 /// While open it holds level 3 ([TraceDemand.timeline]), so rebuilds and
 /// watched state show. Each frame's header shows the recorder's own time
 /// in that frame, so a frame time read in debug is not taken for the
-/// app's alone (watch out for).
+/// app's alone.
 class TimelinePanel extends StatefulWidget {
   const TimelinePanel({
     super.key,
@@ -61,8 +61,7 @@ class TimelinePanel extends StatefulWidget {
       ValueKey<String>('pinpoint.timeline.name.$seq');
 
   /// Whether the Timeline is open. A static, not a field of the overlay's
-  /// `State`: a new instance field is undefined after a web hot reload
-  /// (api-notes item 29, watch out for).
+  /// `State`: a new instance field is undefined after a web hot reload.
   static final ValueNotifier<bool> open = ValueNotifier<bool>(false);
 
   /// Whether the header shows how many events the record holds. Hidden by
@@ -144,8 +143,8 @@ class _TimelinePanelState extends State<TimelinePanel> {
     final tokens = PinPointTokens.of(context);
     final recorder = _session.recorder;
     _seen = recorder.nextSeq;
-    // Newest first. Events sit under their cause (PLAN-v2 Milestone 14,
-    // step 17); without causes (no PinPoint.run), under their frame. The
+    // Newest first. Events sit under their cause; without causes (no
+    // PinPoint.run), under their frame. The
     // frame event carries the recorder's own time and the rebuild count for
     // its header.
     final groups = <(int?, int), List<TraceEvent>>{};
@@ -243,8 +242,7 @@ class _TimelinePanelState extends State<TimelinePanel> {
             ),
           const Spacer(),
           // For the moment the user typed something they do not want kept:
-          // the record and the tape stores go at once (PLAN-v2 Milestone
-          // 15, step 6).
+          // the record and the tape stores go at once.
           DraftButton.link(
             key: TimelinePanel.clearKey,
             onPressed: () => setState(_session.clearRecording),
@@ -337,7 +335,7 @@ class _TimelinePanelState extends State<TimelinePanel> {
     final parts = [
       'c$id',
       cause?.kind ?? '?',
-      first == last ? 'f$first' : 'f$first-f$last',
+      if (first == last) 'f$first' else 'f$first-f$last',
       formatTraceTime(events.last.t),
       if (us is int && !folded) 'rec ${(us / 1000).toStringAsFixed(2)} ms',
     ];

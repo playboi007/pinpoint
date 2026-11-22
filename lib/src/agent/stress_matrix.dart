@@ -65,7 +65,7 @@ class StressRun {
   final Environment environment;
 }
 
-/// The runs of a stress matrix around [base] (plan Milestone 12, step 8).
+/// The runs of a stress matrix around [base].
 ///
 /// By default one axis varies at a time, the rest stay as in [base]: each
 /// width (at [height], the app's height now), then each text scale, each

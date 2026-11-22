@@ -42,8 +42,7 @@ class TraceWatch {
   };
 }
 
-/// `state` events for watched widgets (level 3, PLAN-v2 Milestone 13,
-/// step 8).
+/// `state` events for watched widgets (level 3).
 ///
 /// A watch follows one widget: on each rebuild of that widget or of a
 /// local `State` above it, up to the route, it takes the state dump and
@@ -154,7 +153,7 @@ class WatchSource extends TraceSource with FrameWork {
 
   // A post-frame tick (FrameClock): never during the build phase, so a
   // state dump, which runs app code (`debugFillProperties`), sees a
-  // finished tree (watch out for).
+  // finished tree.
   @override
   void afterFrame() {
     if (_recorder == null || _watches.isEmpty) {

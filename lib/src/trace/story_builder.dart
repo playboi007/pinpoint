@@ -1,11 +1,11 @@
-// Plain Dart: no `dart:ui` and no `package:flutter` (PLAN-v2 rule 13).
-// Makes the [Story] of PLAN-v3 Milestone 21b from what the recorder holds:
-// the `state.notify` and `state.setState` events since the watch began, the
-// causes, the input events around them, and the joins of the state lens
-// (which widgets rebuilt).
+// Plain Dart: no `dart:ui` and no `package:flutter`.
+// Makes the [Story] from what the recorder holds: the `state.notify` and
+// `state.setState` events since the watch began, the causes, the input events
+// around them, and the joins of the state lens (which widgets rebuilt).
 
 import '../model/trace_event.dart';
 import 'cause_zone.dart';
+import 'pointer_phase.dart';
 import 'state_flow.dart';
 import 'story.dart';
 import 'story_names.dart';
@@ -73,7 +73,7 @@ class StoryBuilder {
                 r.verb == 'focus' ||
                 (r.kind == 'setState' && focusWidgets.contains(r.owner)),
           );
-      if ((StoryKind.isHover(cause.kind) || onlyFocus) && !filter.showHover) {
+      if ((cause.kind.isHover || onlyFocus) && !filter.showHover) {
         hiddenHover += events;
         continue;
       }
@@ -150,13 +150,16 @@ class StoryBuilder {
   static int _lastAt(List<StoryBlock> blocks) =>
       blocks.isEmpty ? 0 : (blocks.last.lastAt ?? blocks.last.at);
 
-  static String _endText(String reason) => switch (reason) {
-    'target unmounted' => 'target left the screen',
-    're-targeted' => 'watch moved to another widget',
-    'disposed' => 'stopped',
-    'window ended' => 'window ended',
-    _ => reason,
+  /// The end line for each reason the lens gives. Any other reason is shown
+  /// as it is.
+  static const Map<String, String> _endTexts = {
+    'target unmounted': 'target left the screen',
+    're-targeted': 'watch moved to another widget',
+    'disposed': 'stopped',
+    'window ended': 'window ended',
   };
+
+  static String _endText(String reason) => _endTexts[reason] ?? reason;
 
   // Blocks in a row that say the same become one with a count. A hover over
   // different rows of one list says the same, so their labels are cut to
@@ -169,7 +172,7 @@ class StoryBuilder {
         final sameKind = last.cause.kind == block.cause.kind;
         final sameLabel = last.cause.label == block.cause.label;
         if (sameKind &&
-            (sameLabel || StoryKind.isHover(block.cause.kind)) &&
+            (sameLabel || block.cause.kind.isHover) &&
             _rowsKey(last) == _rowsKey(block)) {
           out[out.length - 1] = StoryBlock(
             id: last.id,
@@ -197,6 +200,76 @@ class StoryBuilder {
 
   static String _rowsKey(StoryBlock block) =>
       block.rows.map((r) => r.signature).join('\n');
+}
+
+/// Who started a pointer cause: the user, the agent, or a tape replay.
+enum _Origin {
+  user(''),
+  agent('agent '),
+  replay('replayed ');
+
+  const _Origin(this.prefix);
+
+  /// Starts the label: `agent tap "Save"`.
+  final String prefix;
+
+  StoryKind kindOr(StoryKind own) => switch (this) {
+    user => own,
+    agent => StoryKind.agent,
+    replay => StoryKind.replay,
+  };
+}
+
+/// The input event that names a cause. Pointer, key and text keep the last
+/// event of the cause; message, route and network keep the first.
+sealed class _Trigger {
+  const _Trigger(this.event);
+
+  final TraceEvent event;
+
+  static _Trigger? of(List<TraceEvent> events) {
+    TraceEvent? last(String kind) =>
+        events.where((e) => e.kind == kind).lastOrNull;
+    TraceEvent? first(String kind) =>
+        events.where((e) => e.kind == kind).firstOrNull;
+
+    if (last(TraceKind.pointer) case final e?) return _Pointer(e);
+    if (last(TraceKind.key) case final e?) return _Key(e);
+    if (last(TraceKind.text) case final e?) return _Text(e);
+    if (first(TraceKind.message) case final e?) return _Message(e);
+    if (first(TraceKind.route) case final e?) return _Route(e);
+    final answer = events
+        .where(
+          (e) =>
+              e.kind == TraceKind.netResponse || e.kind == TraceKind.netError,
+        )
+        .firstOrNull;
+    return answer == null ? null : _Net(answer);
+  }
+}
+
+final class _Pointer extends _Trigger {
+  const _Pointer(super.event);
+}
+
+final class _Key extends _Trigger {
+  const _Key(super.event);
+}
+
+final class _Text extends _Trigger {
+  const _Text(super.event);
+}
+
+final class _Message extends _Trigger {
+  const _Message(super.event);
+}
+
+final class _Route extends _Trigger {
+  const _Route(super.event);
+}
+
+final class _Net extends _Trigger {
+  const _Net(super.event);
 }
 
 class _Group {
@@ -246,19 +319,8 @@ class _Context {
         replaying = false;
       }
       if (kind == TraceKind.pointer) {
-        final pointer = e.data['pointer'];
-        switch (e.data['phase']) {
-          case 'down':
-            _downs[pointer] = e;
-            _moved.remove(pointer);
-          case 'move':
-            _moved.add(pointer);
-          case 'up' || 'cancel':
-            _upDowns[e.seq] = (_downs[pointer], _moved.contains(pointer));
-            _downs.remove(pointer);
-            _moved.remove(pointer);
-        }
-        if (replaying && e.data['by'] == 'agent') _replayed.add(e.seq);
+        _trackPointer(e);
+        if (replaying && e.byAgent) _replayed.add(e.seq);
       }
       if (seq < fromSeq) continue;
       if (kind == TraceKind.stateDropped) {
@@ -273,7 +335,7 @@ class _Context {
               kind == TraceKind.route)) {
         _byCause.putIfAbsent(id, () => <TraceEvent>[]).add(e);
       }
-      if (kind == TraceKind.pointer && e.data['phase'] == 'up' ||
+      if (kind == TraceKind.pointer && e.pointerPhase == PointerPhase.up ||
           kind == TraceKind.key && e.data['phase'] == 'down' ||
           kind == TraceKind.text) {
         _inputs.add((e.t, _inputLabel(e)));
@@ -292,6 +354,24 @@ class _Context {
       } else {
         group.setStates.add(e);
       }
+    }
+  }
+
+  /// Remembers each pointer's down, and whether it moved before its up.
+  void _trackPointer(TraceEvent e) {
+    final pointer = e.data['pointer'];
+    switch (e.pointerPhase) {
+      case PointerPhase.down:
+        _downs[pointer] = e;
+        _moved.remove(pointer);
+      case PointerPhase.move:
+        _moved.add(pointer);
+      case PointerPhase.up || PointerPhase.cancel:
+        _upDowns[e.seq] = (_downs[pointer], _moved.contains(pointer));
+        _downs.remove(pointer);
+        _moved.remove(pointer);
+      case PointerPhase.hover || PointerPhase.scroll || PointerPhase.drag:
+        break;
     }
   }
 
@@ -318,145 +398,130 @@ class _Context {
     return x is num && y is num ? 'at ${x.round()},${y.round()}' : '';
   }
 
+  /// The input that caused [group]. Without one, the kind of entry says what
+  /// it was.
   StoryCause causeOf(_Group group) {
     final id = group.cause;
     if (id == null) {
       return const StoryCause(kind: StoryKind.none, label: 'no cause recorded');
     }
-    final cause = recorder.causeOf(id);
-    final kind = cause?.kind ?? CauseKind.other;
-    final events = _byCause[id] ?? const <TraceEvent>[];
-    StoryCause make(String k, String label) =>
-        StoryCause(kind: k, label: label, id: id);
-
-    // The last input of the cause: one pointer packet gives one event.
-    TraceEvent? pointer;
-    TraceEvent? key;
-    TraceEvent? text;
-    TraceEvent? message;
-    TraceEvent? route;
-    TraceEvent? net;
-    for (final e in events) {
-      switch (e.kind) {
-        case TraceKind.pointer:
-          pointer = e;
-        case TraceKind.key:
-          key = e;
-        case TraceKind.text:
-          text = e;
-        case TraceKind.message:
-          message ??= e;
-        case TraceKind.route:
-          route ??= e;
-        case TraceKind.netResponse || TraceKind.netError:
-          net ??= e;
-      }
-    }
-    String joined(String verb, String target) =>
-        target.isEmpty ? verb : '$verb $target';
-    if (pointer != null) {
-      final phase = pointer.data['phase'];
-      final byAgent = pointer.data['by'] == 'agent';
-      final replay = byAgent && _replayed.contains(pointer.seq);
-      final prefix = replay ? 'replayed ' : (byAgent ? 'agent ' : '');
-      String agentKind(String k) =>
-          replay ? StoryKind.replay : (byAgent ? StoryKind.agent : k);
-      switch (phase) {
-        case 'hover':
-          final widget = pointer.widget;
-          final left = pointer.data['left'];
-          return make(
-            StoryKind.hover,
-            widget != null
-                ? 'hover $widget'
-                : (left is String ? 'pointer left $left' : 'hover'),
-          );
-        case 'down':
-          return make(
-            agentKind(StoryKind.press),
-            joined('${prefix}press', _target(pointer, pointer)),
-          );
-        case 'up':
-          final pair = _upDowns[pointer.seq];
-          final moved = pair?.$2 ?? false;
-          final verb = moved ? 'drag' : 'tap';
-          return make(
-            agentKind(moved ? StoryKind.drag : StoryKind.tap),
-            joined('$prefix$verb', _target(pointer, pair?.$1)),
-          );
-        case 'cancel':
-          return make(
-            agentKind(StoryKind.drag),
-            joined(
-              '${prefix}pointer cancelled',
-              _target(pointer, _downOf(pointer)),
-            ),
-          );
-        case 'scroll':
-          return make(agentKind(StoryKind.scroll), '${prefix}scroll');
-        default:
-          return make(
-            agentKind(StoryKind.drag),
-            joined('${prefix}drag', _target(pointer, null)),
-          );
-      }
-    }
-    if (key != null) {
-      final byAgent = key.data['by'] == 'agent';
-      return make(
-        byAgent ? StoryKind.agent : StoryKind.key,
-        '${byAgent ? 'agent ' : ''}key ${key.data['key'] ?? '?'}',
-      );
-    }
-    if (text != null) {
-      final byAgent = text.data['by'] == 'agent';
-      return make(
-        byAgent ? StoryKind.agent : StoryKind.text,
-        '${byAgent ? 'agent typed' : 'typing'} in ${text.widget ?? 'a field'}',
-      );
-    }
-    if (message != null) {
-      return make(
+    return switch (_Trigger.of(_byCause[id] ?? const <TraceEvent>[])) {
+      _Pointer(:final event) => _pointerCause(id, event),
+      _Key(:final event) => _keyCause(id, event),
+      _Text(:final event) => _textCause(id, event),
+      _Message(:final event) => _cause(
+        id,
         StoryKind.message,
-        'message from ${message.data['origin'] ?? 'another window'}',
-      );
-    }
-    if (route != null) {
-      return make(
+        'message from ${event.data['origin'] ?? 'another window'}',
+      ),
+      _Route(:final event) => _cause(
+        id,
         StoryKind.route,
-        'route change ${route.data['from'] ?? '(none)'} → '
-        '${route.data['to'] ?? '(none)'}',
-      );
-    }
-    if (net != null) {
-      final url = net.data['url'];
-      final what =
-          '${net.data['method'] ?? ''} '
-                  '${url is String ? shortUrl(url) : ''}'
-              .trim();
-      return make(
-        StoryKind.network,
-        net.kind == TraceKind.netError
-            ? 'network error $what'.trim()
-            : 'network answer $what'.trim(),
-      );
-    }
-    switch (kind) {
-      case CauseKind.agent:
-        return make(StoryKind.agent, 'agent command');
-      case CauseKind.frame:
-        return make(StoryKind.frame, 'frame callback');
-      case CauseKind.pointer:
-        return make(StoryKind.hover, 'pointer move');
-      case CauseKind.message:
-        return make(StoryKind.message, 'message');
-      case CauseKind.key:
-        return make(StoryKind.key, 'key');
-      default:
-        // An entry that no input names: a timer, a stream, a platform
-        // callback. The zone cannot tell which.
-        return make(StoryKind.timer, 'timer or async callback');
-    }
+        'route change ${event.data['from'] ?? '(none)'} → '
+        '${event.data['to'] ?? '(none)'}',
+      ),
+      _Net(:final event) => _netCause(id, event),
+      null => _entryCause(id, recorder.causeOf(id)?.kind ?? CauseKind.other),
+    };
+  }
+
+  static StoryCause _cause(int id, StoryKind kind, String label) =>
+      StoryCause(kind: kind, label: label, id: id);
+
+  static String _joined(String verb, String target) =>
+      target.isEmpty ? verb : '$verb $target';
+
+  StoryCause _pointerCause(int id, TraceEvent pointer) {
+    final origin = _originOf(pointer);
+    final prefix = origin.prefix;
+    final (down, moved) = _upDowns[pointer.seq] ?? (null, false);
+    return switch (pointer.pointerPhase) {
+      PointerPhase.hover => _cause(id, StoryKind.hover, _hoverLabel(pointer)),
+      PointerPhase.down => _cause(
+        id,
+        origin.kindOr(StoryKind.press),
+        _joined('${prefix}press', _target(pointer, pointer)),
+      ),
+      PointerPhase.up => _cause(
+        id,
+        origin.kindOr(moved ? StoryKind.drag : StoryKind.tap),
+        _joined('$prefix${moved ? 'drag' : 'tap'}', _target(pointer, down)),
+      ),
+      PointerPhase.cancel => _cause(
+        id,
+        origin.kindOr(StoryKind.drag),
+        _joined(
+          '${prefix}pointer cancelled',
+          _target(pointer, _downOf(pointer)),
+        ),
+      ),
+      PointerPhase.scroll => _cause(
+        id,
+        origin.kindOr(StoryKind.scroll),
+        '${prefix}scroll',
+      ),
+      PointerPhase.move || PointerPhase.drag => _cause(
+        id,
+        origin.kindOr(StoryKind.drag),
+        _joined('${prefix}drag', _target(pointer, null)),
+      ),
+    };
+  }
+
+  _Origin _originOf(TraceEvent pointer) => switch (pointer.byAgent) {
+    false => _Origin.user,
+    true when _replayed.contains(pointer.seq) => _Origin.replay,
+    true => _Origin.agent,
+  };
+
+  static String _hoverLabel(TraceEvent pointer) {
+    final widget = pointer.widget;
+    if (widget != null) return 'hover $widget';
+    return switch (pointer.data['left']) {
+      final String left => 'pointer left $left',
+      _ => 'hover',
+    };
+  }
+
+  static StoryCause _keyCause(int id, TraceEvent key) {
+    final name = key.data['key'] ?? '?';
+    return key.byAgent
+        ? _cause(id, StoryKind.agent, 'agent key $name')
+        : _cause(id, StoryKind.key, 'key $name');
+  }
+
+  static StoryCause _textCause(int id, TraceEvent text) {
+    final field = text.widget ?? 'a field';
+    return text.byAgent
+        ? _cause(id, StoryKind.agent, 'agent typed in $field')
+        : _cause(id, StoryKind.text, 'typing in $field');
+  }
+
+  static StoryCause _netCause(int id, TraceEvent net) {
+    final url = net.data['url'];
+    final what =
+        '${net.data['method'] ?? ''} ${url is String ? shortUrl(url) : ''}'
+            .trim();
+    final label = net.kind == TraceKind.netError
+        ? 'network error $what'
+        : 'network answer $what';
+    return _cause(id, StoryKind.network, label.trim());
+  }
+
+  /// The cause of a change that no input names. A timer, a stream or a
+  /// platform callback: the zone cannot tell which.
+  static const Map<String, (StoryKind, String)> _entryCauses = {
+    CauseKind.agent: (StoryKind.agent, 'agent command'),
+    CauseKind.frame: (StoryKind.frame, 'frame callback'),
+    CauseKind.pointer: (StoryKind.hover, 'pointer move'),
+    CauseKind.message: (StoryKind.message, 'message'),
+    CauseKind.key: (StoryKind.key, 'key'),
+  };
+
+  static StoryCause _entryCause(int id, String kind) {
+    final (storyKind, label) =
+        _entryCauses[kind] ?? (StoryKind.timer, 'timer or async callback');
+    return _cause(id, storyKind, label);
   }
 
   // ---------------------------------------------------------------- rows

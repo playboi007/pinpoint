@@ -35,7 +35,7 @@ abstract final class ReloadCounter {
         return developer.ServiceExtensionResponse.result(answer());
       });
     } catch (_) {
-      // Registered by an earlier Pinpoint in this isolate.
+      // Registered by another Pinpoint in this isolate.
     }
   }
 

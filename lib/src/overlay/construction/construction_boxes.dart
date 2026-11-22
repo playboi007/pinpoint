@@ -237,6 +237,20 @@ abstract final class ConstructionBoxes {
     List<ConstructionBox> boxes, {
     ConstructionCrew? crew,
   }) {
+    final schedule = _Schedule(seed, boxes, crew);
+    return [
+      for (var i = 0; i < boxes.length; i++) schedule.planBox(i, boxes[i]),
+    ];
+  }
+}
+
+/// The shared timing numbers of one site: who repairs which box, and when.
+class _Schedule {
+  factory _Schedule(
+    int seed,
+    List<ConstructionBox> boxes,
+    ConstructionCrew? crew,
+  ) {
     final count = boxes.length;
     // The biggest boxes get dimension ticks.
     final order = [for (var i = 0; i < count; i++) i]
@@ -244,7 +258,7 @@ abstract final class ConstructionBoxes {
         final byArea = boxes[b].area.compareTo(boxes[a].area);
         return byArea != 0 ? byArea : a.compareTo(b);
       });
-    final dims = order.take(maxDims).toSet();
+    final dims = order.take(ConstructionBoxes.maxDims).toSet();
 
     // The builder's boxes, in order: the ones the stacker does not take.
     final stackerBoxes = crew?.boxes.toSet() ?? const <int>{};
@@ -273,42 +287,74 @@ abstract final class ConstructionBoxes {
           : ConstructionTimeline.hitOf(builderCount - 1, builderCount),
       crew?.buildEnd ?? 0.0,
     );
+    return _Schedule._(
+      seed: seed,
+      crew: crew,
+      dims: dims,
+      stackerBoxes: stackerBoxes,
+      builderRank: builderRank,
+      builderCount: builderCount,
+      slippers: slippers,
+      slipCount: slipCount,
+      repairEnd: repairEnd,
+    );
+  }
 
-    return [
-      for (var i = 0; i < count; i++)
-        () {
-          final box = boxes[i];
-          final r = _stream(seed, i, 7);
-          double shift(double u, double sign, double size) =>
-              sign * (3 + u * math.max(0.0, 0.12 * size - 3));
-          final slip = slippers[i];
-          final byStacker = stackerBoxes.contains(i);
-          final hit = byStacker
-              ? crew!.hitOf(i)
-              : ConstructionTimeline.hitOf(builderRank[i]!, builderCount);
-          return ConstructionBoxPlan(
-            box: box,
-            dx: _round(shift(r[0], r[1] < 0.5 ? -1 : 1, box.width)),
-            dy: _round(shift(r[2], r[3] < 0.5 ? -1 : 1, box.height)),
-            degrees: _round((r[4] < 0.5 ? -1 : 1) * _turn(r[5], box)),
-            drawDelay: _round(0.2 + math.min(i * 0.05, 1.3)),
-            breakDelay: _round(
-              ConstructionTimeline.planSeconds + math.min(i * 0.03, 0.6),
+  _Schedule._({
+    required this.seed,
+    required this.crew,
+    required this.dims,
+    required this.stackerBoxes,
+    required this.builderRank,
+    required this.builderCount,
+    required this.slippers,
+    required this.slipCount,
+    required this.repairEnd,
+  });
+
+  final int seed;
+  final ConstructionCrew? crew;
+  final Set<int> dims;
+  final Set<int> stackerBoxes;
+  final Map<int, int> builderRank;
+  final int builderCount;
+  final Map<int, int> slippers;
+  final int slipCount;
+  final double repairEnd;
+
+  ConstructionBoxPlan planBox(int i, ConstructionBox box) {
+    final r = ConstructionBoxes._stream(seed, i, 7);
+    double shift(double u, double sign, double size) =>
+        sign * (3 + u * math.max(0.0, 0.12 * size - 3));
+    final slip = slippers[i];
+    final byStacker = stackerBoxes.contains(i);
+    final hit = byStacker
+        ? crew!.hitOf(i)
+        : ConstructionTimeline.hitOf(builderRank[i]!, builderCount);
+    final round = ConstructionBoxes._round;
+    return ConstructionBoxPlan(
+      box: box,
+      dx: round(shift(r[0], r[1] < 0.5 ? -1 : 1, box.width)),
+      dy: round(shift(r[2], r[3] < 0.5 ? -1 : 1, box.height)),
+      degrees: round(
+        (r[4] < 0.5 ? -1 : 1) * ConstructionBoxes._turn(r[5], box),
+      ),
+      drawDelay: round(0.2 + math.min(i * 0.05, 1.3)),
+      breakDelay: round(
+        ConstructionTimeline.planSeconds + math.min(i * 0.03, 0.6),
+      ),
+      repairDelay: round(hit - ConstructionTimeline.fixLead),
+      slipDelay: slip == null
+          ? null
+          : round(
+              repairEnd +
+                  1 +
+                  slip * ConstructionTimeline.loopSeconds / slipCount,
             ),
-            repairDelay: _round(hit - ConstructionTimeline.fixLead),
-            slipDelay: slip == null
-                ? null
-                : _round(
-                    repairEnd +
-                        1 +
-                        slip * ConstructionTimeline.loopSeconds / slipCount,
-                  ),
-            dimX: dims.contains(i) && box.width >= 44,
-            dimY: dims.contains(i) && box.height >= 36,
-            stacker: byStacker,
-            stackerSlip: byStacker ? crew!.slipOf(i) : null,
-          );
-        }(),
-    ];
+      dimX: dims.contains(i) && box.width >= 44,
+      dimY: dims.contains(i) && box.height >= 36,
+      stacker: byStacker,
+      stackerSlip: byStacker ? crew!.slipOf(i) : null,
+    );
   }
 }
