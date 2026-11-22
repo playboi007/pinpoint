@@ -1,6 +1,5 @@
-// Plain Dart: no `dart:ui` and no `package:flutter` (PLAN-v2 rule 13).
-// What changed between two values, in a few words (PLAN-v3 Milestone 21b,
-// "Story view"). The state lens keeps a small snapshot of the last value of
+// Plain Dart: no `dart:ui` and no `package:flutter`.
+// What changed between two values, in a few words. The state lens keeps a small snapshot of the last value of
 // each notifier it follows; at a notify it diffs that snapshot with the new
 // one. Nothing here reads a private field or uses reflection: only `length`,
 // iteration and `toString`.
@@ -109,97 +108,136 @@ ValueSnap snapshotOf(
   String owner = '',
   TraceRedact redact = const TraceRedact(),
 }) {
-  String type;
+  final type = _typeOf(value);
+  final scalar = _Scalars(owner, redact);
   try {
-    type = clipText(value.runtimeType.toString(), 80);
-  } catch (_) {
-    type = '?';
-  }
-  String scalar(Object? v, {String key = ''}) {
-    if (key.isNotEmpty && redact.masks(key)) return TraceRedact.mask;
-    if (v is String) {
-      if (owner.isNotEmpty && redact.masks(owner)) return TraceRedact.mask;
-      return "'${clipText(v, maxDiffChars)}'";
-    }
-    try {
-      return clipText('$v', maxDiffChars);
-    } catch (_) {
-      return '<${v.runtimeType}>';
-    }
-  }
-
-  try {
-    if (value == null || value is bool || value is num) {
-      return ValueSnap(type: type, text: '$value');
-    }
-    if (value is String) {
-      return ValueSnap(type: type, text: scalar(value));
-    }
-    if (value is Map) {
-      final fields = <String, String>{};
-      final secrets = <String, int>{};
-      for (final entry in value.entries.take(maxSnapItems)) {
-        final key = clipText('${entry.key}', 30);
-        fields[key] = scalar(entry.value, key: key);
-        if (redact.masks(key)) secrets[key] = _fingerprint(entry.value);
-      }
-      return ValueSnap(
-        type: type,
-        text: 'map of ${value.length}',
-        fields: fields,
-        length: value.length,
-        isMap: true,
-        secrets: secrets.isEmpty ? null : secrets,
-      );
-    }
-    if (value is List || value is Set) {
-      final iterable = value as Iterable<Object?>;
-      final length = value is List ? value.length : (value as Set).length;
-      return ValueSnap(
-        type: type,
-        text: '${value is List ? 'list' : 'set'} of $length',
-        items: [for (final item in iterable.take(maxSnapItems)) scalar(item)],
-        length: length,
-      );
-    }
-    final full = '$value';
-    if (_instance.hasMatch(full)) {
-      return ValueSnap(type: type, text: full, opaque: true);
-    }
-    final fields = full.length <= maxParsedChars ? parseFields(full) : null;
-    if (fields != null) {
-      final shown = <String, String>{};
-      final secrets = <String, int>{};
-      for (final MapEntry(:key, :value) in fields.entries) {
-        if (redact.masks(key)) {
-          shown[key] = TraceRedact.mask;
-          secrets[key] = _fingerprint(value);
-        } else {
-          shown[key] = clipText(value, maxDiffChars);
-        }
-      }
-      // The text is rebuilt from the masked fields: a secret is never in it.
-      final head = full.substring(0, full.indexOf('('));
-      return ValueSnap(
-        type: type,
-        text: clipText(
-          '$head(${[for (final e in shown.entries) '${e.key}: ${e.value}'].join(', ')})',
-          maxDiffChars * 2,
-        ),
-        fields: shown,
-        secrets: secrets.isEmpty ? null : secrets,
-      );
-    }
-    return ValueSnap(
-      type: type,
-      text: owner.isNotEmpty && redact.masks(owner)
-          ? TraceRedact.mask
-          : clipText(full, maxDiffChars),
-    );
+    return switch (value) {
+      null || bool() || num() => ValueSnap(type: type, text: '$value'),
+      String() => ValueSnap(type: type, text: scalar(value)),
+      final Map<Object?, Object?> map => _mapSnap(type, map, scalar, redact),
+      final List<Object?> list => _itemsSnap(type, 'list', list, scalar),
+      final Set<Object?> set => _itemsSnap(type, 'set', set, scalar),
+      _ => _objectSnap(type, value, owner, redact),
+    };
   } catch (_) {
     // A `toString` that throws.
     return ValueSnap(type: type, text: '<$type>');
   }
+}
+
+String _typeOf(Object? value) {
+  try {
+    return clipText(value.runtimeType.toString(), 80);
+  } catch (_) {
+    return '?';
+  }
+}
+
+/// The text of one scalar in a snapshot. A string held by a masked owner,
+/// and a value under a masked key, are masked whole.
+class _Scalars {
+  const _Scalars(this.owner, this.redact);
+
+  final String owner;
+  final TraceRedact redact;
+
+  bool get ownerMasked => owner.isNotEmpty && redact.masks(owner);
+
+  String call(Object? value, {String key = ''}) {
+    if (key.isNotEmpty && redact.masks(key)) return TraceRedact.mask;
+    if (value is String) {
+      if (ownerMasked) return TraceRedact.mask;
+      return "'${clipText(value, maxDiffChars)}'";
+    }
+    try {
+      return clipText('$value', maxDiffChars);
+    } catch (_) {
+      return '<${value.runtimeType}>';
+    }
+  }
+}
+
+ValueSnap _mapSnap(
+  String type,
+  Map<Object?, Object?> map,
+  _Scalars scalar,
+  TraceRedact redact,
+) {
+  final fields = <String, String>{};
+  final secrets = <String, int>{};
+  for (final entry in map.entries.take(maxSnapItems)) {
+    final key = clipText('${entry.key}', 30);
+    fields[key] = scalar(entry.value, key: key);
+    if (redact.masks(key)) secrets[key] = _fingerprint(entry.value);
+  }
+  return ValueSnap(
+    type: type,
+    text: 'map of ${map.length}',
+    fields: fields,
+    length: map.length,
+    isMap: true,
+    secrets: secrets.isEmpty ? null : secrets,
+  );
+}
+
+ValueSnap _itemsSnap(
+  String type,
+  String noun,
+  Iterable<Object?> items,
+  _Scalars scalar,
+) => ValueSnap(
+  type: type,
+  text: '$noun of ${items.length}',
+  items: [for (final item in items.take(maxSnapItems)) scalar(item)],
+  length: items.length,
+);
+
+/// An object that is not a collection: `Instance of 'Foo'` is opaque, a
+/// `toString` shaped like `Name(a: 1)` gives fields, anything else is text.
+ValueSnap _objectSnap(
+  String type,
+  Object? value,
+  String owner,
+  TraceRedact redact,
+) {
+  final full = '$value';
+  if (_instance.hasMatch(full)) {
+    return ValueSnap(type: type, text: full, opaque: true);
+  }
+  final fields = full.length <= maxParsedChars ? parseFields(full) : null;
+  if (fields != null) return _fieldsSnap(type, full, fields, redact);
+  final masked = owner.isNotEmpty && redact.masks(owner);
+  return ValueSnap(
+    type: type,
+    text: masked ? TraceRedact.mask : clipText(full, maxDiffChars),
+  );
+}
+
+ValueSnap _fieldsSnap(
+  String type,
+  String full,
+  Map<String, String> fields,
+  TraceRedact redact,
+) {
+  final shown = <String, String>{};
+  final secrets = <String, int>{};
+  for (final MapEntry(:key, :value) in fields.entries) {
+    if (redact.masks(key)) {
+      shown[key] = TraceRedact.mask;
+      secrets[key] = _fingerprint(value);
+    } else {
+      shown[key] = clipText(value, maxDiffChars);
+    }
+  }
+  // The text is rebuilt from the masked fields: a secret is never in it.
+  final head = full.substring(0, full.indexOf('('));
+  final body = [for (final e in shown.entries) '${e.key}: ${e.value}'];
+  return ValueSnap(
+    type: type,
+    text: clipText('$head(${body.join(', ')})', maxDiffChars * 2),
+    fields: shown,
+    secrets: secrets.isEmpty ? null : secrets,
+  );
 }
 
 // A number for a real value that must not be shown: equal values give equal

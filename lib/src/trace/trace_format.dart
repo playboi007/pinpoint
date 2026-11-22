@@ -1,8 +1,9 @@
-// Plain Dart: no `dart:ui` and no `package:flutter` (PLAN-v2 rule 13). The
-// compact text an agent reads, and the `get_trace` query.
+// Plain Dart: no `dart:ui` and no `package:flutter`. The compact text an agent
+// reads, and the `get_trace` query.
 
 import '../model/annotation.dart' show clipText, traceNotRecorded;
 import '../model/trace_event.dart';
+import 'pointer_phase.dart';
 import 'trace_recorder.dart';
 
 /// `+3.21s`: [ms] since the run started.
@@ -73,110 +74,149 @@ String shortSource(String source) {
 String traceSummary(TraceEvent event) {
   final d = event.data;
   final widget = event.widget;
-  final where = event.source == null ? '' : ' (${shortSource(event.source!)})';
-  final agent = event.byAgent ? ' [agent]' : '';
-  switch (event.kind) {
-    case TraceKind.pointer:
-      final phase = d['phase'] ?? '?';
-      final at = d['x'] is num && d['y'] is num
-          ? ' at ${d['x']},${d['y']}'
-          : '';
-      final inside = d['fx'] is num && d['fy'] is num
-          ? ' (${d['fx']}, ${d['fy']})'
-          : '';
-      final scroll = phase == 'scroll' ? ' dx=${d['dx']} dy=${d['dy']}' : '';
-      return '$phase${widget == null ? '' : ' $widget'}$inside$scroll$at'
-          '$where$agent';
-    case TraceKind.key:
-      final char = d['char'] is String ? ' "${d['char']}"' : '';
-      return '${d['phase'] ?? '?'} ${d['key'] ?? '?'}$char$agent';
-    case TraceKind.text:
-      return '${widget ?? 'field'} "${d['value'] ?? ''}"$where';
-    case TraceKind.frame:
-      final builds = d['builds'] is int ? ' builds=${d['builds']}' : '';
-      final self = d['us'] is int && (d['us']! as int) > 0
-          ? ' rec=${((d['us']! as int) / 1000).toStringAsFixed(2)}ms'
-          : '';
-      final n = d['n'] is int ? ' ×${d['n']} from f${d['from']}' : '';
-      return 'drawn$n$builds$self';
-    case TraceKind.build:
-      final n = d['n'];
-      return '${widget ?? '?'}${n is int && n > 1 ? ' n=$n' : ''}$where';
-    case TraceKind.route:
-      return '${d['from'] ?? '(none)'} → ${d['to'] ?? '(none)'}';
-    case TraceKind.state:
-      final changed = d['changed'];
-      final parts = <String>[
-        if (changed is Map<String, Object?>)
-          for (final MapEntry(:key, :value) in changed.entries)
-            value is List<Object?> && value.length == 2
-                ? '$key: ${value[0]} → ${value[1]}'
-                : '$key: $value',
-      ];
-      final first = d['initial'] == true ? ' (first read)' : '';
-      return '${d['state'] ?? widget ?? '?'}$first ${parts.join(', ')}';
-    case TraceKind.stateNotify:
-      final values = d.containsKey('after')
-          ? ' ${d['before']} → ${d['after']}'
-          : '';
-      final method = d['method'] is String ? ' in ${d['method']}' : '';
-      return '${d['owner'] ?? widget ?? '?'} ${d['tag'] ?? ''}'
-          '$values$method$where';
-    case TraceKind.stateSetState:
-      final method = d['method'] is String ? ' in ${d['method']}' : '';
-      return '${widget ?? '?'} setState$method$where';
-    case TraceKind.stateDropped:
-      return '${d['n'] ?? '?'} setState stacks dropped (cap)';
-    case TraceKind.probe:
-      return '${d['name'] ?? '?'} ${_pairs(d['values'])}$where';
-    case TraceKind.error:
-      final uncaught = d['uncaught'] == true ? ' (uncaught)' : '';
-      return '${d['type'] ?? 'error'}$uncaught: ${d['message'] ?? ''}$where';
-    case TraceKind.finding:
-      return '${d['kind'] ?? '?'}: ${d['summary'] ?? ''}';
-    case TraceKind.netRequest:
-      final size = d['size'] is int ? ' ${formatBytes(d['size']! as int)}' : '';
-      return '${d['method'] ?? '?'} ${shortUrl('${d['url'] ?? ''}')}$size'
-          '$agent';
-    case TraceKind.netResponse:
-      final size = d['size'] is int ? ' ${formatBytes(d['size']! as int)}' : '';
-      final cut = d['truncated'] == true ? ' (truncated)' : '';
-      return '${d['status'] ?? '?'} ${d['method'] ?? '?'} '
-          '${shortUrl('${d['url'] ?? ''}')} ${d['ms'] ?? '?'}ms$size$cut'
-          '${d['req'] is int ? ' (req ${d['req']})' : ''}';
-    case TraceKind.netError:
-      return '${d['error'] ?? 'failed'} ${d['method'] ?? '?'} '
-          '${shortUrl('${d['url'] ?? ''}')}'
-          '${d['req'] is int ? ' (req ${d['req']})' : ''}';
-    case TraceKind.message:
-      final size = d['size'] is int ? ' ${formatBytes(d['size']! as int)}' : '';
-      return 'from ${d['origin'] ?? '?'}$size ${d['data'] ?? ''}'.trimRight();
-    case TraceKind.mark:
-      final text = d['text'];
-      final by = d['by'] is String ? ' by ${d['by']}' : '';
-      return '${text is String && text.isNotEmpty ? '"$text"' : '(no text)'}'
-          '$by';
-    case TraceKind.detailOn:
-      final sources = d['sources'];
-      final reason = d['reason'] is String ? '; ${d['reason']}' : '';
-      return 'level 3 on'
-          '${sources is List<Object?> ? ': ${sources.join(', ')}' : ''}'
-          '$reason';
-    case TraceKind.detailOff:
-      final sources = d['sources'];
-      final reason = d['reason'] is String ? '; ${d['reason']}' : '';
-      return 'level 3 off'
-          '${sources is List<Object?> ? ': ${sources.join(', ')}' : ''}'
-          '$reason';
-  }
-  return '${widget ?? ''}${_pairs(d)}$where'.trim();
+  final where = _where(event);
+  return switch (event.kind) {
+    TraceKind.pointer => _pointerSummary(event),
+    TraceKind.key => _keySummary(event),
+    TraceKind.text => '${widget ?? 'field'} "${d['value'] ?? ''}"$where',
+    TraceKind.frame => _frameSummary(d),
+    TraceKind.build => _buildSummary(event),
+    TraceKind.route => '${d['from'] ?? '(none)'} → ${d['to'] ?? '(none)'}',
+    TraceKind.state => _stateSummary(event),
+    TraceKind.stateNotify => _notifySummary(event),
+    TraceKind.stateSetState => '${widget ?? '?'} setState${_method(d)}$where',
+    TraceKind.stateDropped => '${d['n'] ?? '?'} setState stacks dropped (cap)',
+    TraceKind.probe => '${d['name'] ?? '?'} ${_pairs(d['values'])}$where',
+    TraceKind.error => _errorSummary(event),
+    TraceKind.finding => '${d['kind'] ?? '?'}: ${d['summary'] ?? ''}',
+    TraceKind.netRequest => _requestSummary(event),
+    TraceKind.netResponse => _responseSummary(d),
+    TraceKind.netError =>
+      '${d['error'] ?? 'failed'} ${d['method'] ?? '?'} '
+          '${shortUrl('${d['url'] ?? ''}')}${_reqText(d)}',
+    TraceKind.message =>
+      'from ${d['origin'] ?? '?'}${_sizeText(d)} ${d['data'] ?? ''}'
+          .trimRight(),
+    TraceKind.mark => _markSummary(d),
+    TraceKind.detailOn => _detailSummary('level 3 on', d),
+    TraceKind.detailOff => _detailSummary('level 3 off', d),
+    _ => '${widget ?? ''}${_pairs(d)}$where'.trim(),
+  };
+}
+
+String _where(TraceEvent event) {
+  final source = event.source;
+  return source == null ? '' : ' (${shortSource(source)})';
+}
+
+String _agentTag(TraceEvent event) => event.byAgent ? ' [agent]' : '';
+
+String _method(Map<String, Object?> d) =>
+    d['method'] is String ? ' in ${d['method']}' : '';
+
+String _sizeText(Map<String, Object?> d) =>
+    d['size'] is int ? ' ${formatBytes(d['size']! as int)}' : '';
+
+String _reqText(Map<String, Object?> d) =>
+    d['req'] is int ? ' (req ${d['req']})' : '';
+
+String _pointerSummary(TraceEvent event) {
+  final d = event.data;
+  final phase = d['phase'] ?? '?';
+  final widget = event.widget == null ? '' : ' ${event.widget}';
+  final at = d['x'] is num && d['y'] is num ? ' at ${d['x']},${d['y']}' : '';
+  final inside = d['fx'] is num && d['fy'] is num
+      ? ' (${d['fx']}, ${d['fy']})'
+      : '';
+  final scroll = event.pointerPhase == PointerPhase.scroll
+      ? ' dx=${d['dx']} dy=${d['dy']}'
+      : '';
+  return '$phase$widget$inside$scroll$at${_where(event)}${_agentTag(event)}';
+}
+
+String _keySummary(TraceEvent event) {
+  final d = event.data;
+  final char = d['char'] is String ? ' "${d['char']}"' : '';
+  return '${d['phase'] ?? '?'} ${d['key'] ?? '?'}$char${_agentTag(event)}';
+}
+
+String _frameSummary(Map<String, Object?> d) {
+  final builds = d['builds'] is int ? ' builds=${d['builds']}' : '';
+  final self = d['us'] is int && (d['us']! as int) > 0
+      ? ' rec=${((d['us']! as int) / 1000).toStringAsFixed(2)}ms'
+      : '';
+  final n = d['n'] is int ? ' ×${d['n']} from f${d['from']}' : '';
+  return 'drawn$n$builds$self';
+}
+
+String _buildSummary(TraceEvent event) {
+  final n = event.data['n'];
+  return '${event.widget ?? '?'}${n is int && n > 1 ? ' n=$n' : ''}'
+      '${_where(event)}';
+}
+
+String _stateSummary(TraceEvent event) {
+  final d = event.data;
+  final changed = d['changed'];
+  final parts = <String>[
+    if (changed is Map<String, Object?>)
+      for (final MapEntry(:key, :value) in changed.entries)
+        switch (value) {
+          [final before, final after] => '$key: $before → $after',
+          _ => '$key: $value',
+        },
+  ];
+  final first = d['initial'] == true ? ' (first read)' : '';
+  return '${d['state'] ?? event.widget ?? '?'}$first ${parts.join(', ')}';
+}
+
+String _notifySummary(TraceEvent event) {
+  final d = event.data;
+  final values = d.containsKey('after')
+      ? ' ${d['before']} → ${d['after']}'
+      : '';
+  return '${d['owner'] ?? event.widget ?? '?'} ${d['tag'] ?? ''}'
+      '$values${_method(d)}${_where(event)}';
+}
+
+String _errorSummary(TraceEvent event) {
+  final d = event.data;
+  final uncaught = d['uncaught'] == true ? ' (uncaught)' : '';
+  return '${d['type'] ?? 'error'}$uncaught: ${d['message'] ?? ''}'
+      '${_where(event)}';
+}
+
+String _requestSummary(TraceEvent event) {
+  final d = event.data;
+  return '${d['method'] ?? '?'} ${shortUrl('${d['url'] ?? ''}')}${_sizeText(d)}'
+      '${_agentTag(event)}';
+}
+
+String _responseSummary(Map<String, Object?> d) {
+  final cut = d['truncated'] == true ? ' (truncated)' : '';
+  return '${d['status'] ?? '?'} ${d['method'] ?? '?'} '
+      '${shortUrl('${d['url'] ?? ''}')} ${d['ms'] ?? '?'}ms${_sizeText(d)}$cut'
+      '${_reqText(d)}';
+}
+
+String _markSummary(Map<String, Object?> d) {
+  final text = d['text'];
+  final by = d['by'] is String ? ' by ${d['by']}' : '';
+  return '${text is String && text.isNotEmpty ? '"$text"' : '(no text)'}$by';
+}
+
+String _detailSummary(String label, Map<String, Object?> d) {
+  final sources = d['sources'];
+  final reason = d['reason'] is String ? '; ${d['reason']}' : '';
+  return '$label${sources is List<Object?> ? ': ${sources.join(', ')}' : ''}'
+      '$reason';
 }
 
 /// What makes two events "equal" for folding: the kind and the summary
 /// without values that change on every event (positions, times).
 String traceFoldKey(TraceEvent event) => switch (event.kind) {
   TraceKind.frame => 'frame ${event.data['builds'] ?? ''}',
-  TraceKind.pointer when event.data['phase'] == 'move' =>
+  TraceKind.pointer when event.pointerPhase == PointerPhase.move =>
     'move ${event.widget ?? ''}',
   // A loop asks the same thing again: fold on method and URL, not on the
   // time it took or the request it answers.
@@ -206,7 +246,7 @@ String traceLine(TraceEvent event, {int width = 200}) => clipText(
 );
 
 /// [events] as compact lines, at most [limit] of them, each at most [width]
-/// characters (PLAN-v2 Milestone 13, step 10).
+/// characters.
 ///
 /// Equal lines in a row fold into one with `×n` and the seq range. A short
 /// block of two to four lines that repeats folds too, which is what a loop
@@ -278,7 +318,7 @@ bool _repeats(List<String> keys, int i, int p, int r) {
   return true;
 }
 
-/// A `get_trace` request (PLAN-v2 Milestone 13, tools table).
+/// A `get_trace` request.
 class TraceQuery {
   const TraceQuery({
     this.since,
@@ -403,104 +443,142 @@ class MarkBound extends TraceBound {
   const MarkBound();
 }
 
-/// The `get_trace` answer for [query] over [recorder] (PLAN-v2 Milestone
-/// 13, tools table and rule 19).
+/// The `get_trace` answer for [query] over [recorder].
 ///
 /// Says `partial: true` with the reason when a limit dropped events from
 /// the window, and adds a note for each part of the window where rebuilds
 /// were not recorded, so a missing `build` is never read as "no rebuild".
 Map<String, Object?> traceAnswer(TraceRecorder recorder, TraceQuery query) {
-  final now = recorder.now;
-  int? fromSeq;
-  int? toSeq;
-  int? fromT;
-  int? toT;
-  for (final (bound, isSince) in [(query.since, true), (query.until, false)]) {
-    switch (bound) {
-      case null:
-        break;
-      case SeqBound(:final seq):
-        isSince ? fromSeq = seq : toSeq = seq;
-      case SecondsBound(:final seconds):
-        final t = now - (seconds * 1000).round();
-        isSince ? fromT = t : toT = t;
-      case MarkBound():
-        final mark = recorder.lastOf(TraceKind.mark);
-        if (mark == null) {
-          throw const FormatException('no mark yet; make one with mark');
-        }
-        isSince ? fromSeq = mark.seq : toSeq = mark.seq;
-    }
-  }
-
-  final inWindow = <TraceEvent>[];
-  var frames = 0;
-  for (final event in recorder.events) {
-    if (fromSeq != null && event.seq < fromSeq) continue;
-    if (toSeq != null && event.seq > toSeq) continue;
-    if (fromT != null && event.t < fromT) continue;
-    if (toT != null && event.t > toT) continue;
-    if (event.kind == TraceKind.frame) {
-      // A folded frame event counts every frame it covers.
-      frames += event.data['n'] is int ? event.data['n']! as int : 1;
-    }
-    if (query.matches(event)) inWindow.add(event);
-  }
+  final window = _Window(
+    _cutOf(query.since, recorder),
+    _cutOf(query.until, recorder),
+  );
+  final (inWindow, frames) = _eventsIn(recorder, query, window);
 
   final oldest = recorder.oldest?.seq ?? recorder.nextSeq;
-  final windowStart =
-      fromSeq ??
-      (fromT == null
-          ? 1
-          : (inWindow.isEmpty ? recorder.nextSeq : inWindow.first.seq));
-  final windowEnd = toSeq ?? (recorder.nextSeq - 1);
+  final windowStart = _windowStart(recorder, window, inWindow);
+  final windowEnd = window.until.seq ?? (recorder.nextSeq - 1);
   // The window reaches back before the oldest event held.
   final partial = recorder.partial && windowStart < oldest;
+  final notes = query.wantsDetail
+      ? _rebuildNotes(
+          recorder,
+          windowStart < oldest ? oldest : windowStart,
+          windowEnd,
+        )
+      : const <String>[];
 
-  final notes = <String>[];
-  if (query.wantsDetail) {
-    final from = windowStart < oldest ? oldest : windowStart;
-    for (final (a, b) in recorder.rebuildGaps(from, windowEnd)) {
-      notes.add(
-        'rebuilds not recorded for seq $a-$b (level 3 was off); '
-        'call trace_detail({on: true}) to record them',
-      );
-      if (notes.length >= 5) break;
-    }
-  }
-
-  final answer = <String, Object?>{
+  return {
     'matched': inWindow.length,
     'frames': frames,
     'partial': partial,
     if (partial) 'reason': recorder.partialReason,
     if (notes.isNotEmpty) 'notes': notes,
-    // Said once per answer, not per event (PLAN-v2 Milestone 14, step 7).
+    // Said once per answer, not per event.
     'hint': ?recorder.causeHint,
+    ...query.full
+        ? _fullListing(inWindow, query.limit)
+        : _compactListing(inWindow, query.limit),
   };
-  if (query.full) {
-    final shown = inWindow.length <= query.limit
-        ? inWindow
-        : inWindow.sublist(inWindow.length - query.limit);
-    answer['events'] = [for (final e in shown) e.toJson()];
-    if (shown.length < inWindow.length) {
-      answer['more'] =
-          '${inWindow.length - shown.length} earlier events left out; '
-          'narrow with since, until or kinds';
-    }
-  } else {
-    final compact = compactTrace(inWindow, limit: query.limit);
-    answer['lines'] = compact.lines.join('\n');
-    if (compact.more > 0) {
-      answer['more'] =
-          '${compact.more} earlier lines left out; narrow with since, '
-          'until or kinds';
-    }
-  }
-  return answer;
 }
 
-/// The `trace` of a note (PLAN-v2 Milestone 13, step 12): the events in the
+/// Where one end of a window cuts: at a seq, or at a recorder time.
+typedef _Cut = ({int? seq, int? t});
+
+_Cut _cutOf(TraceBound? bound, TraceRecorder recorder) => switch (bound) {
+  null => (seq: null, t: null),
+  SeqBound(:final seq) => (seq: seq, t: null),
+  SecondsBound(:final seconds) => (
+    seq: null,
+    t: recorder.now - (seconds * 1000).round(),
+  ),
+  MarkBound() => (seq: _lastMarkSeq(recorder), t: null),
+};
+
+int _lastMarkSeq(TraceRecorder recorder) {
+  final mark = recorder.lastOf(TraceKind.mark);
+  if (mark == null) {
+    throw const FormatException('no mark yet; make one with mark');
+  }
+  return mark.seq;
+}
+
+/// The two ends of a `get_trace` window.
+final class _Window {
+  const _Window(this.since, this.until);
+
+  final _Cut since;
+  final _Cut until;
+
+  bool contains(TraceEvent event) {
+    final (fromSeq, fromT) = (since.seq, since.t);
+    final (toSeq, toT) = (until.seq, until.t);
+    return (fromSeq == null || event.seq >= fromSeq) &&
+        (toSeq == null || event.seq <= toSeq) &&
+        (fromT == null || event.t >= fromT) &&
+        (toT == null || event.t <= toT);
+  }
+}
+
+/// The events of [window] that [query] matches, and how many frames the
+/// window covers (a folded frame event counts every frame it covers).
+(List<TraceEvent>, int) _eventsIn(
+  TraceRecorder recorder,
+  TraceQuery query,
+  _Window window,
+) {
+  final matched = <TraceEvent>[];
+  var frames = 0;
+  for (final event in recorder.events.where(window.contains)) {
+    if (event.kind == TraceKind.frame) {
+      frames += event.data['n'] is int ? event.data['n']! as int : 1;
+    }
+    if (query.matches(event)) matched.add(event);
+  }
+  return (matched, frames);
+}
+
+int _windowStart(
+  TraceRecorder recorder,
+  _Window window,
+  List<TraceEvent> inWindow,
+) {
+  if (window.since.seq case final seq?) return seq;
+  if (window.since.t == null) return 1;
+  return inWindow.isEmpty ? recorder.nextSeq : inWindow.first.seq;
+}
+
+List<String> _rebuildNotes(TraceRecorder recorder, int from, int to) => [
+  for (final (a, b) in recorder.rebuildGaps(from, to).take(5))
+    'rebuilds not recorded for seq $a-$b (level 3 was off); '
+        'call trace_detail({on: true}) to record them',
+];
+
+Map<String, Object?> _fullListing(List<TraceEvent> inWindow, int limit) {
+  final shown = inWindow.length <= limit
+      ? inWindow
+      : inWindow.sublist(inWindow.length - limit);
+  return {
+    'events': [for (final e in shown) e.toJson()],
+    if (shown.length < inWindow.length)
+      'more':
+          '${inWindow.length - shown.length} earlier events left out; '
+          'narrow with since, until or kinds',
+  };
+}
+
+Map<String, Object?> _compactListing(List<TraceEvent> inWindow, int limit) {
+  final compact = compactTrace(inWindow, limit: limit);
+  return {
+    'lines': compact.lines.join('\n'),
+    if (compact.more > 0)
+      'more':
+          '${compact.more} earlier lines left out; narrow with since, '
+          'until or kinds',
+  };
+}
+
+/// The `trace` of a note: the events in the
 /// [seconds] before [end] (recorder time, in ms), at most [maxLines]
 /// compact lines. Null when nothing in the window is kept.
 ///
