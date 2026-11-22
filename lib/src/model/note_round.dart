@@ -1,5 +1,5 @@
 // Plain Dart: no `dart:ui` and no `package:flutter`. The bridge writes the
-// rounds of a note (PLAN-v3 Milestone 20); the app and the bridge's text
+// rounds of a note; the app and the bridge's text
 // read them with these classes.
 
 import 'json_read.dart';

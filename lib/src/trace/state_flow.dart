@@ -1,5 +1,5 @@
-// Plain Dart: no `dart:ui` and no `package:flutter` (PLAN-v2 rule 13).
-// The chain of PLAN-v3 Milestone 21, step 4: the `state.notify` and
+// Plain Dart: no `dart:ui` and no `package:flutter`.
+// The chain: the `state.notify` and
 // `state.setState` events of one cause, the elements that rebuilt because of
 // them, and one coupling hint. The app joins events with rebuilds
 // (`StateLens`); this file turns the join into the answer, so the limits
@@ -229,7 +229,7 @@ class _Group {
   }
 }
 
-/// One line for one cause: the coupling shapes of PLAN-v3 Milestone 21,
+/// One line for one cause: the coupling shapes,
 /// joined with `; `. Null when there is nothing to say.
 ///
 /// The user reads this line, so it uses plain words and never the shape

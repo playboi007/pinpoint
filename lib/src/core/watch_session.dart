@@ -5,7 +5,7 @@ import 'package:flutter/widgets.dart';
 import '../search/render_search.dart';
 import '../state/state_lens.dart';
 
-/// "Watch mode" of the state lens (PLAN-v3 Milestone 21): the user pressed
+/// "Watch mode" of the state lens: the user pressed
 /// "Watch state" on a widget and went back to using the app.
 ///
 /// Watching is a flag next to the mode, not a mode of its own, like the

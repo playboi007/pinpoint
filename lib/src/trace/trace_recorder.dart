@@ -1,4 +1,4 @@
-// Plain Dart: no `dart:ui` and no `package:flutter` (PLAN-v2 rule 13), so
+// Plain Dart: no `dart:ui` and no `package:flutter`, so
 // the limits are tested without a widget tree.
 
 import 'dart:collection';
@@ -7,14 +7,14 @@ import 'dart:math' show max;
 import '../model/trace_event.dart';
 import 'cause_zone.dart';
 
-/// A bounded record of what the app did (PLAN-v2 Milestone 13).
+/// A bounded record of what the app did.
 ///
-/// A ring buffer, bounded twice (rule 12): by [maxEvents] and by [maxBytes].
+/// A ring buffer, bounded twice: by [maxEvents] and by [maxBytes].
 /// When a limit is reached the oldest events go, [dropped] counts them and
 /// every answer built on the record says `partial`.
 ///
 /// [add] is O(1): it writes into a list made once, and allocates only the
-/// event. The recorder only observes (rule 11): it never awaits, schedules
+/// event. The recorder only observes: it never awaits, schedules
 /// nothing and throws nothing at its callers.
 class TraceRecorder {
   TraceRecorder({
@@ -30,8 +30,8 @@ class TraceRecorder {
        frameOf = frameOf ?? _noFrame;
 
   /// A recorder that holds [events] as they were recorded, with their
-  /// seqs, for reading a stored run with the same queries as the live one
-  /// (PLAN-v2 Milestone 15, `get_trace({run})`). Its clock stands at the
+  /// seqs, for reading a stored run with the same queries as the live one.
+  /// Its clock stands at the
   /// last event.
   factory TraceRecorder.of(List<TraceEvent> events) {
     final last = events.isEmpty ? 0 : events.last.t;
@@ -87,7 +87,7 @@ class TraceRecorder {
   Iterable<TraceCause> get causes => _causes.values;
 
   /// Whether events get causes: `PinPoint.run` started the cause zone and
-  /// `TraceConfig.causes` is on (PLAN-v2 Milestone 14, step 7).
+  /// `TraceConfig.causes` is on.
   bool get causesRecorded => readCauses && CauseZone.current != null;
 
   /// Why events have no cause, for the tools; null when they do.
@@ -124,7 +124,7 @@ class TraceRecorder {
   /// Events dropped because a limit was reached.
   int get dropped => _dropped;
 
-  /// Whether a limit dropped data from this run (rule 19).
+  /// Whether a limit dropped data from this run.
   bool get partial => _dropped > 0;
 
   /// Why the record is partial, or null.
@@ -179,8 +179,8 @@ class TraceRecorder {
   /// Records one event. [data] must already be small JSON values (see
   /// [traceValues]); it is kept as given.
   ///
-  /// The event's cause is [cause], or the cause of the zone it is added in
-  /// (PLAN-v2 Milestone 14, step 5). Give [cause] for work that runs
+  /// The event's cause is [cause], or the cause of the zone it is added in.
+  /// Give [cause] for work that runs
   /// outside the zone of what started it, such as a response that a
   /// browser callback reports.
   TraceEvent add(
@@ -191,7 +191,7 @@ class TraceRecorder {
     TraceCause? cause,
   }) {
     final from = readCauses ? (cause ?? CauseZone.currentCause) : null;
-    // Pinpoint's own work is not a cause (rule 14).
+    // Pinpoint's own work is not a cause.
     final owner = from == null || from.internal ? null : from;
     final event = TraceEvent(
       seq: _nextSeq++,
@@ -270,8 +270,8 @@ class TraceRecorder {
       <void Function(TraceEvent event)>[];
 
   /// Calls [listener] with each new event, after it is held. The tape
-  /// recorder keeps inputs this way, apart from the ring buffer
-  /// (Milestone 15, step 3). A listener must be as cheap as [add].
+  /// recorder keeps inputs this way, apart from the ring buffer.
+  /// A listener must be as cheap as [add].
   void addListener(void Function(TraceEvent event) listener) =>
       _listeners.add(listener);
 

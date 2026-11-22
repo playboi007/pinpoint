@@ -1,4 +1,4 @@
-// Plain Dart: the bridge's `list_probes` (PLAN-v2 Milestone 13, step 7).
+// Plain Dart: the bridge's `list_probes`.
 
 import 'dart:io';
 

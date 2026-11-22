@@ -121,8 +121,8 @@ class ImagePaintRecorder {
     _pending.clear();
   }
 
-  // Runs during paint. Only append here; findings are made after the frame
-  // (watch out for: never touch widgets inside debugOnPaintImage).
+  // Runs during paint. Only append here and never touch widgets; findings
+  // are made after the frame.
   void _onPaint(ImageSizeInfo info) {
     _slot.previous?.call(info);
     if (!_installed || _pending.length >= maxPending) return;

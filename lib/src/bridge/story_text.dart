@@ -1,7 +1,7 @@
 // Plain Dart with `dart:io` (through [SourceLookup]): no `dart:ui` and no
 // `package:flutter`, so `dart run pinpoint:bridge` can run it.
 //
-// The story of PLAN-v3 Milestone 21b as plain text, for `state_flow`. It
+// The story as plain text, for `state_flow`. It
 // reads the same [Story] blocks as the watch card and says the same words
 // ([storyName], [rowHeadline], [changesText]); the code lines and the names
 // from the code come from the project's source on this side.

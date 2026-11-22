@@ -8,7 +8,7 @@ import 'dart:io';
 import '../model/tape.dart' show runIdPattern;
 import '../model/trace_event.dart';
 
-/// Replay runs on disk (PLAN-v2 Milestone 15, step 14): the events in
+/// Replay runs on disk: the events in
 /// `<dir>/runs/<id>.jsonl` and the last status in `<dir>/runs/<id>.json`.
 /// A page reload clears the app's memory, so the bridge is where a run
 /// lives. The newest [keep] runs are kept.

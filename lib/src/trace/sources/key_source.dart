@@ -6,11 +6,11 @@ import '../trace_recorder.dart';
 import '../trace_source.dart';
 
 /// `input.key` events (level 1), fed by the wrapper's one
-/// `HardwareKeyboard` handler from Milestone 1: no second handler.
+/// `HardwareKeyboard` handler: no second handler.
 ///
 /// A key typed while the focus is in a field with `obscureText` is masked
-/// when recorded, not when shown (rule 16). Pinpoint's own keys, and keys
-/// typed into Pinpoint's own fields, are left out (rule 14).
+/// when recorded, not when shown. Pinpoint's own keys, and keys
+/// typed into Pinpoint's own fields, are left out.
 class KeySource extends TraceSource {
   TraceRecorder? _recorder;
 

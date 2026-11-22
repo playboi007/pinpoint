@@ -4,7 +4,7 @@ import 'console_filter_stub.dart'
     as platform;
 
 /// Keeps the browser console free of the `scheduleBuildFor` lines while the
-/// state lens is armed (PLAN-v3 Milestone 21, web).
+/// state lens is armed.
 ///
 /// On newer Flutter versions, the label and stack of each `scheduleBuildFor`
 /// call go to `console.error`. Armed, this replaces `console.error` with a

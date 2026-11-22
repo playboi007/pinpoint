@@ -229,7 +229,7 @@ class StoryRow {
     if (hasValue) 'hasValue': true,
   };
 
-  /// A string that is equal for two rows that say the same (used to fold
+  /// A string that is equal for two rows that say the same (it folds
   /// blocks that repeat).
   String get signature =>
       '$kind|$owner|$src|$verb|${changes.map((c) => c.text).join(';')}|$method';

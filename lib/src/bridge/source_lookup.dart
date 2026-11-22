@@ -65,7 +65,7 @@ class SourceDeclaration {
   Map<String, Object?> toJson() => {'type': type, 'file': file, 'line': line};
 }
 
-/// Reads the app's own source for the state lens (PLAN-v3 Milestone 21):
+/// Reads the app's own source for the state lens:
 /// the lines of the method around a file and line, and where a class is
 /// declared. Only `.dart` files inside the project folder; nothing outside
 /// it is ever read.

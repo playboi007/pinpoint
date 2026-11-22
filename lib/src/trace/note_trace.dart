@@ -4,7 +4,7 @@ import '../search/source_resolver.dart';
 import 'trace_format.dart';
 import 'trace_session.dart';
 
-/// The `trace` for a note on [picked] (PLAN-v2 Milestone 13, step 12): the
+/// The `trace` for a note on [picked]: the
 /// events of its subtree in the 10 seconds before Pinpoint became active
 /// (the user saw the problem, then started picking). Null when the
 /// recorder is off or nothing was kept.

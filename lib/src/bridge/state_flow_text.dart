@@ -1,8 +1,7 @@
 // Plain Dart with `dart:io` (through [SourceLookup]): no `dart:ui` and no
 // `package:flutter`, so `dart run pinpoint:bridge` can run it.
 //
-// The text of the `state_flow` tool (PLAN-v3 Milestone 21, step 8, and the
-// story of Milestone 21b): what the widget reads, then the story of changes
+// The text of the `state_flow` tool: what the widget reads, then the story of changes
 // per cause, with the code line under each row and the declaration of each
 // state type, from the project's source on this side. The story is the same
 // [Story] the watch card shows ([storyLines] in `story_text.dart`).

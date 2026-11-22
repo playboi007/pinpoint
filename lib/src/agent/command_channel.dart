@@ -74,8 +74,8 @@ class LongPollTransport implements CommandTransport {
   void start(CommandHandler handler) {
     if (_running) return;
     _running = true;
-    // Pinpoint's own work: its awaits are not entries and make no cause
-    // (rule 14). Each command it runs is a cause of its own.
+    // Pinpoint's own work: its awaits are not entries and make no cause.
+    // Each command it runs is a cause of its own.
     unawaited(CauseZone.internal(() => _loop(++_generation, handler)));
   }
 

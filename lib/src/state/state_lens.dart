@@ -80,13 +80,13 @@ class StateLensState {
   final bool rebuildsRecorded;
 }
 
-/// The state lens for one target element (PLAN-v3 Milestone 21, step 5).
+/// The state lens for one target element.
 ///
 /// [arm] computes what the target reads (always cheap), attaches
 /// [StateListen] to the objects it reads and to the target's subtree,
 /// starts [BuildStacks] and, on web, the [ConsoleFilter]; and for a window
 /// (at most [maxWindow]) joins each state event with the elements that
-/// rebuilt after it (step 4). The window ends by itself, on [stop], on
+/// rebuilt after it. The window ends by itself, on [stop], on
 /// dispose and when the target unmounts: then every listener and global is
 /// taken back.
 ///
@@ -554,7 +554,7 @@ class StateLens extends ChangeNotifier
     return stateFlowChain(recorder, fromSeq: _fromSeq, rebuilds: _rebuilds);
   }
 
-  /// The story since the window opened (PLAN-v3 Milestone 21b): blocks per
+  /// The story since the window opened: blocks per
   /// cause in time order, oldest first, with rows, diffs and what rebuilt.
   /// [filter] folds hover and controller changes and, for "Only my state",
   /// owners outside the project. The card and `state_flow` read this.

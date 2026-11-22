@@ -17,7 +17,7 @@ import 'story_view.dart';
 
 export 'state_chain.dart' show formatClock, methodLabel, whereLabel;
 
-/// The State tab of the Info panel (PLAN-v3 Milestone 21, step 7).
+/// The State tab of the Info panel.
 ///
 /// Three parts:
 /// 1. What the picked widget reads: its state owners and the objects they

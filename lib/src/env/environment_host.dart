@@ -169,7 +169,7 @@ class ViewportFrame extends SingleChildRenderObjectWidget {
 
 /// The render object of [ViewportFrame].
 ///
-/// The app's boundary is no longer at the screen's origin, and it can be
+/// The app's boundary is not at the screen's origin, and it can be
 /// scaled. Everything that maps between the app and the screen goes through
 /// [applyPaintTransform], so `getTransformTo(null)` (the picker, the
 /// outlines, the pins) and the screenshot's inverse transform stay right.

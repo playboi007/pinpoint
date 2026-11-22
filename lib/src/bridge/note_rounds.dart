@@ -1,6 +1,6 @@
-// Plain Dart with `dart:io` (through [Checkpoints]): the rounds of a note
-// (PLAN-v3 Milestone 20): what the agent changed in each pass, labelled by
-// the agent, and the texts the bridge writes when the user undoes some of it.
+// Plain Dart with `dart:io` (through [Checkpoints]): the rounds of a note,
+// what the agent changed in each pass labelled by the agent, and the texts
+// the bridge writes when the user undoes some of it.
 
 import 'checkpoints.dart';
 

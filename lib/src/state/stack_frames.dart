@@ -2,7 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import '../model/source_location.dart';
 
-/// One stack frame that is the project's own code (PLAN-v3 Milestone 21).
+/// One stack frame that is the project's own code.
 @immutable
 class ProjectFrame {
   const ProjectFrame({

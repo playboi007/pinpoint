@@ -11,7 +11,7 @@ import '../theme/pinpoint_tokens.dart';
 /// Driven by [rect] through `repaint`. The rect is set after frames the app
 /// draws anyway (`WatchSession`), so this painter asks for no frame of its
 /// own. A null rect paints nothing: the target is unmounted, scrolled away
-/// or no longer watched. It must sit inside an `IgnorePointer`.
+/// or not watched. It must sit inside an `IgnorePointer`.
 class WatchMarkerPainter extends CustomPainter {
   WatchMarkerPainter({
     required this.rect,

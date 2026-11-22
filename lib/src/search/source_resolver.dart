@@ -117,7 +117,7 @@ class SourceResolver {
         return true;
       });
     } catch (_) {
-      // An element that is no longer active asserts on ancestor lookup.
+      // An element that is inactive asserts on ancestor lookup.
     }
     return SourceChain(elements, this);
   }

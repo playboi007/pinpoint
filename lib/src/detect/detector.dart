@@ -12,7 +12,7 @@ enum Severity { info, warning, error }
 /// One problem a detector found on the current screen.
 ///
 /// Every detector produces this same value, so the findings list, the notes
-/// and the stress matrix (Milestone 12) treat them alike.
+/// and the stress matrix treat them alike.
 @immutable
 class Finding {
   const Finding({
@@ -68,7 +68,7 @@ class Finding {
   String toString() => 'Finding($kind, ${severity.name}, $summary)';
 }
 
-/// The checks Milestone 12's `verify_note` runs for a note made from
+/// The checks `verify_note` runs for a note made from
 /// [finding]: the measurement that found it, which must pass after the fix.
 /// Empty when no check measures that kind.
 List<Map<String, Object?>> checksFor(Finding finding) => switch (finding.kind) {
@@ -259,7 +259,7 @@ class FindingScan {
 /// object to every detector in [detectors].
 ///
 /// [root] is the app's boundary, so Pinpoint's own UI is never scanned.
-/// Offstage and clipped content is skipped (the Milestone 2 walk). A
+/// Offstage and clipped content is skipped. A
 /// detector that throws on one render object loses that one only
 /// (engineering rule 4).
 FindingScan scanTree(

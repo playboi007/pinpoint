@@ -46,7 +46,7 @@ class BuildStacksSummary {
       '${failure == null ? '' : ', failed: $failure'}';
 }
 
-/// Who called `setState` (PLAN-v3 Milestone 21, step 3): a stack for every
+/// Who called `setState`: a stack for every
 /// `markNeedsBuild`, in an armed window only.
 ///
 /// This covers a `State` that changes with no listenable that Pinpoint can

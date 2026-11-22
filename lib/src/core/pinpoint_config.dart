@@ -8,8 +8,6 @@ import '../trace/trace_config.dart';
 import 'keymap.dart';
 
 /// Settings for [PinPointWrapper].
-///
-/// Later milestones add more.
 @immutable
 class PinPointConfig {
   const PinPointConfig({
@@ -28,7 +26,7 @@ class PinPointConfig {
     this.trace = const TraceConfig(),
   }) : assert(maxScreenshotWidth > 0);
 
-  /// The flight recorder (PLAN-v2 Milestone 13): what the app did in the
+  /// The flight recorder: what the app did in the
   /// last minutes, for the Timeline, notes and `get_trace`.
   /// `TraceConfig(enabled: false)` turns it off and leaves the rest as it
   /// was.

@@ -7,7 +7,7 @@ import '../trace_source.dart';
 /// The tick comes from [FrameClock], which reads the persistent frame
 /// callback; this source only writes. The event carries the recorder's own
 /// time in that frame (`us`), so a frame time read in debug is not taken
-/// for the app's alone (watch out for), and the frame's rebuild count while
+/// for the app's alone, and the frame's rebuild count while
 /// the rebuild source runs.
 class FrameSource extends TraceSource with FrameWork {
   FrameSource({required this.builds});

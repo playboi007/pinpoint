@@ -5,7 +5,7 @@ import '../model/annotation.dart'
 import '../model/source_location.dart';
 import '../search/source_resolver.dart';
 
-/// Who reads what (PLAN-v3 Milestone 21, step 1): for an element, the
+/// Who reads what: for an element, the
 /// nearest local build owners and the state objects each one depends on.
 ///
 /// No hook and no listener: `Element.debugFillProperties` adds a
@@ -60,7 +60,7 @@ const Set<String> frameworkInheritedWidgets = <String>{
 };
 
 /// Gives each state object a short name for the length of the lens
-/// session, for example `#a1` (PLAN-v3 Milestone 21, step 1).
+/// session, for example `#a1`.
 ///
 /// The tag is kept in an [Expando], so it lives as long as the object and
 /// leaves no reference behind. Two readers that show the same tag read one
@@ -125,7 +125,7 @@ class DependencyRef {
   /// Where the scope was created, when that is in the project.
   final SourceLocation? location;
 
-  /// The provided object when it is a [Listenable]: what step 2 listens to.
+  /// The provided object when it is a [Listenable]: what Pinpoint listens to.
   Listenable? get listenable {
     final v = value;
     return v is Listenable ? v : null;
@@ -285,8 +285,8 @@ Object? _providedValue(InheritedElement scope, String kind) {
 
 /// The scope is made inside its package, by the app's
 /// `ChangeNotifierProvider(...)` call: the source is the nearest local
-/// widget at the scope or just above it (the rule Milestone 19 uses for
-/// the same).
+/// widget at the scope or just above it (the rule the lean text uses
+/// too).
 SourceLocation? _scopeSource(InheritedElement scope, SourceResolver resolver) {
   final own = resolver.entryOf(scope);
   if (own.isLocal) return own.location;
@@ -316,7 +316,7 @@ String baseTypeName(String name) {
 /// `_InheritedProviderScope<Foo?>` (the `provider` package) is `provider` of
 /// `Foo`; `InheritedNotifier<Foo>` is `notifier`; `InheritedModel<Foo>` is
 /// `provider`. Null for any other widget. Shared with the note's state
-/// owners (Milestone 19).
+/// owners.
 (String, String)? scopeOf(String widgetType) {
   final open = widgetType.indexOf('<');
   if (open < 0 || !widgetType.endsWith('>')) return null;
@@ -370,7 +370,7 @@ ReaderRef? readerOf(
 }
 
 /// The nearest readers of [target]: [target] itself, then each ancestor
-/// (toward the app), at most [max] (PLAN-v3 Milestone 21, step 1).
+/// (toward the app), at most [max].
 /// [boundary] is the element just above the app's own widgets: the walk
 /// stops there.
 List<ReaderRef> nearestReaders(
@@ -395,7 +395,7 @@ List<ReaderRef> nearestReaders(
       return true;
     });
   } catch (_) {
-    // An element that is no longer active asserts on ancestor lookup.
+    // An element that is inactive asserts on ancestor lookup.
   }
   return readers;
 }

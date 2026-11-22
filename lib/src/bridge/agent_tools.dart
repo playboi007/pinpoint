@@ -1,4 +1,4 @@
-// Plain Dart: the Milestone 12 tools the bridge offers over MCP. Each one
+// Plain Dart: the tools the bridge offers over MCP. Each one
 // runs inside the app, through the command queue.
 
 import '../trace/trace_causes.dart' show whyLimits;

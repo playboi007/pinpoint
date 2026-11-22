@@ -1,11 +1,11 @@
-// Plain Dart: no `dart:ui` and no `package:flutter` (PLAN-v2 rule 13). The
+// Plain Dart: no `dart:ui` and no `package:flutter`. The
 // app records these events and the bridge reads the same shape.
 
 import 'dart:convert';
 
 import 'annotation.dart' show clipText;
 
-/// The kinds of [TraceEvent] that Milestone 13 records.
+/// The kinds of [TraceEvent] that the recorder records.
 ///
 /// A kind is a dotted name; a filter on `input` matches every `input.…`
 /// kind.
@@ -19,7 +19,7 @@ abstract final class TraceKind {
   /// The value of the focused text field changed.
   static const String text = 'input.text';
 
-  /// A `message` event on `window` (Milestone 14).
+  /// A `message` event on `window`.
   static const String message = 'input.message';
 
   /// A request started (`fetch` or XHR on web).
@@ -44,8 +44,8 @@ abstract final class TraceKind {
   /// Values of a watched `State` changed (level 3 only).
   static const String state = 'state';
 
-  /// A listenable that Pinpoint listens to notified (PLAN-v3 Milestone 21,
-  /// step 2): `notifyListeners`, a `ValueNotifier` set. `data` holds
+  /// A listenable that Pinpoint listens to notified: `notifyListeners`, a
+  /// `ValueNotifier` set. `data` holds
   /// `owner`, `tag`, the first project frame (`file`, `line`, `method`),
   /// and `before` / `after` for a `ValueListenable`.
   ///
@@ -80,20 +80,20 @@ abstract final class TraceKind {
   /// Level 3 sources stopped.
   static const String detailOff = 'detail.off';
 
-  /// A replay started (PLAN-v2 Milestone 15): the tape, its kind, the run.
+  /// A replay started: the tape, its kind, the run.
   static const String replayStart = 'replay.start';
 
   /// The player sent one input of the tape.
   static const String replayStep = 'replay.step';
 
-  /// A request had no answer in the tape (step 9).
+  /// A request had no answer in the tape.
   static const String replayUnmatched = 'replay.unmatched';
 
   /// An input's target was gone, and nothing like it was at its place: the
-  /// replay stopped (step 11).
+  /// replay stopped.
   static const String replayDiverged = 'replay.diverged';
 
-  /// The replay holds at a mark or a step (step 15).
+  /// The replay holds at a mark or a step.
   static const String replayHold = 'replay.hold';
 
   /// The replay ended: done, stopped, or diverged.
@@ -111,8 +111,7 @@ abstract final class TraceKind {
           kind.codeUnitAt(filter.length) == 0x2E);
 }
 
-/// One thing that happened in the app (PLAN-v2, "One event shape for
-/// everything").
+/// One thing that happened in the app.
 ///
 /// [data] holds small JSON values only: [traceValues] clips them before an
 /// event is made.
@@ -182,7 +181,7 @@ class TraceEvent {
   /// For example `input.pointer` or `build`. See [TraceKind].
   final String kind;
 
-  /// The id of the entry that started this work (Milestone 14); null
+  /// The id of the entry that started this work; null
   /// without `PinPoint.run`.
   final int? cause;
 

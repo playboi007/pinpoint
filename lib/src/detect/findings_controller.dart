@@ -40,14 +40,14 @@ class FindingsController extends ChangeNotifier {
   /// Whether a scan has run since the last [clear].
   bool get hasScanned => _hasScanned;
 
-  /// The findings of the last scan replace the earlier scan's.
+  /// The findings of the last scan replace the previous scan's.
   void setScanned(List<Finding> findings) {
     _scanned = List<Finding>.unmodifiable(findings);
     _hasScanned = true;
     _changed();
   }
 
-  /// The findings of the last accessibility audit replace the earlier
+  /// The findings of the last accessibility audit replace the previous
   /// audit's.
   void setAudited(List<Finding> findings) {
     _audited = List<Finding>.unmodifiable(findings);
@@ -64,7 +64,7 @@ class FindingsController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Adds findings from a hook. One with the key of an earlier one
+  /// Adds findings from a hook. One with the key of a previous one
   /// replaces it, so the newest text is kept.
   void addCaptured(Iterable<Finding> findings) {
     for (final finding in findings) {

@@ -18,7 +18,7 @@ enum ReplayOutcome {
   diverged,
 }
 
-/// What a replay shows and blocks (PLAN-v2 Milestone 15, step 17).
+/// What a replay shows and blocks.
 ///
 /// Statics, not fields of a widget's `State`: a new instance field is
 /// undefined after a web hot reload (api-notes item 29), and the player
@@ -27,8 +27,7 @@ abstract final class ReplayGate {
   /// Whether real pointer input is blocked: while a replay runs or holds.
   static final ValueNotifier<bool> blocking = ValueNotifier<bool>(false);
 
-  /// The banner text, for example "Replaying tape, step 12 of 42", or
-  /// null for none.
+  /// The banner text, which says how far the replay is, or null for none.
   static final ValueNotifier<String?> banner = ValueNotifier<String?>(null);
 
   /// The step number inside [banner]'s text, which the banner rolls when it
@@ -79,7 +78,7 @@ abstract final class ReplayGate {
 /// ends: the banner never holds it.
 ///
 /// Always in the tree (engineering rule 5): only what it does changes. It
-/// sits outside the app's `RepaintBoundary` (rule 6), so it is in no
+/// sits outside the app's `RepaintBoundary`, so it is in no
 /// screenshot and no pick. With reduced motion the banner shows and hides
 /// at once and nothing rolls or shakes.
 class ReplayBlocker extends StatelessWidget {

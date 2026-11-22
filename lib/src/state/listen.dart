@@ -22,8 +22,8 @@ const TraceRedact stateRedact = TraceRedact([
   '*passwd*',
 ]);
 
-/// Pinpoint's own listener on the objects that notify (PLAN-v3 Milestone 21,
-/// step 2): the listenables a state owner reads (step 1) and those that
+/// Pinpoint's own listener on the objects that notify: the listenables a state
+/// owner reads and those that
 /// `ValueListenableBuilder`, `ListenableBuilder` and `AnimatedBuilder` in a
 /// subtree listen to.
 ///
@@ -241,7 +241,7 @@ class StateListen {
     }
   }
 
-  // Runs inside the notifying call (watch out for): it only reads and
+  // Runs inside the notifying call: it only reads and
   // records, and a failure here must never reach the app's notifier.
   void _notified(_Attachment attachment) {
     if (_stopped) return;

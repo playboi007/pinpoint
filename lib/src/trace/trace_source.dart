@@ -1,11 +1,10 @@
 import 'trace_recorder.dart';
 
-/// Where a [TraceSource]'s events come from, and when it runs (PLAN-v2,
-/// "Source levels").
+/// Where a [TraceSource]'s events come from, and when it runs.
 ///
 /// - 1: always, from wrapper start. Cheap, takes no global slot another
 ///   tool wants.
-/// - 2: on by default behind one switch (network bodies, Milestone 14).
+/// - 2: on by default behind one switch (network bodies).
 /// - 3: only while something needs it: the Timeline is open, a watch is
 ///   set, or the agent asked with `trace_detail`.
 abstract class TraceSource {
@@ -15,10 +14,10 @@ abstract class TraceSource {
   String get name;
 
   /// 1, 2 or 3; see above. A source that takes a slot another tool wants,
-  /// or costs much per event, is level 3 (rule 18).
+  /// or costs much per event, is level 3.
   int get level;
 
-  /// Whether its events are input that a tape replays (Milestone 15).
+  /// Whether its events are input that a tape replays.
   bool get isInput;
 
   /// Starts recording into [recorder]. Called once per start; a source
