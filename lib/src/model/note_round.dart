@@ -2,6 +2,8 @@
 // rounds of a note (PLAN-v3 Milestone 20); the app and the bridge's text
 // read them with these classes.
 
+import 'json_read.dart';
+
 /// One file in a [RoundChange]. [path] is relative to the git top level,
 /// which can be above the app's folder.
 class RoundFile {
@@ -109,8 +111,8 @@ class NoteRound {
     final undone = json['undone'];
     return NoteRound(
       n: n,
-      startedAt: _date(json['startedAt']),
-      endedAt: _date(json['endedAt']),
+      startedAt: asDate(json['startedAt']),
+      endedAt: asDate(json['endedAt']),
       start: json['start'] is String ? json['start']! as String : null,
       end: json['end'] is String ? json['end']! as String : null,
       changes: [
@@ -125,9 +127,6 @@ class NoteRound {
       undo: RoundUndo.byName(json['undo']),
     );
   }
-
-  static DateTime? _date(Object? value) =>
-      value is String ? DateTime.tryParse(value) : null;
 
   final int n;
   final DateTime? startedAt;

@@ -8,6 +8,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import '../model/annotation.dart' show NoteMessage, NoteStatus;
+import '../model/json_read.dart';
 import '../model/tape.dart' show tapeIdPattern;
 import 'bridge_protocol.dart';
 import 'checkpoints.dart';
@@ -376,12 +377,9 @@ class NoteStore {
   }
 
   static List<Map<String, Object?>> _roundsOf(Map<String, Object?> note) => [
-    for (final r in _listOf(note['rounds']))
+    for (final r in asJsonList(note['rounds']))
       if (r is Map<String, Object?>) r,
   ];
-
-  static List<Object?> _listOf(Object? value) =>
-      value is List<Object?> ? value : const <Object?>[];
 
   static Map<String, Object?>? _openRound(List<Map<String, Object?>> rounds) {
     for (final round in rounds.reversed) {
@@ -432,7 +430,7 @@ class NoteStore {
       if (open != null) {
         // Labels before the round closes: kept until it does.
         open['pending'] = [
-          ..._listOf(open['pending']),
+          ...asJsonList(open['pending']),
           for (final l in labels) l.toJson(),
         ];
       } else if (rounds.isNotEmpty) {
@@ -475,7 +473,7 @@ class NoteStore {
     round['endedAt'] = _now();
     round['end'] = end;
     final pending = [
-      for (final p in _listOf(round.remove('pending')))
+      for (final p in asJsonList(round.remove('pending')))
         ?ChangeLabel.fromJson(p),
     ];
     final all = [...pending, ...labels];
@@ -501,7 +499,8 @@ class NoteStore {
     List<ChangeLabel> labels,
     RoundsReport? report,
   ) async {
-    if (round['endedAt'] == null || _listOf(round['undone']).isNotEmpty) return;
+    final isUndone = asJsonList(round['undone']).isNotEmpty;
+    if (round['endedAt'] == null || isUndone) return;
     final cp = await checkpoints;
     final start = round['start'] as String?;
     final end = round['end'] as String?;
@@ -594,7 +593,7 @@ class NoteStore {
       throw StoreException(HttpStatus.conflict, 'Round $round is still open');
     }
     final all = [
-      for (final c in _listOf(target['changes']))
+      for (final c in asJsonList(target['changes']))
         if (c is Map<String, Object?> && c['id'] is String) c,
     ];
     final already = _undoneIds(target, all);
@@ -628,7 +627,7 @@ class NoteStore {
     ];
     final files = {
       for (final c in chosen)
-        for (final f in _listOf(c['files']))
+        for (final f in asJsonList(c['files']))
           if (f is Map<String, Object?> && f['path'] is String)
             f['path']! as String,
     }.toList();
@@ -701,7 +700,7 @@ class NoteStore {
     Map<String, Object?> round,
     List<Map<String, Object?>> changes,
   ) {
-    final undone = _listOf(round['undone']);
+    final undone = asJsonList(round['undone']);
     return undone.contains('*')
         ? {for (final c in changes) c['id']! as String}
         : {

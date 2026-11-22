@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 
 import '../bridge/bridge_protocol.dart';
 import '../model/annotation.dart';
+import '../model/json_read.dart';
 import '../model/tape.dart';
 import 'http_sink.dart';
 import 'pinpoint_sink.dart';
@@ -182,15 +183,10 @@ class BridgeClient {
       body: {'round': round, 'changes': changes, 'reason': ?reason},
       timeout: const Duration(seconds: 60),
     );
-    List<String> strings(Object? list) => [
-      if (list is List<Object?>)
-        for (final item in list)
-          if (item is String) item,
-    ];
     return UndoResult(
       undo: json['undo'] is String ? json['undo']! as String : 'requested',
-      reverted: strings(json['reverted']),
-      conflicts: strings(json['conflicts']),
+      reverted: asStrings(json['reverted']),
+      conflicts: asStrings(json['conflicts']),
       reloaded: json['reloaded'] == true,
       note: json['note'] is Map<String, Object?>
           ? Annotation.fromJson(json['note']! as Map<String, Object?>)

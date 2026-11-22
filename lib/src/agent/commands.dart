@@ -18,6 +18,7 @@ import '../detect/overflow_detector.dart';
 import '../detect/truncation_detector.dart';
 import '../env/environment_controller.dart';
 import '../model/annotation.dart';
+import '../model/json_read.dart';
 import '../model/tape.dart';
 import '../overlay/replay_blocker.dart';
 import '../search/pick_result.dart';
@@ -1705,11 +1706,11 @@ class AgentCommands {
     Element? root,
     int? take,
   }) {
-    final file = _string(args['file']);
+    final file = nonEmptyString(args['file']);
     final line = args['line'];
-    final type = _string(args['type']);
-    final text = _string(args['text'])?.toLowerCase();
-    final key = _string(args['key']);
+    final type = nonEmptyString(args['type']);
+    final text = nonEmptyString(args['text'])?.toLowerCase();
+    final key = nonEmptyString(args['key']);
     if (file == null && type == null && text == null && key == null) {
       throw const AgentError('give at least one of file, type, text or key');
     }
@@ -2246,9 +2247,6 @@ class AgentCommands {
     });
     return twin;
   }
-
-  static String? _string(Object? value) =>
-      value is String && value.isNotEmpty ? value : null;
 
   /// The app's boundary render object. Throws when the app is not on
   /// screen.

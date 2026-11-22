@@ -86,11 +86,13 @@ final _jsonHelper = RegExp(
   caseSensitive: false,
 );
 
+/// `lib/src/model/json_read.dart` is the one place these helpers may live.
 List<Hit> jsonHelpers(List<ScannedSource> files) => [
   for (final file in files)
-    for (final (index, line) in file.code.split('\n').indexed)
-      if (_jsonHelper.firstMatch(line) case final match?)
-        Hit(file.path, index + 1, match[1]!),
+    if (!file.path.endsWith('model/json_read.dart'))
+      for (final (index, line) in file.code.split('\n').indexed)
+        if (_jsonHelper.firstMatch(line) case final match?)
+          Hit(file.path, index + 1, match[1]!),
 ];
 
 /// Names that look like a call before `(` but are not a function.

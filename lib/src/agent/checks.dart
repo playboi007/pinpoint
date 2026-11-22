@@ -11,6 +11,7 @@ import '../detect/detector.dart';
 import '../detect/overflow_detector.dart';
 import '../detect/truncation_detector.dart';
 import '../model/annotation.dart';
+import '../model/json_read.dart';
 import '../search/render_search.dart';
 import '../search/source_index.dart';
 import '../search/source_resolver.dart';
@@ -230,8 +231,8 @@ class CheckRunner {
     RenderObject renderObject,
   ) {
     final rect = _appRect(renderObject);
-    final width = _double(check['width']);
-    final height = _double(check['height']);
+    final width = asDouble(check['width']);
+    final height = asDouble(check['height']);
     if (width == null && height == null) {
       return CheckResult.fail(type, 'give a width, a height or both');
     }
@@ -310,8 +311,8 @@ class CheckRunner {
       'vertical' => dy,
       _ => math.max(dx, dy),
     };
-    final min = _double(check['min']);
-    final max = _double(check['max']);
+    final min = asDouble(check['min']);
+    final max = asDouble(check['max']);
     final passed =
         (min == null || gap >= min - tolerance) &&
         (max == null || gap <= max + tolerance);
@@ -347,7 +348,7 @@ class CheckRunner {
       return CheckResult.fail(type, 'unknown edge: $edge');
     }
     final off = (mine - theirs).abs();
-    final allowed = _double(check['tolerance']) ?? tolerance;
+    final allowed = asDouble(check['tolerance']) ?? tolerance;
     return CheckResult(
       type: type,
       passed: off <= allowed,
@@ -411,7 +412,7 @@ class CheckRunner {
       return const CheckResult.fail(type, 'no text to measure');
     }
     final lowest = measures.reduce((a, b) => a.ratio <= b.ratio ? a : b);
-    final min = _double(check['min']) ?? lowest.required;
+    final min = asDouble(check['min']) ?? lowest.required;
     final ratio = (lowest.ratio * 100).roundToDouble() / 100;
     return CheckResult(
       type: type,
@@ -428,7 +429,7 @@ class CheckRunner {
     RenderObject renderObject,
   ) async {
     const type = 'tap_target_min';
-    final min = _double(check['min']) ?? minTapTarget;
+    final min = asDouble(check['min']) ?? minTapTarget;
     // Semantics are on for this check only: on web they cost a parallel
     // DOM tree (Milestone 10). The handle is disposed on every path.
     final handle = SemanticsBinding.instance.ensureSemantics();
@@ -523,9 +524,6 @@ class CheckRunner {
     _num(rect.width),
     _num(rect.height),
   ];
-
-  static double? _double(Object? value) =>
-      value is num ? value.toDouble() : null;
 
   static num _num(double value) {
     final r = (value * 10).roundToDouble() / 10;

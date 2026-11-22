@@ -5,6 +5,8 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'json_read.dart';
+
 /// Version of the tape JSON shape.
 const int tapeSchema = 1;
 
@@ -75,9 +77,9 @@ class TapeStart {
       seq: seq,
       wallTime: wall,
       url: json['url'] is String ? json['url']! as String : '',
-      width: _double(json['width']),
-      height: _double(json['height']),
-      pixelRatio: _double(json['pixelRatio']),
+      width: asDouble(json['width']),
+      height: asDouble(json['height']),
+      pixelRatio: asDouble(json['pixelRatio']),
       locale: json['locale'] is String ? json['locale']! as String : null,
       environment: env is Map<String, Object?> ? env : null,
       storage: storage is Map<String, Object?>
@@ -507,5 +509,3 @@ List<int> answeredBefore(int seq, List<NetExchange> net) => [
   for (final e in net)
     if (e.answeredSeq != null && e.answeredSeq! < seq) e.n,
 ];
-
-double? _double(Object? value) => value is num ? value.toDouble() : null;

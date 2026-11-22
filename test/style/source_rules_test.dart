@@ -12,7 +12,7 @@ const _limits = (
   filesOver500Lines: 29,
   functionsOver60Lines: 99,
   stringKindCompares: 212,
-  jsonHelperCopies: 29,
+  jsonHelperCopies: 0,
   positionalBoolParameters: 23,
   plainDartHeadersCitingPlan: 21,
 );

@@ -2,6 +2,7 @@
 // writes each note's `.md` with the same function the clipboard sink uses.
 
 import '../model/annotation.dart';
+import '../model/json_read.dart';
 
 /// [note] as the Markdown a coding agent reads.
 ///
@@ -16,26 +17,26 @@ String markdownFor(Annotation note) => markdownFromJson(note.toJson());
 /// defensively: a missing field or one of the wrong type is left out, never
 /// thrown on.
 String markdownFromJson(Map<String, Object?> json) {
-  final target = _map(json['target']);
-  final page = _map(json['page']);
-  final app = _map(json['app']);
-  final siblings = _map(json['siblings']);
-  final shot = _map(json['screenshot']);
+  final target = asJsonMap(json['target']);
+  final page = asJsonMap(json['page']);
+  final app = asJsonMap(json['app']);
+  final siblings = asJsonMap(json['siblings']);
+  final shot = asJsonMap(json['screenshot']);
 
-  final id = _string(json['id']);
-  final intent = _string(json['intent']);
+  final id = asString(json['id']);
+  final intent = asString(json['intent']);
   final out = StringBuffer()
     ..writeln(
       '# Pinpoint${id == null ? '' : ' ${_line(id)}'}'
       '${intent == null ? '' : ' (${_line(intent)})'}',
     )
     ..writeln()
-    ..writeln('Comment: ${_block(_string(json['comment']) ?? '')}')
+    ..writeln('Comment: ${_block(asString(json['comment']) ?? '')}')
     ..writeln();
 
   // Only once the agent or the user moved the note on: a sent note is
   // `submitted`, and a copied one is still a `draft`.
-  final status = _string(json['status']);
+  final status = asString(json['status']);
   if (status != null && status != 'submitted' && status != 'draft') {
     out.writeln('Status: ${_line(status)}');
   }
@@ -49,10 +50,10 @@ String markdownFromJson(Map<String, Object?> json) {
     );
   }
 
-  final widget = _string(target['widget']);
-  final description = _string(target['description']) ?? widget;
+  final widget = asString(target['widget']);
+  final description = asString(target['description']) ?? widget;
   if (description != null) out.writeln('Target: ${_line(description)}');
-  final text = _string(target['text']);
+  final text = asString(target['text']);
   if (text != null &&
       text.isNotEmpty &&
       !(description?.contains(text) ?? false)) {
@@ -65,7 +66,7 @@ String markdownFromJson(Map<String, Object?> json) {
   if (source != null) {
     out.writeln('Source: $source');
   } else {
-    final mode = _string(app['buildMode']);
+    final mode = asString(app['buildMode']);
     out.writeln(
       mode != null && mode != 'debug'
           ? 'Source: unavailable ($mode build; file:line needs debug)'
@@ -75,14 +76,14 @@ String markdownFromJson(Map<String, Object?> json) {
 
   if (enclosingLine(json) case final enclosing?) out.writeln(enclosing);
 
-  final viewport = _map(page['viewport']);
-  final width = _number(viewport['width']);
-  final height = _number(viewport['height']);
-  final textScale = _number(page['textScale']);
+  final viewport = asJsonMap(page['viewport']);
+  final width = jsonNumberText(viewport['width']);
+  final height = jsonNumberText(viewport['height']);
+  final textScale = jsonNumberText(page['textScale']);
   final pageParts = [
-    ?_string(page['route']) ?? _string(page['url']),
+    ?asString(page['route']) ?? asString(page['url']),
     if (width != null && height != null) 'viewport ${width}x$height',
-    ?_string(page['brightness']),
+    ?asString(page['brightness']),
     if (textScale != null)
       'textScale ${textScale.contains('.') ? textScale : '$textScale.0'}',
   ];
@@ -92,13 +93,13 @@ String markdownFromJson(Map<String, Object?> json) {
   tweakLines(json).forEach(out.writeln);
   verificationLines(json).forEach(out.writeln);
 
-  final rect = _map(target['rect']);
-  final x = _number(rect['x']);
-  final y = _number(rect['y']);
-  final w = _number(rect['w']);
-  final h = _number(rect['h']);
-  final constraints = _string(target['constraints']);
-  final parent = _string(siblings['parent']);
+  final rect = asJsonMap(target['rect']);
+  final x = jsonNumberText(rect['x']);
+  final y = jsonNumberText(rect['y']);
+  final w = jsonNumberText(rect['w']);
+  final h = jsonNumberText(rect['h']);
+  final constraints = asString(target['constraints']);
+  final parent = asString(siblings['parent']);
   final index = siblings['index'];
   final count = siblings['count'];
   final layoutParts = [
@@ -114,18 +115,20 @@ String markdownFromJson(Map<String, Object?> json) {
   }
 
   final properties = [
-    for (final MapEntry(:key, :value) in _map(target['properties']).entries)
-      if (_string(value) case final v?) '$key=$v',
+    for (final MapEntry(:key, :value) in asJsonMap(
+      target['properties'],
+    ).entries)
+      if (asString(value) case final v?) '$key=$v',
   ];
   if (properties.isNotEmpty) {
     out.writeln('Properties: ${_line(properties.join(', '))}');
   }
   if (stateOwnersLine(json) case final owners?) out.writeln(owners);
 
-  final file = _string(shot['file']);
+  final file = asString(shot['file']);
   if (file != null) {
     final debugPaint = [
-      for (final flag in _list(shot['debugPaint'])) ?_string(flag),
+      for (final flag in asJsonList(shot['debugPaint'])) ?asString(flag),
     ];
     out.writeln(
       'Screenshot: ${_line(file)}'
@@ -135,21 +138,24 @@ String markdownFromJson(Map<String, Object?> json) {
     );
   }
 
-  final errors = [for (final e in _list(json['errors'])) ?_string(e)];
+  final errors = [for (final e in asJsonList(json['errors'])) ?asString(e)];
   if (errors.isNotEmpty) {
     out.writeln('Not collected: ${_line(errors.join(', '))}');
   }
-  final truncated = [for (final t in _list(json['truncated'])) ?_string(t)];
+  final truncated = [
+    for (final t in asJsonList(json['truncated'])) ?asString(t),
+  ];
   if (truncated.isNotEmpty) {
     out.writeln('Truncated: ${_line(truncated.join(', '))}');
   }
 
   final replies = [
-    for (final m in _list(json['messages']))
-      if (_map(m) case final message when _string(message['text']) != null)
-        '- ${_line(_string(message['from']) ?? 'agent')}'
-            '${_string(message['at']) == null ? '' : ' (${_line(_string(message['at'])!)})'}'
-            ': ${_block(_string(message['text'])!)}',
+    for (final m in asJsonList(json['messages']))
+      if (asJsonMap(m) case final message
+          when asString(message['text']) != null)
+        '- ${_line(asString(message['from']) ?? 'agent')}'
+            '${asString(message['at']) == null ? '' : ' (${_line(asString(message['at'])!)})'}'
+            ': ${_block(asString(message['text'])!)}',
   ];
   if (replies.isNotEmpty) {
     out
@@ -164,7 +170,7 @@ String markdownFromJson(Map<String, Object?> json) {
     happened.forEach(out.writeln);
   }
 
-  final subtree = _string(json['subtree']);
+  final subtree = asString(json['subtree']);
   if (subtree != null && subtree.isNotEmpty) {
     out
       ..writeln()
@@ -179,19 +185,19 @@ String markdownFromJson(Map<String, Object?> json) {
 /// The "What happened" section of a note (its `trace` JSON): a heading,
 /// then the compact trace lines indented. Empty without a trace.
 List<String> whatHappenedLines(Map<String, Object?> json) {
-  final trace = _map(json['trace']);
+  final trace = asJsonMap(json['trace']);
   // "rebuilds not recorded" says nothing about the problem (PLAN-v3
   // Milestone 19, step 9): the lines of the run stay, that one goes.
   final lines = [
-    for (final line in _list(trace['lines']).whereType<String>())
+    for (final line in asJsonList(trace['lines']).whereType<String>())
       if (!line.startsWith(traceNotRecorded)) line,
   ];
   if (lines.isEmpty) return const <String>[];
-  final seconds = _number(trace['seconds']);
+  final seconds = jsonNumberText(trace['seconds']);
   final partial = trace['partial'] == true;
   return [
     'What happened${seconds == null ? '' : ' ($seconds s before the pick)'}'
-        '${partial ? ' (partial: ${_line(_string(trace['reason']) ?? 'older events dropped')})' : ''}:',
+        '${partial ? ' (partial: ${_line(asString(trace['reason']) ?? 'older events dropped')})' : ''}:',
     for (final line in lines) '  ${_line(line)}',
   ];
 }
@@ -200,16 +206,16 @@ List<String> whatHappenedLines(Map<String, Object?> json) {
 /// tp_… (full, 12 inputs, 3 requests, 1 mark). Replay it with replay.`,
 /// or null without a tape (PLAN-v2 Milestone 15, step 18).
 String? tapeLine(Object? tape) {
-  final t = _map(tape);
-  final id = _string(t['id']);
+  final t = asJsonMap(tape);
+  final id = asString(t['id']);
   if (id == null) return null;
   String count(String key, String word) {
-    final n = _number(t[key]) ?? 0;
+    final n = jsonNumberText(t[key]) ?? 0;
     return '$n $word${n == 1 ? '' : 's'}';
   }
 
   final partial = t['partial'];
-  return 'Tape: $id (${_string(t['kind']) ?? 'segment'}, '
+  return 'Tape: $id (${asString(t['kind']) ?? 'segment'}, '
       '${count('inputs', 'input')}, ${count('requests', 'request')}, '
       '${count('marks', 'mark')}'
       '${partial == null || partial == false ? '' : ', partial: ${_line('$partial')}'}'
@@ -220,26 +226,27 @@ String? tapeLine(Object? tape) {
 /// for example `What-if: viewport 360x800, textScale 1.5, rtl`, or null
 /// when there are none. A field of the wrong type is skipped.
 String? whatIfLine(Object? environment) {
-  final env = _map(environment);
-  final viewport = _map(env['viewport']);
-  final width = _number(viewport['width']);
-  final height = _number(viewport['height']);
-  final safe = _map(env['safeArea']);
+  final env = asJsonMap(environment);
+  final viewport = asJsonMap(env['viewport']);
+  final width = jsonNumberText(viewport['width']);
+  final height = jsonNumberText(viewport['height']);
+  final safe = asJsonMap(env['safeArea']);
   final insets = [
-    for (final side in ['left', 'top', 'right', 'bottom']) _number(safe[side]),
+    for (final side in ['left', 'top', 'right', 'bottom'])
+      jsonNumberText(safe[side]),
   ];
   final parts = [
     if (width != null && height != null) 'viewport ${width}x$height',
-    if (_number(env['textScale']) case final t?) 'textScale $t',
+    if (jsonNumberText(env['textScale']) case final t?) 'textScale $t',
     if (env['boldText'] == true) 'boldText',
     if (insets.every((i) => i != null)) 'safeArea ${insets.join(',')}',
-    if (_number(env['keyboardHeight']) case final k?) 'keyboard $k',
-    ?_string(env['textDirection']),
-    ?_string(env['brightness']),
-    if (_string(env['themeVariant']) case final t?) 'theme $t',
-    if (_string(env['seedColor']) case final c?) 'seed $c',
-    if (_string(env['platform']) case final p?) 'platform $p',
-    if (_number(env['timeDilation']) case final d?) 'slow motion ${d}x',
+    if (jsonNumberText(env['keyboardHeight']) case final k?) 'keyboard $k',
+    ?asString(env['textDirection']),
+    ?asString(env['brightness']),
+    if (asString(env['themeVariant']) case final t?) 'theme $t',
+    if (asString(env['seedColor']) case final c?) 'seed $c',
+    if (asString(env['platform']) case final p?) 'platform $p',
+    if (jsonNumberText(env['timeDilation']) case final d?) 'slow motion ${d}x',
   ];
   return parts.isEmpty ? null : 'What-if: ${_line(parts.join(', '))}';
 }
@@ -249,14 +256,14 @@ String? whatIfLine(Object? environment) {
 /// `Checks: no_overflow`. Empty for a note written by hand; a field of the
 /// wrong type is skipped.
 List<String> findingLines(Map<String, Object?> json) {
-  final finding = _map(json['finding']);
-  final kind = _string(finding['kind']);
-  final severity = _string(finding['severity']);
-  final summary = _string(finding['summary']);
+  final finding = asJsonMap(json['finding']);
+  final kind = asString(finding['kind']);
+  final severity = asString(finding['severity']);
+  final summary = asString(finding['summary']);
   final checks = [
-    for (final check in _list(json['checks']))
-      if (_string(_map(check)['type']) case final type?)
-        _checkLabel(type, _map(check)),
+    for (final check in asJsonList(json['checks']))
+      if (asString(asJsonMap(check)['type']) case final type?)
+        _checkLabel(type, asJsonMap(check)),
   ];
   return [
     if (kind != null && summary != null)
@@ -270,16 +277,17 @@ List<String> findingLines(Map<String, Object?> json) {
 /// example `- FAIL no_overflow: Row overflows by 72 px on the right`.
 /// Empty before a verification ran.
 List<String> verificationLines(Map<String, Object?> json) {
-  final verification = _map(json['verification']);
+  final verification = asJsonMap(json['verification']);
   final passed = verification['passed'];
   if (passed is! bool) return const <String>[];
   final checks = [
-    for (final c in _list(verification['checks']))
-      if (_map(c) case final check when _string(check['type']) != null) check,
+    for (final c in asJsonList(verification['checks']))
+      if (asJsonMap(c) case final check when asString(check['type']) != null)
+        check,
   ];
   final count = checks.where((c) => c['passed'] == true).length;
-  final at = _string(verification['at']);
-  final after = _string(verification['after']);
+  final at = asString(verification['at']);
+  final after = asString(verification['after']);
   return [
     _line(
       'Verification: ${passed ? 'passed' : 'failed'} ($count of '
@@ -288,7 +296,7 @@ List<String> verificationLines(Map<String, Object?> json) {
     for (final check in checks)
       _line(
         '- ${check['passed'] == true ? 'PASS' : 'FAIL'} ${check['type']}'
-        '${_string(check['message']) == null ? '' : ': ${check['message']}'}',
+        '${asString(check['message']) == null ? '' : ': ${check['message']}'}',
       ),
     if (after != null) 'After screenshot: $after',
   ];
@@ -307,18 +315,18 @@ const String tweakInstruction =
 List<String> tweakLines(Map<String, Object?> json) {
   final root = projectRootOf(json);
   final lines = <String>[];
-  for (final item in _list(json['tweaks'])) {
-    final tweak = _map(item);
-    final property = _string(tweak['property']);
-    final from = _string(tweak['from']);
-    final to = _string(tweak['to']);
+  for (final item in asJsonList(json['tweaks'])) {
+    final tweak = asJsonMap(item);
+    final property = asString(tweak['property']);
+    final from = asString(tweak['from']);
+    final to = asString(tweak['to']);
     if (property == null || from == null || to == null) continue;
-    final local = _map(tweak['nearestLocal']);
-    final widget = _string(local['widget']);
+    final local = asJsonMap(tweak['nearestLocal']);
+    final widget = asString(local['widget']);
     final where = _where(local['source'], column: true, root: root);
     final maker = [
-      ?_string(tweak['renderType']),
-      if (_string(tweak['createdBy']) case final by?) 'from $by',
+      ?asString(tweak['renderType']),
+      if (asString(tweak['createdBy']) case final by?) 'from $by',
     ].join(' ');
     final made = [
       if (maker.isNotEmpty) maker,
@@ -336,7 +344,7 @@ String _checkLabel(String type, Map<String, Object?> check) {
   final args = [
     for (final MapEntry(:key, :value) in check.entries)
       if (key != 'type')
-        if (_number(value) ?? _string(value) case final v?) '$key $v',
+        if (jsonNumberText(value) ?? asString(value) case final v?) '$key $v',
   ];
   return args.isEmpty ? type : '$type (${args.join(', ')})';
 }
@@ -358,8 +366,8 @@ String compactConstraints(String constraints) {
 /// `file:line`, or `file:line:column` with [column], or null. A file
 /// under [root] is printed relative to it.
 String? _where(Object? source, {bool column = false, String? root}) {
-  final s = _map(source);
-  final file = _string(s['file']);
+  final s = asJsonMap(source);
+  final file = asString(s['file']);
   final line = s['line'];
   if (file == null || line is! int) return null;
   final col = s['column'];
@@ -371,7 +379,7 @@ String? _where(Object? source, {bool column = false, String? root}) {
 /// null when the note has none. The app sets it with `PINPOINT_ROOT`; the
 /// bridge fills it in when the app did not.
 String? projectRootOf(Map<String, Object?> json) {
-  final root = _string(_map(json['app'])['projectRoot']);
+  final root = asString(asJsonMap(json['app'])['projectRoot']);
   if (root == null || root.trim().isEmpty) return null;
   return root.length > 1 && root.endsWith('/')
       ? root.substring(0, root.length - 1)
@@ -392,13 +400,13 @@ String? enclosingLine(Map<String, Object?> json, {int? max}) {
   final root = projectRootOf(json);
   final items = <String>[];
   String? previous;
-  for (final ancestor in _list(json['ancestors'])) {
+  for (final ancestor in asJsonList(json['ancestors'])) {
     if (max != null && items.length >= max) break;
-    final a = _map(ancestor);
-    final widget = _string(a['widget']);
+    final a = asJsonMap(ancestor);
+    final widget = asString(a['widget']);
     if (widget == null) continue;
-    final source = _map(a['source']);
-    final file = _string(source['file']);
+    final source = asJsonMap(a['source']);
+    final file = asString(source['file']);
     final line = source['line'];
     if (file == null || line is! int) {
       items.add(_line(widget));
@@ -416,7 +424,7 @@ String? enclosingLine(Map<String, Object?> json, {int? max}) {
 /// file relative to the root and printed once per run of rows from one
 /// file: later rows show `Name  :line`. Empty without a subtree.
 List<String> subtreeLines(Map<String, Object?> json) {
-  final subtree = _string(json['subtree']);
+  final subtree = asString(json['subtree']);
   if (subtree == null || subtree.isEmpty) return const <String>[];
   final root = projectRootOf(json);
   final row = RegExp(r'^(\s*)(.*)  (\S.*?):(\d+)( …)?$');
@@ -444,30 +452,15 @@ List<String> subtreeLines(Map<String, Object?> json) {
 String? stateOwnersLine(Map<String, Object?> json) {
   final root = projectRootOf(json);
   final owners = [
-    for (final o in _list(json['stateOwners']))
-      if (_map(o) case final owner
-          when _string(owner['kind']) != null && _string(owner['type']) != null)
-        '${_line(_string(owner['kind'])!)} ${_line(_string(owner['type'])!)}'
+    for (final o in asJsonList(json['stateOwners']))
+      if (asJsonMap(o) case final owner
+          when asString(owner['kind']) != null &&
+              asString(owner['type']) != null)
+        '${_line(asString(owner['kind'])!)} ${_line(asString(owner['type'])!)}'
             '${_where(owner['source'], root: root) == null ? '' : ' (${_where(owner['source'], root: root)})'}',
   ];
   return owners.isEmpty ? null : 'State owners: ${owners.join(', ')}';
 }
-
-Map<String, Object?> _map(Object? value) =>
-    value is Map<String, Object?> ? value : const <String, Object?>{};
-
-List<Object?> _list(Object? value) =>
-    value is List<Object?> ? value : const <Object?>[];
-
-String? _string(Object? value) => value is String ? value : null;
-
-/// [value] as JSON writes it: `96`, not `96.0`.
-String? _number(Object? value) => switch (value) {
-  final int n => '$n',
-  final double n when n.isFinite =>
-    n == n.truncateToDouble() ? '${n.toInt()}' : '$n',
-  _ => null,
-};
 
 /// [text] on one line, so a value can never start a line of its own.
 String _line(String text) => text.replaceAll(RegExp(r'\s*[\r\n]+\s*'), ' ');

@@ -50,10 +50,6 @@ Widget locatedRow(Widget? where, Widget text) {
   );
 }
 
-/// [value] as a list, or an empty one.
-List<Object?> asList(Object? value) =>
-    value is List<Object?> ? value : const <Object?>[];
-
 /// `HH:MM:SS` of [time] in the local zone.
 String formatClock(DateTime time) {
   String two(int n) => n.toString().padLeft(2, '0');

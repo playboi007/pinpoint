@@ -7,6 +7,8 @@
 // the widgets that rebuilt. [StoryBuilder] makes it; this file is the data
 // and its JSON.
 
+import '../model/json_read.dart';
+
 /// The kinds of cause a block has. The label says the rest.
 abstract final class StoryKind {
   static const String tap = 'tap';
@@ -123,12 +125,14 @@ class StoryRow {
     mine: json['mine'] != false,
     count: json['count'] is int ? json['count']! as int : 1,
     instances: [
-      for (final i in _list(json['instances'])) ?StoryInstance.fromJson(i),
+      for (final i in asJsonList(json['instances'])) ?StoryInstance.fromJson(i),
     ],
     instanceCount: json['instanceCount'] is int
         ? json['instanceCount']! as int
         : 0,
-    changes: [for (final c in _list(json['changes'])) ?StoryChange.fromJson(c)],
+    changes: [
+      for (final c in asJsonList(json['changes'])) ?StoryChange.fromJson(c),
+    ],
     file: json['file'] is String ? json['file']! as String : null,
     line: json['line'] is int ? json['line']! as int : null,
     method: json['method'] is String ? json['method']! as String : null,
@@ -241,14 +245,14 @@ class StoryBlock {
   factory StoryBlock.fromJson(Map<String, Object?> json) => StoryBlock(
     id: '${json['id'] ?? ''}',
     at: json['at'] is int ? json['at']! as int : 0,
-    cause: StoryCause.fromJson(_map(json['cause'])),
+    cause: StoryCause.fromJson(asJsonMap(json['cause'])),
     wall: json['wall'] is int ? json['wall']! as int : null,
     rows: [
-      for (final r in _list(json['rows']))
+      for (final r in asJsonList(json['rows']))
         if (r is Map<String, Object?>) StoryRow.fromJson(r),
     ],
     droppedRows: json['droppedRows'] is int ? json['droppedRows']! as int : 0,
-    rebuilt: [for (final r in _list(json['rebuilt'])) '$r'],
+    rebuilt: [for (final r in asJsonList(json['rebuilt'])) '$r'],
     rebuiltCount: json['rebuiltCount'] is int
         ? json['rebuiltCount']! as int
         : 0,
@@ -396,18 +400,18 @@ class Story {
     if (json is! Map<String, Object?>) return const Story();
     return Story(
       blocks: [
-        for (final b in _list(json['blocks']))
+        for (final b in asJsonList(json['blocks']))
           if (b is Map<String, Object?>) StoryBlock.fromJson(b),
       ],
       ends: [
-        for (final e in _list(json['ends']))
+        for (final e in asJsonList(json['ends']))
           if (e is Map<String, Object?>) StoryEnd.fromJson(e),
       ],
-      droppedBlocks: _int(json['droppedBlocks']),
-      hiddenHover: _int(json['hiddenHover']),
-      hiddenControllers: _int(json['hiddenControllers']),
-      hiddenForeign: _int(json['hiddenForeign']),
-      droppedStacks: _int(json['droppedStacks']),
+      droppedBlocks: (asInt(json['droppedBlocks']) ?? 0),
+      hiddenHover: (asInt(json['hiddenHover']) ?? 0),
+      hiddenControllers: (asInt(json['hiddenControllers']) ?? 0),
+      hiddenForeign: (asInt(json['hiddenForeign']) ?? 0),
+      droppedStacks: (asInt(json['droppedStacks']) ?? 0),
       noCauseHint: json['noCauseHint'] is String
           ? json['noCauseHint']! as String
           : null,
@@ -482,11 +486,3 @@ class Story {
     if (!rebuildsRecorded) 'rebuildsRecorded': false,
   };
 }
-
-int _int(Object? v) => v is int ? v : 0;
-
-List<Object?> _list(Object? value) =>
-    value is List<Object?> ? value : const <Object?>[];
-
-Map<String, Object?> _map(Object? value) =>
-    value is Map<String, Object?> ? value : const <String, Object?>{};

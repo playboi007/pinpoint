@@ -6,6 +6,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import '../sink/markdown_formatter.dart';
+import 'json_read.dart';
 import 'note_round.dart';
 
 /// The payload version. The receiver rejects any other value, so a change
@@ -92,7 +93,7 @@ class NoteMessage {
     if (text is! String) return null;
     final from = json['from'];
     return NoteMessage(
-      at: _dateOrNull(json['at']) ?? DateTime.utc(1970),
+      at: asDate(json['at']) ?? DateTime.utc(1970),
       from: from is String ? from : 'agent',
       text: text,
     );
@@ -482,11 +483,11 @@ class Annotation {
   static Annotation? fromJson(Map<String, Object?> json) {
     final id = json['id'];
     if (id is! String) return null;
-    final target = _mapOrEmpty(json['target']);
+    final target = asJsonMap(json['target']);
     final shot = json['screenshot'];
     return Annotation(
       id: id,
-      createdAt: _dateOrNull(json['createdAt']) ?? DateTime.utc(1970),
+      createdAt: asDate(json['createdAt']) ?? DateTime.utc(1970),
       status:
           NoteStatus.byName(json['status']) ??
           (json['schema'] == 1 ? NoteStatus.submitted : NoteStatus.draft),
@@ -494,9 +495,9 @@ class Annotation {
         (i) => i.name == json['intent'],
         orElse: () => AnnotationIntent.improve,
       ),
-      comment: _stringOrNull(json['comment']) ?? '',
-      app: AppInfo._fromJson(_mapOrEmpty(json['app'])),
-      page: PageInfo._fromJson(_mapOrEmpty(json['page'])),
+      comment: asString(json['comment']) ?? '',
+      app: AppInfo._fromJson(asJsonMap(json['app'])),
+      page: PageInfo._fromJson(asJsonMap(json['page'])),
       environment: switch (json['environment']) {
         final Map<String, Object?> env when env.isNotEmpty => env,
         _ => null,
@@ -506,11 +507,11 @@ class Annotation {
         _ => null,
       },
       checks: [
-        for (final check in _listOrEmpty(json['checks']))
+        for (final check in asJsonList(json['checks']))
           if (check is Map<String, Object?> && check['type'] is String) check,
       ],
       tweaks: [
-        for (final tweak in _listOrEmpty(json['tweaks']))
+        for (final tweak in asJsonList(json['tweaks']))
           if (tweak is Map<String, Object?> &&
               tweak['property'] is String &&
               tweak['from'] is String &&
@@ -534,11 +535,10 @@ class Annotation {
           ? NoteAnchor.fromJson(json['anchor']! as Map<String, Object?>)
           : null,
       messages: [
-        for (final m in _listOrEmpty(json['messages']))
-          ?NoteMessage.fromJson(m),
+        for (final m in asJsonList(json['messages'])) ?NoteMessage.fromJson(m),
       ],
       ancestors: [
-        for (final a in _listOrEmpty(json['ancestors']))
+        for (final a in asJsonList(json['ancestors']))
           if (a is Map<String, Object?> && a['widget'] is String)
             AncestorInfo(
               widget: a['widget']! as String,
@@ -547,24 +547,24 @@ class Annotation {
       ],
       // An older note's `frameworkChain` is ignored.
       stateOwners: [
-        for (final o in _listOrEmpty(json['stateOwners']))
+        for (final o in asJsonList(json['stateOwners']))
           ?StateOwnerInfo._fromJson(o),
       ],
       // A schema 10 note has no `rounds`.
       rounds: [
-        for (final r in _listOrEmpty(json['rounds']))
+        for (final r in asJsonList(json['rounds']))
           if (r is Map<String, Object?> && r['n'] is int) r,
       ],
       siblings: SiblingsInfo._fromJson(json['siblings']),
-      subtree: _stringOrNull(json['subtree']),
+      subtree: asString(json['subtree']),
       inherited: json['inherited'] is Map<String, Object?>
           ? InheritedInfo._fromJson(json['inherited']! as Map<String, Object?>)
           : null,
       screenshot: shot is Map<String, Object?>
           ? ScreenshotInfo._fromJson(shot)
           : null,
-      errors: _strings(json['errors']),
-      truncated: _strings(json['truncated']),
+      errors: asStrings(json['errors']),
+      truncated: asStrings(json['truncated']),
     );
   }
 
@@ -616,10 +616,10 @@ class AppInfo {
   });
 
   factory AppInfo._fromJson(Map<String, Object?> json) => AppInfo(
-    buildMode: _stringOrNull(json['buildMode']) ?? 'debug',
-    platform: _stringOrNull(json['platform']) ?? 'web',
-    projectRoot: _stringOrNull(json['projectRoot']),
-    origin: _stringOrNull(json['origin']),
+    buildMode: asString(json['buildMode']) ?? 'debug',
+    platform: asString(json['platform']) ?? 'web',
+    projectRoot: asString(json['projectRoot']),
+    origin: asString(json['origin']),
   );
 
   /// `debug`, `profile` or `release`.
@@ -657,13 +657,13 @@ class PageInfo {
   });
 
   factory PageInfo._fromJson(Map<String, Object?> json) => PageInfo(
-    url: _stringOrNull(json['url']),
-    route: _stringOrNull(json['route']),
+    url: asString(json['url']),
+    route: asString(json['route']),
     viewport: PayloadSize._fromJson(json['viewport']),
-    devicePixelRatio: _doubleOrNull(json['devicePixelRatio']),
-    textScale: _doubleOrNull(json['textScale']),
-    brightness: _stringOrNull(json['brightness']),
-    locale: _stringOrNull(json['locale']),
+    devicePixelRatio: asDouble(json['devicePixelRatio']),
+    textScale: asDouble(json['textScale']),
+    brightness: asString(json['brightness']),
+    locale: asString(json['locale']),
   );
 
   /// The browser's URL on web; null elsewhere. Every query value is masked
@@ -716,22 +716,20 @@ class TargetInfo {
   });
 
   factory TargetInfo._fromJson(Map<String, Object?> json) => TargetInfo(
-    widget: _stringOrNull(json['widget']) ?? '?',
-    description: _stringOrNull(json['description']),
-    key: _stringOrNull(json['key']),
+    widget: asString(json['widget']) ?? '?',
+    description: asString(json['description']),
+    key: asString(json['key']),
     source: SourceRef._fromJson(json['source']),
     sourceUnavailable: json['sourceUnavailable'] == true,
     rect: PayloadRect._fromJson(json['rect']),
-    renderObject: _stringOrNull(json['renderObject']),
-    constraints: _stringOrNull(json['constraints']),
-    parentData: _stringOrNull(json['parentData']),
-    text: _stringOrNull(json['text']),
-    properties: _stringMap(json['properties']),
+    renderObject: asString(json['renderObject']),
+    constraints: asString(json['constraints']),
+    parentData: asString(json['parentData']),
+    text: asString(json['text']),
+    properties: asStringMap(json['properties']),
     sections: {
-      for (final MapEntry(:key, :value) in _mapOrEmpty(
-        json['sections'],
-      ).entries)
-        key: _stringMap(value),
+      for (final MapEntry(:key, :value) in asJsonMap(json['sections']).entries)
+        key: asStringMap(value),
     },
   );
 
@@ -919,7 +917,7 @@ class StateOwnerInfo {
       source: SourceRef._fromJson(json['source']),
       dependencies: [
         // Schema 9 notes have no `dependencies`.
-        for (final d in _listOrEmpty(json['dependencies']))
+        for (final d in asJsonList(json['dependencies']))
           ?DependencyInfo._fromJson(d),
       ],
     );
@@ -1024,10 +1022,10 @@ class SiblingsInfo {
     if (parent is! String) return null;
     return SiblingsInfo(
       parent: parent,
-      index: _intOrNull(json['index']) ?? 0,
-      count: _intOrNull(json['count']) ?? 0,
-      firstIndex: _intOrNull(json['firstIndex']) ?? 0,
-      children: _strings(json['children']),
+      index: asInt(json['index']) ?? 0,
+      count: asInt(json['count']) ?? 0,
+      firstIndex: asInt(json['firstIndex']) ?? 0,
+      children: asStrings(json['children']),
     );
   }
 
@@ -1058,11 +1056,11 @@ class InheritedInfo {
   });
 
   factory InheritedInfo._fromJson(Map<String, Object?> json) => InheritedInfo(
-    themeBrightness: _stringOrNull(json['themeBrightness']),
+    themeBrightness: asString(json['themeBrightness']),
     useMaterial3: json['useMaterial3'] is bool
         ? json['useMaterial3']! as bool
         : null,
-    textDirection: _stringOrNull(json['textDirection']),
+    textDirection: asString(json['textDirection']),
   );
 
   final String? themeBrightness;
@@ -1091,13 +1089,13 @@ class ScreenshotInfo {
   });
 
   factory ScreenshotInfo._fromJson(Map<String, Object?> json) => ScreenshotInfo(
-    file: _stringOrNull(json['file']) ?? '',
-    pixelRatio: _doubleOrNull(json['pixelRatio']) ?? 1,
-    width: _intOrNull(json['width']) ?? 0,
-    height: _intOrNull(json['height']) ?? 0,
+    file: asString(json['file']) ?? '',
+    pixelRatio: asDouble(json['pixelRatio']) ?? 1,
+    width: asInt(json['width']) ?? 0,
+    height: asInt(json['height']) ?? 0,
     crop: PayloadRect._fromJson(json['crop']),
     hasPlatformViews: json['hasPlatformViews'] == true,
-    debugPaint: _strings(json['debugPaint']),
+    debugPaint: asStrings(json['debugPaint']),
     beforeAfter: json['beforeAfter'] == true,
   );
 
@@ -1148,10 +1146,10 @@ class PayloadRect {
 
   static PayloadRect? _fromJson(Object? json) {
     if (json is! Map<String, Object?>) return null;
-    final x = _doubleOrNull(json['x']);
-    final y = _doubleOrNull(json['y']);
-    final w = _doubleOrNull(json['w']);
-    final h = _doubleOrNull(json['h']);
+    final x = asDouble(json['x']);
+    final y = asDouble(json['y']);
+    final w = asDouble(json['w']);
+    final h = asDouble(json['h']);
     if (x == null || y == null || w == null || h == null) return null;
     return PayloadRect(x, y, w, h);
   }
@@ -1175,8 +1173,8 @@ class PayloadSize {
 
   static PayloadSize? _fromJson(Object? json) {
     if (json is! Map<String, Object?>) return null;
-    final width = _doubleOrNull(json['width']);
-    final height = _doubleOrNull(json['height']);
+    final width = asDouble(json['width']);
+    final height = asDouble(json['height']);
     if (width == null || height == null) return null;
     return PayloadSize(width, height);
   }
@@ -1253,14 +1251,14 @@ class NoteAnchor {
   factory NoteAnchor.fromJson(Map<String, Object?> json) {
     final ordinal = json['ordinal'];
     return NoteAnchor(
-      file: _stringOrNull(json['file']),
-      line: _intOrNull(json['line']),
-      column: _intOrNull(json['column']),
-      widget: _stringOrNull(json['widget']),
-      key: _stringOrNull(json['key']),
+      file: asString(json['file']),
+      line: asInt(json['line']),
+      column: asInt(json['column']),
+      widget: asString(json['widget']),
+      key: asString(json['key']),
       ordinal: ordinal is int && ordinal >= 0 ? ordinal : 0,
-      itemIndex: _intOrNull(json['itemIndex']),
-      route: _stringOrNull(json['route']),
+      itemIndex: asInt(json['itemIndex']),
+      route: asString(json['route']),
     );
   }
 
@@ -1353,28 +1351,3 @@ class NoteAnchor {
       '${itemIndex == null ? '' : ', item $itemIndex'}'
       '${ordinal == 0 ? '' : ', #$ordinal'})';
 }
-
-String? _stringOrNull(Object? value) => value is String ? value : null;
-
-int? _intOrNull(Object? value) => value is int ? value : null;
-
-double? _doubleOrNull(Object? value) => value is num ? value.toDouble() : null;
-
-DateTime? _dateOrNull(Object? value) =>
-    value is String ? DateTime.tryParse(value) : null;
-
-Map<String, Object?> _mapOrEmpty(Object? value) =>
-    value is Map<String, Object?> ? value : const <String, Object?>{};
-
-List<Object?> _listOrEmpty(Object? value) =>
-    value is List<Object?> ? value : const <Object?>[];
-
-List<String> _strings(Object? value) => [
-  for (final v in _listOrEmpty(value))
-    if (v is String) v,
-];
-
-Map<String, String> _stringMap(Object? value) => {
-  for (final MapEntry(:key, :value) in _mapOrEmpty(value).entries)
-    if (value is String) key: value,
-};

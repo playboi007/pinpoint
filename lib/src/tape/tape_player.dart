@@ -6,6 +6,7 @@ import 'package:flutter/widgets.dart';
 
 import '../agent/synthetic_input.dart';
 import '../model/annotation.dart' show NoteAnchor;
+import '../model/json_read.dart';
 import '../model/tape.dart';
 import '../model/trace_event.dart';
 import '../overlay/replay_blocker.dart';
@@ -532,7 +533,10 @@ class TapePlayer {
     final data = input.data;
     final phase = data['phase'];
     final recordedId = data['pointer'] is int ? data['pointer']! as int : 0;
-    final recorded = Offset(_num(data['x']), _num(data['y']));
+    final recorded = Offset(
+      (asDouble(data['x']) ?? 0),
+      (asDouble(data['y']) ?? 0),
+    );
     _lastAt[recordedId] = recorded;
     switch (phase) {
       case 'down':
@@ -600,7 +604,10 @@ class TapePlayer {
             device: id,
             kind: PointerDeviceKind.mouse,
             position: recorded,
-            scrollDelta: Offset(_num(data['dx']), _num(data['dy'])),
+            scrollDelta: Offset(
+              (asDouble(data['dx']) ?? 0),
+              (asDouble(data['dy']) ?? 0),
+            ),
           ),
         );
     }
@@ -636,8 +643,6 @@ class TapePlayer {
     }
     return PointerDeviceKind.touch;
   }
-
-  static double _num(Object? value) => value is num ? value.toDouble() : 0;
 
   /// Where a down lands now (step 11): its anchor resolved to the widget
   /// now, at the stored fraction. Without an anchor, the recorded spot.
