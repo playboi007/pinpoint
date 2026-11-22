@@ -3,6 +3,8 @@ import 'dart:math' as math;
 import 'construction_assets.dart';
 import 'construction_boxes.dart';
 
+part 'construction_layout_fit.dart';
+
 /// Where the parts of one construction site go, in CSS pixels, for a widget
 /// of a given size.
 ///
@@ -52,6 +54,37 @@ class ConstructionLayout {
     required this.walkSeconds,
   });
 
+  /// A site with tape and hatching only: no workers fit.
+  ConstructionLayout._bare({
+    required this.width,
+    required this.height,
+    required _Tape tape,
+  }) : workerHeight = 0,
+       planners = 0,
+       hammer = false,
+       cones = false,
+       barrow = false,
+       painter = false,
+       stacker = false,
+       aimed = false,
+       hammerScale = 0,
+       plannerScale = 0,
+       stackerScale = 0,
+       barrowScale = 0,
+       painterScale = 0,
+       doneScale = 0,
+       coneScale = 0,
+       hammerLeft = 0,
+       barrowLeft = 0,
+       barrowRun = 0,
+       stackerLeft = 0,
+       zoneEnd = 0,
+       plannersWidth = 0,
+       tapeHeight = tape.height,
+       tapeFont = tape.font,
+       tapeTop = tape.top,
+       walkSeconds = 4;
+
   /// The layout for a site that covers a widget [widgetWidth] by
   /// [widgetHeight], which is the site's size less the 2 px around it.
   ///
@@ -65,168 +98,129 @@ class ConstructionLayout {
   }) {
     final w = widgetWidth + 2 * overscan;
     final h = widgetHeight + 2 * overscan;
+    final tape = _Tape(w, h);
+    final wh = _workerHeightFor(widgetHeight, w, h, tape.height);
+    final hasWorkers =
+        widgetHeight >= minWorkersHeight && wh >= minWorkerHeight;
+    if (!hasWorkers) {
+      return ConstructionLayout._bare(width: w, height: h, tape: tape);
+    }
 
-    // Tape: a band at the top, as tall as its text needs. The text shrinks
-    // to the width: 14 letters of Roboto Mono, with spacing.
-    final fs = ((w - 12) / 9.6).clamp(5.0, 10.0);
-    // A short widget gets a thinner band, so the workers keep room below.
-    final th = math.min(
-      h,
-      math.min(
-        (fs + 6).roundToDouble(),
-        math.max(10.0, (0.3 * h).roundToDouble()),
-      ),
+    final scales = _Scales(wh, h);
+    final fit = _Fit(w, widgetHeight, scales, boxes);
+    final aim = _aimFor(
+      boxes: boxes,
+      widgetWidth: widgetWidth,
+      widgetHeight: widgetHeight,
+      siteHeight: h,
+      scales: scales,
+      fit: fit,
     );
-    final tapeFont = math.min(fs, math.max(4.0, th - 5));
-    final tapeTop = h >= minWorkersHeight ? 0.0 : (h - th) / 2;
-
-    // 56 px, or half the height on a big widget (at most 110 px), never
-    // over 85% of the height or behind the tape.
-    final cap = (0.5 * widgetHeight).clamp(baseWorkerHeight, maxWorkerHeight);
-    var wh = math.min(cap, 0.85 * widgetHeight);
-    wh = math.min(wh, h - th - 2);
-    // One planner must fit the width as well.
-    wh = math.min(wh, (w - 2 * pad) / _plannerWidth * _plannerHeight);
-    final workers = widgetHeight >= minWorkersHeight && wh >= minWorkerHeight;
-    if (!workers) {
-      return ConstructionLayout._(
-        width: w,
-        height: h,
-        workerHeight: 0,
-        planners: 0,
-        hammer: false,
-        cones: false,
-        barrow: false,
-        painter: false,
-        stacker: false,
-        aimed: false,
-        hammerScale: 0,
-        plannerScale: 0,
-        stackerScale: 0,
-        barrowScale: 0,
-        painterScale: 0,
-        doneScale: 0,
-        coneScale: 0,
-        hammerLeft: 0,
-        barrowLeft: 0,
-        barrowRun: 0,
-        stackerLeft: 0,
-        zoneEnd: 0,
-        plannersWidth: 0,
-        tapeHeight: th,
-        tapeFont: tapeFont,
-        tapeTop: tapeTop,
-        walkSeconds: 4,
-      );
-    }
-
-    // Each character is drawn at its real proportions, scaled by height.
-    // The builder, the planners and the stacker are as tall as wh.
-    final sh = wh / _hammerHeight;
-    final spl = wh / _plannerHeight;
-    // His standing figure, not his whole canvas, is as tall as the others.
-    final ss = wh / (_stackerHeight * ConstructionAssets.stackerFigure);
-    // The wheelbarrow worker is a little smaller than the builder.
-    final sb = 0.8 * wh / _barrowHeight;
-    // The painter, with the ladder, is a little taller.
-    final sp = math.min(wh * 1.1, 0.9 * h) / _painterHeight;
-    final sc = 0.42 * wh / _coneHeight;
-    final sd = math.min(wh * 1.1, 0.92 * h) / _doneHeight;
-    final hw = _hammerWidth * sh;
-    final bw = _barrowWidth * sb;
-    final cw = _coneWidth * sc;
-    final pw = _plannerWidth * spl;
-    final ssw = _stackerWidth * ss;
-
-    // At the right: two planners when they fit, else the one that reads
-    // the blueprint.
-    final two = w >= 2 * pw + 3 * pad;
-    final plannersWidth = two ? 2 * pw + pad : pw;
-    // The work zone ends where the planners start.
-    final zoneEnd = w - pad - plannersWidth - pad;
-
-    // In the zone, from the left: cone, gap, builder, gap, the wheelbarrow's
-    // lane (the stacker at its end), gap, cone. Without room for the cones
-    // and the builder there is no builder: the planners work alone.
-    final edge = pad + cw + pad;
-    final builderFit = zoneEnd >= hw + 2 * edge;
-    final lane = zoneEnd - 2 * edge - hw - pad;
-    final barrowFit = builderFit && lane >= bw + minRun;
-    // The painter needs a wide widget: room for the lane and itself.
-    final pw2 = _painterWidth * sp;
-    final painterFit = barrowFit && lane >= bw + minRun + pw2 + pad;
-    // The stacker needs room for himself at the end of the lane, and a box
-    // in the upper half to work on.
-    final stackerFit =
-        barrowFit &&
-        lane >= bw + minRun + ssw + handoffGap &&
-        boxes.any((b) => ConstructionBoxes.isHigh(b, widgetHeight));
-
-    final laneEnd = zoneEnd - edge;
-    final defaultLeft = barrowFit ? edge : math.max(pad, (zoneEnd - hw) / 2);
-    // The builder moves right, to hit an edge of the biggest box. To the
-    // right he still leaves room for the wheelbarrow's shortest walk and
-    // the stacker.
-    final reserve = barrowFit
-        ? bw + minRun + pad + (stackerFit ? ssw + handoffGap : 0)
-        : 0.0;
-    final hammerHi = laneEnd - reserve - hw;
-    final aim = builderFit
-        ? _aim(
-            boxes: boxes,
-            widgetWidth: widgetWidth,
-            widgetHeight: widgetHeight,
-            siteHeight: h,
-            scale: sh,
-            width: hw,
-            low: edge,
-            high: hammerHi,
-            fallback: defaultLeft,
-          )
-        : null;
-    final hammerLeft = aim ?? defaultLeft;
-
-    final laneStart = hammerLeft + hw + pad;
-    var barrowLeft = laneStart;
-    var run = math.max(0.0, laneEnd - laneStart - bw);
-    var stackerLeft = 0.0;
-    if (stackerFit) {
-      // The stacker stands at the end of the lane; the wheelbarrow walks
-      // up to him, a short way only: one trip a few seconds long.
-      stackerLeft = laneEnd - ssw;
-      final endLeft = stackerLeft - handoffGap - bw;
-      barrowLeft = math.max(laneStart, endLeft - maxHandoffRun);
-      run = math.max(0.0, endLeft - barrowLeft);
-    }
+    final hammerLeft = aim ?? fit.defaultLeft;
+    final (:barrowLeft, :run, :stackerLeft) = _lane(scales, fit, hammerLeft);
     return ConstructionLayout._(
       width: w,
       height: h,
       workerHeight: wh,
-      planners: two ? 2 : 1,
-      hammer: builderFit,
-      cones: builderFit,
-      barrow: barrowFit,
-      painter: painterFit,
-      stacker: stackerFit,
+      planners: fit.two ? 2 : 1,
+      hammer: fit.builderFit,
+      cones: fit.builderFit,
+      barrow: fit.barrowFit,
+      painter: fit.painterFit,
+      stacker: fit.stackerFit,
       aimed: aim != null,
-      hammerScale: sh,
-      plannerScale: spl,
-      stackerScale: ss,
-      barrowScale: sb,
-      painterScale: sp,
-      doneScale: sd,
-      coneScale: sc,
+      hammerScale: scales.hammer,
+      plannerScale: scales.planner,
+      stackerScale: scales.stacker,
+      barrowScale: scales.barrow,
+      painterScale: scales.painter,
+      doneScale: scales.done,
+      coneScale: scales.cone,
       hammerLeft: hammerLeft,
       barrowLeft: barrowLeft,
       barrowRun: run,
       stackerLeft: stackerLeft,
-      zoneEnd: zoneEnd,
-      plannersWidth: plannersWidth,
-      tapeHeight: th,
-      tapeFont: tapeFont,
-      tapeTop: tapeTop,
+      zoneEnd: fit.zoneEnd,
+      plannersWidth: fit.plannersWidth,
+      tapeHeight: tape.height,
+      tapeFont: tape.font,
+      tapeTop: tape.top,
       // About 30 px a second, there and back, with a pause at each end.
       walkSeconds: (2 * run / 30 / 0.92).clamp(4.0, 40.0),
+    );
+  }
+
+  /// A worker's height: 56 px, or half the height on a big widget (at most
+  /// 110 px), never over 85% of the height or behind the tape, and one
+  /// planner must fit the width.
+  static double _workerHeightFor(
+    double widgetHeight,
+    double w,
+    double h,
+    double tapeHeight,
+  ) {
+    final cap = (0.5 * widgetHeight).clamp(baseWorkerHeight, maxWorkerHeight);
+    var wh = math.min(cap, 0.85 * widgetHeight);
+    wh = math.min(wh, h - tapeHeight - 2);
+    return math.min(wh, (w - 2 * pad) / _plannerWidth * _plannerHeight);
+  }
+
+  /// The builder moves right, to hit an edge of the biggest box. To the
+  /// right he still leaves room for the wheelbarrow's shortest walk and the
+  /// stacker.
+  static double? _aimFor({
+    required List<ConstructionBox> boxes,
+    required double widgetWidth,
+    required double widgetHeight,
+    required double siteHeight,
+    required _Scales scales,
+    required _Fit fit,
+  }) {
+    if (!fit.builderFit) return null;
+    final reserve = fit.barrowFit
+        ? scales.barrowWidth +
+              minRun +
+              pad +
+              (fit.stackerFit ? scales.stackerWidth + handoffGap : 0)
+        : 0.0;
+    return _aim(
+      boxes: boxes,
+      widgetWidth: widgetWidth,
+      widgetHeight: widgetHeight,
+      siteHeight: siteHeight,
+      scale: scales.hammer,
+      width: scales.hammerWidth,
+      low: fit.edge,
+      high: fit.laneEnd - reserve - scales.hammerWidth,
+      fallback: fit.defaultLeft,
+    );
+  }
+
+  /// Where the wheelbarrow starts, how far it runs, and where the stacker
+  /// stands, for a builder at [hammerLeft].
+  static ({double barrowLeft, double run, double stackerLeft}) _lane(
+    _Scales scales,
+    _Fit fit,
+    double hammerLeft,
+  ) {
+    final laneStart = hammerLeft + scales.hammerWidth + pad;
+    final bw = scales.barrowWidth;
+    if (!fit.stackerFit) {
+      return (
+        barrowLeft: laneStart,
+        run: math.max(0.0, fit.laneEnd - laneStart - bw),
+        stackerLeft: 0.0,
+      );
+    }
+    // The stacker stands at the end of the lane; the wheelbarrow walks up to
+    // him, a short way only: one trip a few seconds long.
+    final stackerLeft = fit.laneEnd - scales.stackerWidth;
+    final endLeft = stackerLeft - handoffGap - bw;
+    final barrowLeft = math.max(laneStart, endLeft - maxHandoffRun);
+    return (
+      barrowLeft: barrowLeft,
+      run: math.max(0.0, endLeft - barrowLeft),
+      stackerLeft: stackerLeft,
     );
   }
 
