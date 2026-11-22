@@ -5,140 +5,175 @@ import '../widget_info.dart';
 /// Text content and style of a `RenderParagraph`.
 ///
 /// The style values are editable through the root span: a new root
-/// `TextSpan` with the same text and children and a changed style (plan
-/// Milestone 11, step 2). A child span that sets the value itself keeps it,
-/// so such a value is read-only here: a change to the root would not show.
+/// `TextSpan` with the same text and children and a changed style. A child
+/// span that sets the value itself keeps it, so such a value is read-only
+/// here: a change to the root would not show.
 InfoSection? paragraphSection(RenderObject renderObject) {
   if (renderObject is! RenderParagraph) return null;
-  final span = renderObject.text;
-  final root = span is TextSpan ? span : null;
-  final rootStyle = span.style;
-  final style = _styleOfFirstText(span, null) ?? rootStyle;
-  final fontSize = style?.fontSize ?? _defaultFontSize;
-  final weight = style?.fontWeight ?? FontWeight.normal;
-  final color = style?.color;
-
-  /// Applies [change] to the root span's style, or null when a child span
-  /// sets [shown] itself or the root is not a `TextSpan`.
-  void Function(T)? styled<T>(
-    Object? shown,
-    Object? own,
-    TextStyle Function(TextStyle style, T value) change,
-  ) {
-    if (root == null) return null;
-    final fromRoot = own == shown || (own == null && style == rootStyle);
-    if (!fromRoot) return null;
-    return (value) => renderObject.text = _withRootStyle(
-      root,
-      change(root.style ?? const TextStyle(), value),
-    );
-  }
-
-  const fromChild = 'A child span sets this; change it in source.';
-  final sizeApply = styled<double>(
-    style?.fontSize,
-    rootStyle?.fontSize,
-    (s, v) => s.copyWith(fontSize: v),
-  );
-  final weightApply = styled<FontWeight>(
-    style?.fontWeight,
-    rootStyle?.fontWeight,
-    (s, v) => s.copyWith(fontWeight: v),
-  );
-  final colorApply = styled<Color>(
-    color,
-    rootStyle?.color,
-    (s, v) => s.copyWith(color: v),
-  );
-  final heightApply = styled<double?>(
-    style?.height,
-    rootStyle?.height,
-    (s, v) => v == null ? _withoutHeight(s) : s.copyWith(height: v),
-  );
-  final spacingApply = styled<double?>(
-    style?.letterSpacing,
-    rootStyle?.letterSpacing,
-    (s, v) =>
-        v == null ? _withoutLetterSpacing(s) : s.copyWith(letterSpacing: v),
-  );
+  final text = _ParagraphText(renderObject);
+  final plain = renderObject.text.toPlainText();
   return InfoSection(
     title: 'Text',
     properties: [
       InfoProperty<String>(
         name: 'text',
-        value: span.toPlainText(),
-        label: truncateText(span.toPlainText()),
+        value: plain,
+        label: truncateText(plain),
       ),
-      InfoProperty<double>(
-        name: 'fontSize',
-        value: fontSize,
-        label: fontSize.toStringAsFixed(1),
-        apply: sizeApply,
-        editor: const NumberEditor(min: 1, max: 400),
-        note: sizeApply == null ? fromChild : null,
-      ),
-      InfoProperty<FontWeight>(
-        name: 'fontWeight',
-        value: weight,
-        label: weightLabel(weight),
-        apply: weightApply,
-        editor: const ChoiceEditor<FontWeight>(FontWeight.values, weightLabel),
-        note: weightApply == null ? fromChild : null,
-      ),
-      if (color != null)
-        InfoProperty<Color>(
-          name: 'color',
-          value: color,
-          label: formatColor(color),
-          apply: colorApply,
-          editor: const ColorEditor(),
-          note: colorApply == null ? fromChild : null,
-        ),
-      InfoProperty<double?>(
-        name: 'height',
-        value: style?.height,
-        label: _orNormal(style?.height),
-        apply: heightApply,
-        editor: const NumberEditor(
-          min: 0.1,
-          max: 10,
-          step: 0.1,
-          nullable: true,
-        ),
-        note: heightApply == null ? fromChild : null,
-      ),
-      InfoProperty<double?>(
-        name: 'letterSpacing',
-        value: style?.letterSpacing,
-        label: _orNormal(style?.letterSpacing),
-        apply: spacingApply,
-        editor: const NumberEditor(step: 0.5, nullable: true),
-        note: spacingApply == null ? fromChild : null,
-      ),
-      InfoProperty<TextAlign>(
-        name: 'textAlign',
-        value: renderObject.textAlign,
-        label: renderObject.textAlign.name,
-        apply: (v) => renderObject.textAlign = v,
-        editor: const ChoiceEditor<TextAlign>(TextAlign.values, _name),
-      ),
-      InfoProperty<int?>(
-        name: 'maxLines',
-        value: renderObject.maxLines,
-        label: renderObject.maxLines?.toString() ?? 'none',
-        apply: (v) => renderObject.maxLines = v,
-        editor: const NumberEditor(min: 1, integer: true, nullable: true),
-      ),
-      InfoProperty<TextOverflow>(
-        name: 'overflow',
-        value: renderObject.overflow,
-        label: renderObject.overflow.name,
-        apply: (v) => renderObject.overflow = v,
-        editor: const ChoiceEditor<TextOverflow>(TextOverflow.values, _name),
-      ),
+      text.fontSize(),
+      text.fontWeight(),
+      if (text.style?.color case final color?) text.color(color),
+      text.height(),
+      text.letterSpacing(),
+      ..._layoutProperties(renderObject),
     ],
   );
 }
+
+const _fromChild = 'A child span sets this; change it in source.';
+
+/// The style of a paragraph and the edits of it that reach the root span.
+class _ParagraphText {
+  _ParagraphText(this.paragraph)
+    : root = switch (paragraph.text) {
+        final TextSpan span => span,
+        _ => null,
+      },
+      rootStyle = paragraph.text.style,
+      style = _styleOfFirstText(paragraph.text, null) ?? paragraph.text.style;
+
+  final RenderParagraph paragraph;
+  final TextSpan? root;
+  final TextStyle? rootStyle;
+
+  /// The style the first visible text is drawn with.
+  final TextStyle? style;
+
+  /// Applies a change to the root span's style, or null when a child span
+  /// sets [shown] itself or the root is not a `TextSpan`.
+  void Function(T)? _styled<T>(
+    Object? shown,
+    Object? own,
+    TextStyle Function(TextStyle style, T value) change,
+  ) {
+    final root = this.root;
+    if (root == null) return null;
+    final fromRoot = own == shown || (own == null && style == rootStyle);
+    if (!fromRoot) return null;
+    return (value) => paragraph.text = _withRootStyle(
+      root,
+      change(root.style ?? const TextStyle(), value),
+    );
+  }
+
+  InfoProperty<double> fontSize() {
+    final size = style?.fontSize ?? _defaultFontSize;
+    final apply = _styled<double>(
+      style?.fontSize,
+      rootStyle?.fontSize,
+      (s, v) => s.copyWith(fontSize: v),
+    );
+    return InfoProperty<double>(
+      name: 'fontSize',
+      value: size,
+      label: size.toStringAsFixed(1),
+      apply: apply,
+      editor: const NumberEditor(min: 1, max: 400),
+      note: apply == null ? _fromChild : null,
+    );
+  }
+
+  InfoProperty<FontWeight> fontWeight() {
+    final weight = style?.fontWeight ?? FontWeight.normal;
+    final apply = _styled<FontWeight>(
+      style?.fontWeight,
+      rootStyle?.fontWeight,
+      (s, v) => s.copyWith(fontWeight: v),
+    );
+    return InfoProperty<FontWeight>(
+      name: 'fontWeight',
+      value: weight,
+      label: weightLabel(weight),
+      apply: apply,
+      editor: const ChoiceEditor<FontWeight>(FontWeight.values, weightLabel),
+      note: apply == null ? _fromChild : null,
+    );
+  }
+
+  InfoProperty<Color> color(Color color) {
+    final apply = _styled<Color>(
+      color,
+      rootStyle?.color,
+      (s, v) => s.copyWith(color: v),
+    );
+    return InfoProperty<Color>(
+      name: 'color',
+      value: color,
+      label: formatColor(color),
+      apply: apply,
+      editor: const ColorEditor(),
+      note: apply == null ? _fromChild : null,
+    );
+  }
+
+  InfoProperty<double?> height() {
+    final apply = _styled<double?>(
+      style?.height,
+      rootStyle?.height,
+      (s, v) => v == null ? _withoutHeight(s) : s.copyWith(height: v),
+    );
+    return InfoProperty<double?>(
+      name: 'height',
+      value: style?.height,
+      label: _orNormal(style?.height),
+      apply: apply,
+      editor: const NumberEditor(min: 0.1, max: 10, step: 0.1, nullable: true),
+      note: apply == null ? _fromChild : null,
+    );
+  }
+
+  InfoProperty<double?> letterSpacing() {
+    final apply = _styled<double?>(
+      style?.letterSpacing,
+      rootStyle?.letterSpacing,
+      (s, v) =>
+          v == null ? _withoutLetterSpacing(s) : s.copyWith(letterSpacing: v),
+    );
+    return InfoProperty<double?>(
+      name: 'letterSpacing',
+      value: style?.letterSpacing,
+      label: _orNormal(style?.letterSpacing),
+      apply: apply,
+      editor: const NumberEditor(step: 0.5, nullable: true),
+      note: apply == null ? _fromChild : null,
+    );
+  }
+}
+
+/// Alignment, line limit and overflow: set on the render object itself.
+List<InfoProperty<Object?>> _layoutProperties(RenderParagraph paragraph) => [
+  InfoProperty<TextAlign>(
+    name: 'textAlign',
+    value: paragraph.textAlign,
+    label: paragraph.textAlign.name,
+    apply: (v) => paragraph.textAlign = v,
+    editor: const ChoiceEditor<TextAlign>(TextAlign.values, _name),
+  ),
+  InfoProperty<int?>(
+    name: 'maxLines',
+    value: paragraph.maxLines,
+    label: paragraph.maxLines?.toString() ?? 'none',
+    apply: (v) => paragraph.maxLines = v,
+    editor: const NumberEditor(min: 1, integer: true, nullable: true),
+  ),
+  InfoProperty<TextOverflow>(
+    name: 'overflow',
+    value: paragraph.overflow,
+    label: paragraph.overflow.name,
+    apply: (v) => paragraph.overflow = v,
+    editor: const ChoiceEditor<TextOverflow>(TextOverflow.values, _name),
+  ),
+];
 
 String _name(Enum value) => value.name;
 

@@ -67,7 +67,7 @@ class RenderSearchResult {
 /// events: padding, a bare `SizedBox`, `IgnorePointer` children, decorative
 /// boxes. Those are what people want to comment on.
 abstract final class RenderSearch {
-  /// Default cap on render objects visited per walk (engineering rule 4).
+  /// Default cap on render objects visited per walk.
   static const int defaultMaxNodes = 20000;
 
   /// Default cap on depth below the root.
@@ -115,7 +115,7 @@ abstract final class RenderSearch {
   /// Many wrappers share one rect (`Padding` inside `Align` inside
   /// `SizedBox`), so area ties are the norm and depth decides most picks.
   /// Deepest first also keeps every wrapper in the picked widget's ancestor
-  /// chain for Milestone 3. Later siblings paint on top, so on an area and
+  /// chain. Later siblings paint on top, so on an area and
   /// depth tie the later one wins. `List.sort` is not stable, so every key is
   /// in the comparator.
   static int compare(RenderCandidate a, RenderCandidate b) {
@@ -138,7 +138,7 @@ abstract final class RenderSearch {
   /// The same walk as [find], without a point: offstage children (routes
   /// beneath an opaque route, hidden `IndexedStack` children) are skipped,
   /// and so is everything a clip hides (list items scrolled out of view).
-  /// Bounded and guarded like every walk (engineering rule 4): a node whose
+  /// Bounded and guarded like every walk: a node whose
   /// read throws, or a [visit] that throws, skips that node only.
   ///
   /// With [includeRoot], [root] is visited too: a check on one widget's
@@ -184,8 +184,7 @@ abstract final class RenderSearch {
   /// With a what-if viewport the boundary is smaller than the screen. A
   /// pointer outside the viewport frame is over nothing, even where an
   /// app widget overflows its boundary (the frame clips it): the picker
-  /// and the wheel passthrough refuse it, and Milestone 12's synthetic
-  /// taps must too.
+  /// and the wheel passthrough refuse it, and synthetic taps must too.
   static bool isOnApp(RenderObject root, Offset globalPosition) =>
       globalRectOf(root)?.contains(globalPosition) ?? false;
 
@@ -210,8 +209,7 @@ abstract final class RenderSearch {
   /// beneath an opaque route, a hidden `IndexedStack` child, `Offstage`),
   /// clipped away, or not laid out.
   ///
-  /// It walks up to the root once; bounded like every walk (engineering
-  /// rule 4).
+  /// It walks up to the root once; bounded like every walk.
   static Rect? visibleRectOf(RenderObject renderObject, {int maxDepth = 512}) {
     var visible = globalRectOf(renderObject);
     if (visible == null) return null;
@@ -329,53 +327,68 @@ class _VisibleWalk {
       return;
     }
     visited++;
+    final children = _read(node, transform, clip, depth);
+    if (children == null) return;
+    for (final value in children) {
+      final step = _step(node, value, transform, clip);
+      if (step != null) visit(value, step.transform, step.clip, depth + 1);
+    }
+  }
 
-    final List<RenderObject> children;
+  /// Reports [node] when it shows, then lists its on-stage children. Null
+  /// when the node cannot be read.
+  List<RenderObject>? _read(
+    RenderObject node,
+    Matrix4 transform,
+    Rect clip,
+    int depth,
+  ) {
     try {
-      if (!node.attached) return;
-      if (depth > 0 || includeRoot) {
-        final rect = MatrixUtils.transformRect(transform, node.paintBounds);
-        if (rect.isFinite) {
-          final visible = rect.intersect(clip);
-          // A zero-size box (a bare SizedBox.shrink) is on screen too.
-          if (visible.width >= 0 && visible.height >= 0) {
-            try {
-              onVisit(node, rect, visible);
-            } catch (_) {
-              errors++;
-            }
-          }
-        }
-      }
-      children = _onstageChildren(node);
+      if (!node.attached) return null;
+      if (depth > 0 || includeRoot) _report(node, transform, clip);
+      return _onstageChildren(node);
     } catch (_) {
       errors++;
-      return;
+      return null;
     }
+  }
 
-    for (final value in children) {
-      final Matrix4 childTransform;
+  void _report(RenderObject node, Matrix4 transform, Rect clip) {
+    final rect = MatrixUtils.transformRect(transform, node.paintBounds);
+    if (!rect.isFinite) return;
+    final visible = rect.intersect(clip);
+    // A zero-size box (a bare SizedBox.shrink) is on screen too.
+    if (visible.width < 0 || visible.height < 0) return;
+    try {
+      onVisit(node, rect, visible);
+    } catch (_) {
+      errors++;
+    }
+  }
+
+  /// The transform and clip of [child], or null when nothing beneath it is
+  /// on screen.
+  ({Matrix4 transform, Rect clip})? _step(
+    RenderObject node,
+    RenderObject child,
+    Matrix4 transform,
+    Rect clip,
+  ) {
+    try {
       var childClip = clip;
-      try {
-        final local = node.describeApproximatePaintClip(value);
-        if (local != null) {
-          childClip = clip.intersect(
-            MatrixUtils.transformRect(transform, local),
-          );
-          // Everything beneath is clipped away.
-          if (childClip.width <= 0 || childClip.height <= 0) continue;
-        }
-        childTransform = transform.clone();
-        if (node is! RenderView) {
-          node.applyPaintTransform(value, childTransform);
-        }
-        // A singular transform (scale 0): nothing beneath is on screen.
-        if (Matrix4.tryInvert(childTransform) == null) continue;
-      } catch (_) {
-        errors++;
-        continue;
+      if (node.describeApproximatePaintClip(child) case final local?) {
+        childClip = clip.intersect(MatrixUtils.transformRect(transform, local));
+        // Everything beneath is clipped away.
+        if (childClip.width <= 0 || childClip.height <= 0) return null;
       }
-      visit(value, childTransform, childClip, depth + 1);
+      final childTransform = transform.clone();
+      if (node is! RenderView) node.applyPaintTransform(child, childTransform);
+      // A singular transform (scale 0): nothing beneath is on screen.
+      if (Matrix4.tryInvert(childTransform) == null) return null;
+      return (transform: childTransform, clip: childClip);
+    } catch (_) {
+      errors++;
+      return null;
     }
   }
 }
@@ -403,61 +416,77 @@ class _Walk {
       return;
     }
     visited++;
+    final read = _read(node, transform, depth);
+    if (read == null) return;
+    for (final value in read.children) {
+      final childTransform = _step(node, value, transform, read.local);
+      if (childTransform != null) visit(value, childTransform, depth + 1);
+    }
+  }
 
-    final Offset local;
-    final List<RenderObject> children;
-    // Each node's read is guarded (engineering rule 4). A render object not
-    // laid out yet throws on `paintBounds`; a custom one may throw anywhere.
+  /// Collects [node] when the point is inside it, then lists its on-stage
+  /// children. Each node's read is guarded: a render object not laid out yet
+  /// throws on `paintBounds`, and a custom one may throw anywhere. Null when
+  /// the node cannot be read or nothing beneath it is on screen.
+  ({Offset local, List<RenderObject> children})? _read(
+    RenderObject node,
+    Matrix4 transform,
+    int depth,
+  ) {
     try {
-      if (!node.attached) return;
+      if (!node.attached) return null;
       // A singular transform (scale 0, mid-animation) does not throw in
       // `transformRect` (docs/api-notes.md, item 4): the rect can come out
       // non-finite. Nothing beneath it is on screen, so skip the subtree.
       final inverse = Matrix4.tryInvert(transform);
-      if (inverse == null) return;
+      if (inverse == null) return null;
       // The point test runs in the node's own space, so a rotated widget is
       // hit only inside its real shape, not its whole bounding rect.
-      local = MatrixUtils.transformPoint(inverse, position);
-      if (depth > 0) {
-        final bounds = node.paintBounds;
-        if (bounds.contains(local)) {
-          final rect = MatrixUtils.transformRect(transform, bounds);
-          if (rect.isFinite && !rect.isEmpty) {
-            hits.add(
-              RenderCandidate(
-                renderObject: node,
-                globalRect: rect,
-                depth: depth,
-                order: _order++,
-              ),
-            );
-          }
-        }
-      }
-      // `debugDescribeChildren()` allocates a diagnostics node per child. If
-      // the walk is over budget, replace this first, but the replacement
-      // must still skip offstage children (see [_onstageChildren]).
-      children = _onstageChildren(node);
+      final local = MatrixUtils.transformPoint(inverse, position);
+      if (depth > 0) _collect(node, transform, local, depth);
+      // `debugDescribeChildren()` allocates a diagnostics node per child, and
+      // the replacement must still skip offstage children.
+      return (local: local, children: _onstageChildren(node));
     } catch (_) {
       errors++;
-      return;
+      return null;
     }
+  }
 
-    for (final value in children) {
-      final Matrix4 childTransform;
-      try {
-        // Prune only on clips, never on the parent's own bounds: children can
-        // overflow or be translated outside their parent. A `Row` or `Stack`
-        // reports a clip only while it overflows.
-        final clip = node.describeApproximatePaintClip(value);
-        if (clip != null && !clip.contains(local)) continue;
-        childTransform = transform.clone();
-        node.applyPaintTransform(value, childTransform);
-      } catch (_) {
-        errors++;
-        continue;
-      }
-      visit(value, childTransform, depth + 1);
+  void _collect(RenderObject node, Matrix4 transform, Offset local, int depth) {
+    final bounds = node.paintBounds;
+    if (!bounds.contains(local)) return;
+    final rect = MatrixUtils.transformRect(transform, bounds);
+    if (!rect.isFinite || rect.isEmpty) return;
+    hits.add(
+      RenderCandidate(
+        renderObject: node,
+        globalRect: rect,
+        depth: depth,
+        order: _order++,
+      ),
+    );
+  }
+
+  /// The transform of [child], or null when its clip leaves out the point.
+  /// Prune only on clips, never on the parent's own bounds: children can
+  /// overflow or be translated outside their parent. A `Row` or `Stack`
+  /// reports a clip only while it overflows.
+  Matrix4? _step(
+    RenderObject node,
+    RenderObject child,
+    Matrix4 transform,
+    Offset local,
+  ) {
+    try {
+      final clip = node.describeApproximatePaintClip(child);
+      if (clip != null && !clip.contains(local)) return null;
+      final childTransform = transform.clone();
+      node.applyPaintTransform(child, childTransform);
+      return childTransform;
+    } catch (_) {
+      errors++;
+      return null;
     }
   }
 }

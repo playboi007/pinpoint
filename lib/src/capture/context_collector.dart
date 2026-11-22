@@ -19,10 +19,10 @@ import 'subtree_outline.dart';
 /// Each payload field has its own collector. One that throws records the
 /// field's name in [Annotation.errors] and leaves the field empty, so the
 /// note is still sent. Each field is capped as it is read, and the whole
-/// note is then cut to [maxPayloadBytes] (engineering rule 9).
+/// note is then cut to [maxPayloadBytes].
 ///
-/// Nothing here subscribes an app element to an inherited widget
-/// (engineering rule 3): reads go through `getInheritedWidgetOfExactType`
+/// Nothing here subscribes an app element to an inherited widget: reads go
+/// through `getInheritedWidgetOfExactType`
 /// and `findAncestorWidgetOfExactType`, never `.of(element)`. The route
 /// name is the one exception; see [_routeOf].
 class ContextCollector {
@@ -94,8 +94,7 @@ class ContextCollector {
   @visibleForTesting
   static Set<String> debugFailFields = const <String>{};
 
-  /// How long the last [collect] took. Logged in debug when over a frame
-  /// (engineering rule 4).
+  /// How long the last [collect] took. Logged in debug when over a frame.
   Duration? lastElapsed;
 
   /// The note for [selection], with [comment] and [intent].
@@ -113,13 +112,34 @@ class ContextCollector {
     Map<String, Object?>? trace,
   }) {
     final watch = Stopwatch()..start();
+    final note = _noteFor(
+      selection,
+      comment,
+      intent,
+      context: context,
+      environment: environment,
+      trace: trace,
+    );
+    lastElapsed = watch.elapsed;
+    assert(_logIfSlow(note, watch));
+    return note;
+  }
+
+  Annotation _noteFor(
+    PickResult selection,
+    String comment,
+    AnnotationIntent intent, {
+    required BuildContext context,
+    Map<String, Object?>? environment,
+    Map<String, Object?>? trace,
+  }) {
     final fields = _Fields();
     final field = fields.read;
     final paths = selection.chain.resolver.paths;
     final now = _clock();
     final page =
         field('page', () => _page(context, selection)) ?? const PageInfo();
-    final note = Annotation(
+    return Annotation(
       id: annotationId(now, _random),
       createdAt: now,
       intent: intent,
@@ -157,17 +177,16 @@ class ContextCollector {
       trace: trace,
       errors: fields.errors,
     ).fitToBudget();
-    lastElapsed = watch.elapsed;
-    assert(() {
-      if (watch.elapsedMilliseconds > 16) {
-        debugPrint(
-          'pinpoint: collecting ${note.id} took '
-          '${watch.elapsedMilliseconds} ms.',
-        );
-      }
-      return true;
-    }());
-    return note;
+  }
+
+  static bool _logIfSlow(Annotation note, Stopwatch watch) {
+    if (watch.elapsedMilliseconds > 16) {
+      debugPrint(
+        'pinpoint: collecting ${note.id} took '
+        '${watch.elapsedMilliseconds} ms.',
+      );
+    }
+    return true;
   }
 
   /// The page's origin on web, for example `http://localhost:5000`.
@@ -213,7 +232,7 @@ class ContextCollector {
     final url = _pageUrl();
     return PageInfo(
       // Every query value is masked: the page URL often carries a session
-      // token (engineering rule 9: no secret leaves the app).
+      // token: no secret leaves the app.
       url: url == null
           ? null
           : clipText(const TraceRedact().pageUrl(url.toString()), maxShortText),
@@ -232,7 +251,7 @@ class ContextCollector {
 
   /// The name of the route the selection is in, or null.
   ///
-  /// The one accepted exception to engineering rule 3: no public lookup
+  /// The one exception to "never subscribe an app element": no public lookup
   /// finds a route without depending on it. It is read on the element that
   /// owns the picked render object, which is not a widget the app's author
   /// wrote a build method for, and through the settings aspect only, so it
@@ -260,7 +279,7 @@ class ContextCollector {
 
   /// The name of the route [owner] is in, or null. [owner] owns a render
   /// object, so it is never an inherited element (see [_routeOf] for why
-  /// that matters, and for the exception to engineering rule 3 this is).
+  /// that matters, and for the exception this is).
   static String? routeNameOf(RenderObjectElement owner) {
     try {
       if (!owner.mounted) return null;
@@ -285,8 +304,7 @@ class ContextCollector {
   /// shows, so the panel and the note never disagree.
   ///
   /// Text from an obscured field never leaves: its own text is replaced,
-  /// and any other value that contains it is masked whole (engineering
-  /// rule 9). Masking cannot fail on its own; if the scan for obscured
+  /// and any other value that contains it is masked whole. Masking cannot fail on its own; if the scan for obscured
   /// fields throws, the whole target is left empty.
   static TargetInfo _target(
     PickResult selection,
@@ -441,8 +459,8 @@ class ContextCollector {
     return open < 0 ? name : name.substring(0, open);
   }
 
-  /// The objects that hold state for the target, nearest first (PLAN-v3
-  /// Milestone 19, step 4), at most [maxStateOwners]:
+  /// The objects that hold state for the target, nearest first, at most
+  /// [maxStateOwners]:
   ///
   /// - a `StatefulElement` whose widget the project made, and whose `State`
   ///   the project wrote: `state`, typed by its `State` class. The first
@@ -476,7 +494,7 @@ class ContextCollector {
       if (element is StatefulElement || element is StatelessElement) {
         // A `State` the project wrote (`state`), or a stateless widget the
         // project wrote that reads a state object (`reader`), with what
-        // it reads (Milestone 21, step 1).
+        // it reads.
         final entry = chain[i];
         if (!entry.isLocal) continue;
         final reader = readerOf(element, resolver);
