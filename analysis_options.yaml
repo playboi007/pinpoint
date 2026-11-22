@@ -30,3 +30,9 @@ linter:
     - prefer_final_locals
     - unawaited_futures
     - unnecessary_lambdas
+    - avoid_bool_literals_in_conditional_expressions
+    - prefer_asserts_in_initializer_lists
+    - prefer_void_to_null
+    - sort_unnamed_constructors_first
+    - unnecessary_breaks
+    - use_truncating_division
