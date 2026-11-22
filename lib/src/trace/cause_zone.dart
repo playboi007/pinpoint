@@ -1,4 +1,4 @@
-// Plain Dart: no `dart:ui` and no `package:flutter` (PLAN-v2 rule 13), so
+// Plain Dart: no `dart:ui` and no `package:flutter`, so
 // the zone is tested with real async and no widget tree. `PinPoint.run`
 // (probe.dart) gives it the Flutter parts: which argument is a pointer
 // packet or a frame, and when the app is ready.
@@ -8,7 +8,8 @@ import 'dart:async';
 /// The zone value that holds the [TraceCause] of the running work.
 const Symbol causeKey = #pinpointCause;
 
-/// What started a cause (PLAN-v2 Milestone 14, step 5).
+/// What started a cause. The kind stays a String: an `other` cause takes the
+/// kind of its first input event (`text`, for example), and tests pin it.
 abstract final class CauseKind {
   /// One pointer packet from the engine.
   static const String pointer = 'pointer';
@@ -29,7 +30,7 @@ abstract final class CauseKind {
   /// message, a DOM callback.
   static const String other = 'other';
 
-  /// Pinpoint's own work (the long poll). Never on an event (rule 14).
+  /// Pinpoint's own work (the long poll). Never on an event.
   static const String pinpoint = 'pinpoint';
 }
 
@@ -40,8 +41,7 @@ class TraceCause {
   /// Never reused. 0 is [CauseZone.pinpoint].
   final int id;
 
-  /// See [CauseKind]. An `other` cause takes the kind of its first input
-  /// event (`key`, `text`, `message`).
+  /// An `other` cause takes the kind of its first input event.
   String kind;
 
   /// When it started, on [CauseZone.clockMs].
@@ -58,8 +58,7 @@ class TraceCause {
   int timers = 0;
 
   /// For a frame: the causes that ran since the frame before it, oldest
-  /// first ("near" links, PLAN-v2 Milestone 14, step 9). One of them made
-  /// this frame dirty.
+  /// first ("near" links). One of them made this frame dirty.
   List<int> after = const <int>[];
 
   /// Pinpoint's own work.
@@ -75,7 +74,7 @@ class TraceCause {
   };
 }
 
-/// The zone of `PinPoint.run` (PLAN-v2 Milestone 14, steps 1 to 4).
+/// The zone of `PinPoint.run`.
 ///
 /// The engine calls every binding callback through the zone that was
 /// current when the binding set it (`dart:ui` `hooks.dart:452`; web
@@ -95,8 +94,7 @@ class TraceCause {
 ///
 /// The child zones never get an error handler of their own. A future that
 /// fails in one error zone does not deliver its error to a listener in
-/// another, so a handler per cause would change what the app sees (rule
-/// 11). Errors go to this zone's one handler, as they would go to the root.
+/// another, so a handler per cause would change what the app sees. Errors go to this zone's one handler, as they would go to the root.
 class CauseZone {
   CauseZone({this.kindOf, this.inFrame, this.ready, this.onUncaught});
 
@@ -214,10 +212,10 @@ class CauseZone {
   /// The cause for a call into [zone], or null to run it as is.
   TraceCause? _entry(Zone zone, String? kind) {
     if (zone[causeKey] != null || _starting || !_isReady()) return null;
-    // Watch out for: a nested dispatch (the browser fires an event during
-    // a call from Dart) reaches here from inside a cause, because the
-    // current zone is that cause's child, not the binding zone the engine
-    // compares with. It belongs to the cause that is running.
+    // A nested dispatch (the browser fires an event during a call from Dart)
+    // reaches here from inside a cause, because the current zone is that
+    // cause's child, not the binding zone the engine compares with. It
+    // belongs to the cause that is running.
     final running = Zone.current[causeKey];
     if (running is TraceCause) return running;
     if (kind == CauseKind.frame) {
@@ -226,11 +224,9 @@ class CauseZone {
         CauseKind.frame,
         clockMs,
       );
-      // From frame to frame, the "near" way (PLAN-v2 Milestone 14, step
-      // 9): the frame is linked to every cause that ran since the frame
-      // before it. One of them made it dirty. The exact way
-      // (`debugPrintScheduleBuildForStacks`) costs a stack per setState and
-      // takes the `debugPrint` slot.
+      // The "near" way: the frame is linked to every cause that ran since
+      // the frame before it. The exact way (`debugPrintScheduleBuildForStacks`)
+      // costs a stack per setState and takes the `debugPrint` slot.
       frame.after = [for (final c in _ran) c.id];
       _ran.clear();
       _lastRan = null;
@@ -307,11 +303,10 @@ class CauseZone {
     return parent.runBinary(_fork(zone, cause), f, arg1, arg2);
   }
 
-  // Watch out for: an uncaught error now passes through Pinpoint before
-  // the app's handler. A throw here would hide the app's error, so the
-  // body is one guarded call and then the parent, always. There is no
-  // `print` handler, and this one prints nothing: a print from inside a
-  // zone's handler would come back to the zone.
+  // An uncaught error passes through Pinpoint before the app's handler. A
+  // throw here would hide the app's error, so the body is one guarded call
+  // and then the parent, always. A print from inside a zone's handler would
+  // come back to the zone, so this one prints nothing.
   void _uncaught(
     Zone self,
     ZoneDelegate parent,
