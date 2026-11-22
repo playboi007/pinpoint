@@ -198,6 +198,9 @@ class TraceEvent {
   /// Small, clipped, JSON values only.
   final Map<String, Object?> data;
 
+  /// Whether the agent, or a tape replay, made this input.
+  bool get byAgent => data['by'] == 'agent';
+
   /// Rough size in memory, for the recorder's byte limit. Counts strings by
   /// length and everything else as 8 bytes; [data] is small and flat, so
   /// this costs little.

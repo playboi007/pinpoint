@@ -258,7 +258,7 @@ class _Context {
             _downs.remove(pointer);
             _moved.remove(pointer);
         }
-        if (replaying && e.data['by'] == 'agent') _replayed.add(e.seq);
+        if (replaying && e.byAgent) _replayed.add(e.seq);
       }
       if (seq < fromSeq) continue;
       if (kind == TraceKind.stateDropped) {
@@ -356,7 +356,7 @@ class _Context {
         target.isEmpty ? verb : '$verb $target';
     if (pointer != null) {
       final phase = pointer.data['phase'];
-      final byAgent = pointer.data['by'] == 'agent';
+      final byAgent = pointer.byAgent;
       final replay = byAgent && _replayed.contains(pointer.seq);
       final prefix = replay ? 'replayed ' : (byAgent ? 'agent ' : '');
       String agentKind(String k) =>
@@ -402,14 +402,14 @@ class _Context {
       }
     }
     if (key != null) {
-      final byAgent = key.data['by'] == 'agent';
+      final byAgent = key.byAgent;
       return make(
         byAgent ? StoryKind.agent : StoryKind.key,
         '${byAgent ? 'agent ' : ''}key ${key.data['key'] ?? '?'}',
       );
     }
     if (text != null) {
-      final byAgent = text.data['by'] == 'agent';
+      final byAgent = text.byAgent;
       return make(
         byAgent ? StoryKind.agent : StoryKind.text,
         '${byAgent ? 'agent typed' : 'typing'} in ${text.widget ?? 'a field'}',

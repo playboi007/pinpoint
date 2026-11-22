@@ -74,7 +74,7 @@ String traceSummary(TraceEvent event) {
   final d = event.data;
   final widget = event.widget;
   final where = event.source == null ? '' : ' (${shortSource(event.source!)})';
-  final agent = d['by'] == 'agent' ? ' [agent]' : '';
+  final agent = event.byAgent ? ' [agent]' : '';
   switch (event.kind) {
     case TraceKind.pointer:
       final phase = d['phase'] ?? '?';

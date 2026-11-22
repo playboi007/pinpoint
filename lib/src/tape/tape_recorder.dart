@@ -205,9 +205,8 @@ class TapeRecorder implements NetTap {
     if (_replaying) return;
     final kind = event.kind;
     if (TraceKind.isInput(kind)) {
-      // The agent's synthetic input and the player's own events are tagged
-      // `agent` (rule 14, watch out for): a tape replays the user.
-      if (event.data['by'] == 'agent') return;
+      // A tape replays the user, not the agent's or the player's own input.
+      if (event.byAgent) return;
       _inputs.add(event);
       if (_inputs.length > maxInputs) {
         final old = _inputs.removeFirst();
