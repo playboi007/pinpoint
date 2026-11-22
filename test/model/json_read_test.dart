@@ -1,6 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pinpoint/src/model/json_read.dart';
 
+enum Brightness { light, dark }
+
 void main() {
   group('plain reads', () {
     test('a wrong type gives the fallback', () {
@@ -35,6 +37,12 @@ void main() {
       expect(asStringMap({'a': 'x', 'b': 1}), {'a': 'x'});
     });
 
+    test('an enum is read by its name', () {
+      expect(asEnum(Brightness.values, 'dark'), Brightness.dark);
+      expect(asEnum(Brightness.values, 'blue'), isNull);
+      expect(asEnum(Brightness.values, 1), isNull);
+    });
+
     test('numbers print as JSON writes them', () {
       expect(jsonNumberText(96.0), '96');
       expect(jsonNumberText(1.5), '1.5');
@@ -65,6 +73,12 @@ void main() {
       expect(json.nonEmptyMap('empty'), isNull);
       expect(json.nonEmptyMap('id'), isNull);
       expect(json.nonEmptyMap('env', where: (m) => m['z'] != null), isNull);
+    });
+
+    test('object reads a map and nothing else', () {
+      expect(json.object('env', (m) => m.length), 1);
+      expect(json.object('empty', (m) => m.length), 0);
+      expect(json.object('id', (m) => m.length), isNull);
     });
 
     test('items drops what the parser rejects', () {

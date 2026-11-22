@@ -9,29 +9,26 @@ import '../sink/markdown_formatter.dart';
 import 'json_read.dart';
 import 'note_round.dart';
 
+part 'annotation_budget.dart';
+part 'annotation_format.dart';
+part 'annotation_json.dart';
+part 'annotation_media.dart';
+part 'annotation_state.dart';
+part 'annotation_target.dart';
+
 /// The payload version. The receiver rejects any other value, so a change
 /// to the shape below needs a new number.
 ///
-/// 2 (Milestone 8): `status`, `anchor`, `messages` and `app.origin`.
-/// 3 (Milestone 9): `environment`, the what-if overrides.
-/// 4 (Milestone 10): `finding` and `checks`, for a note made from a finding.
-/// 5 (Milestone 11): `tweaks`, the live edits, and `screenshot.beforeAfter`.
-/// 6 (Milestone 12): `verification`, the outcome of `verify_note`, written
-/// by the bridge.
-/// 7 (PLAN-v2 Milestone 13): `trace`, what happened in the seconds before
-/// the pick.
-/// 8 (PLAN-v2 Milestone 15): `tape`, the tape attached to the note.
-/// 9 (PLAN-v3 Milestone 19): `stateOwners`; `frameworkChain` is gone (an
-/// older note that has it still reads, and the field is ignored), and
-/// `page.url` has its query values masked.
-/// 10 (PLAN-v3 Milestone 21): `stateOwners[].dependencies`, the state
-/// objects an owner reads, and the new owner kind `reader`.
-/// 11 (PLAN-v3 Milestone 20): `rounds`, what the agent changed in each pass
-/// on the note, written by the bridge. A note without it reads as before.
+/// 2: `status`, `anchor`, `messages` and `app.origin`. 3: `environment`.
+/// 4: `finding` and `checks`. 5: `tweaks` and `screenshot.beforeAfter`.
+/// 6: `verification`. 7: `trace`. 8: `tape`. 9: `stateOwners`; the old
+/// `frameworkChain` is ignored and `page.url` has its query values masked.
+/// 10: `stateOwners[].dependencies` and the owner kind `reader`.
+/// 11: `rounds`, written by the bridge.
 const int annotationSchema = 11;
 
-/// The start of the first line of a note's trace when rebuilds were not
-/// recorded in all or part of its window (PLAN-v2 Milestone 13, step 12).
+/// The start of the first trace line when rebuilds were not recorded in all
+/// or part of the window.
 const String traceNotRecorded = 'rebuilds not recorded';
 
 /// Largest JSON for a note, without the screenshot, in UTF-8 bytes.
@@ -57,7 +54,7 @@ enum NoteStatus {
   /// The agent changed the code; not yet checked.
   fixed,
 
-  /// The user (Milestone 12: a measured check) accepted the result.
+  /// The user, or a measured check, accepted the result.
   verified,
 
   /// The agent says it is done. The pin fades but stays until the user
@@ -178,16 +175,13 @@ class Annotation {
   /// Local widgets above the target, nearest first.
   final List<AncestorInfo> ancestors;
 
-  /// The objects that hold state for the target, nearest first, at most 4
-  /// (PLAN-v3 Milestone 19, step 4): a local `State`, or a provider-like
-  /// scope. Input for the state lens.
+  /// The objects that hold state for the target, nearest first, at most 4:
+  /// a local `State`, or a provider-like scope. Input for the state lens.
   final List<StateOwnerInfo> stateOwners;
 
-  /// The agent's passes on this note, oldest first, written by the bridge
-  /// (PLAN-v3 Milestone 20); empty for a note it has not worked. Each round
-  /// is `{n, startedAt, endedAt, start, end, changes, undone, undo}`; read
-  /// it with [roundViews]. The app never writes them: the bridge keeps its
-  /// own copy when a note is sent again.
+  /// The agent's passes on this note, oldest first, written by the bridge.
+  /// Read them with [roundViews]. The app never writes them: the bridge keeps
+  /// its own copy when a note is sent again.
   final List<Map<String, Object?>> rounds;
 
   /// [rounds] as typed values, oldest first.
@@ -213,8 +207,8 @@ class Annotation {
   /// by hand.
   final Map<String, Object?>? finding;
 
-  /// What Milestone 12's `verify_note` measures, each with a `type`, for
-  /// example `{type: no_overflow}`. Empty when none were chosen.
+  /// What `verify_note` measures, each with a `type`, for example
+  /// `{type: no_overflow}`. Empty when none were chosen.
   final List<Map<String, Object?>> checks;
 
   /// The last `verify_note` outcome, written by the bridge: `at`,
@@ -223,17 +217,14 @@ class Annotation {
   /// screenshot's file). Null until a verification ran.
   final Map<String, Object?>? verification;
 
-  /// What happened before the pick (PLAN-v2 Milestone 13, step 12):
-  /// `seconds` (the window), `lines` (compact trace lines, at most 60),
-  /// `rebuilds` (whether rebuilds were recorded in the window) and
-  /// `partial` with a `reason` when a limit dropped events. Null when the
-  /// recorder was off.
+  /// What happened before the pick: `seconds` (the window), `lines` (at most
+  /// 60), `rebuilds` (whether they were recorded) and `partial` with a
+  /// `reason` when a limit dropped events. Null when the recorder was off.
   final Map<String, Object?>? trace;
 
-  /// The tape attached with "Attach what happened" (PLAN-v2 Milestone 15,
-  /// step 18): `id`, `kind` (full or segment), `inputs`, `requests`,
-  /// `marks`, and `partial` when a limit dropped data. The tape itself is
-  /// on the bridge, in `.pinpoint/tapes/`. Null when none is attached.
+  /// The attached tape: `id`, `kind` (full or segment), `inputs`, `requests`,
+  /// `marks`, and `partial` when a limit dropped data. The tape itself is on
+  /// the bridge, in `.pinpoint/tapes/`. Null when none is attached.
   final Map<String, Object?>? tape;
 
   /// Whether the last verification passed; null when none ran.
@@ -339,230 +330,43 @@ class Annotation {
     return note._marked('comment')._fitComment(maxBytes) ?? note;
   }
 
-  int get _bytes => utf8.encode(jsonEncode(toJson())).length;
-
-  Annotation _marked(String name) => truncated.contains(name)
-      ? this
-      : copyWith(truncated: [...truncated, name]);
-
-  /// The longest cut of [comment] that fits, or null when none does.
-  Annotation? _fitComment(int maxBytes) {
-    Annotation withLength(int n) => copyWith(comment: clipText(comment, n));
-    if (withLength(1)._bytes > maxBytes) return null;
-    var low = 1; // fits
-    var high = comment.length; // does not fit
-    while (high - low > 1) {
-      final middle = (low + high) ~/ 2;
-      if (withLength(middle)._bytes <= maxBytes) {
-        low = middle;
-      } else {
-        high = middle;
-      }
-    }
-    return withLength(low);
-  }
-
-  /// The budget steps, in order. A step returns null when it has nothing
-  /// to cut.
-  static final List<(String, Annotation? Function(Annotation))> _budgetSteps = [
-    // The bridge keeps the rounds and puts them back (PLAN-v3 Milestone 20),
-    // so a note that is too large loses its copy first.
-    ('rounds', (a) => a.rounds.isEmpty ? null : a.copyWith(rounds: const [])),
-    // The trace goes first (PLAN-v2 Milestone 13, step 12): the agent can
-    // read the whole run with get_trace.
-    ('trace', (a) => a._traceLines(20)),
-    ('subtree', (a) => a._subtreeLines(10)),
-    ('target.properties', (a) => a._target(a.target._clipProperties(60))),
-    ('siblings', (a) => a._siblingWindow(5)),
-    (
-      'stateOwners.dependencies',
-      (a) => a.stateOwners.every((o) => o.dependencies.isEmpty)
-          ? null
-          : a.copyWith(
-              stateOwners: [
-                for (final o in a.stateOwners) o.withoutDependencies(),
-              ],
-            ),
-    ),
-    (
-      'stateOwners',
-      (a) => a.stateOwners.length <= 2
-          ? null
-          : a.copyWith(stateOwners: a.stateOwners.take(2).toList()),
-    ),
-    (
-      'ancestors',
-      (a) => a.ancestors.length <= 4
-          ? null
-          : a.copyWith(ancestors: a.ancestors.take(4).toList()),
-    ),
-    ('target.sections', (a) => a._target(a.target._clipSections(60))),
-    ('target.text', (a) => a._target(a.target._clipText(100))),
-    ('target.description', (a) => a._target(a.target._clipDescription(80))),
-    (
-      'subtree',
-      (a) => a.subtree == null ? null : a.copyWith(subtree: () => null),
-    ),
-    ('target.properties', (a) => a._target(a.target._firstProperties(8))),
-    (
-      'stateOwners',
-      (a) => a.stateOwners.isEmpty
-          ? null
-          : a.copyWith(stateOwners: const <StateOwnerInfo>[]),
-    ),
-    (
-      'siblings',
-      (a) => a.siblings == null ? null : a.copyWith(siblings: () => null),
-    ),
-    (
-      'ancestors',
-      (a) => a.ancestors.length <= 1
-          ? null
-          : a.copyWith(ancestors: a.ancestors.take(1).toList()),
-    ),
-    ('target.sections', (a) => a._target(a.target._firstSections(0))),
-    ('target.properties', (a) => a._target(a.target._firstProperties(0))),
-  ];
-
-  Annotation? _target(TargetInfo? cut) =>
-      cut == null ? null : copyWith(target: cut);
-
-  Annotation? _subtreeLines(int max) {
-    final lines = subtree?.split('\n');
-    if (lines == null || lines.length <= max + 1) return null;
-    return copyWith(subtree: () => [...lines.take(max), '…'].join('\n'));
-  }
-
-  /// [max] siblings around the target's branch.
-  Annotation? _siblingWindow(int max) {
-    final s = siblings;
-    if (s == null || s.children.length <= max) return null;
-    final offset = s.index - s.firstIndex;
-    final from = math.max(
-      0,
-      math.min(offset - max ~/ 2, s.children.length - max),
-    );
-    return copyWith(
-      siblings: () => SiblingsInfo(
-        parent: s.parent,
-        index: s.index,
-        count: s.count,
-        firstIndex: s.firstIndex + from,
-        children: s.children.sublist(from, from + max),
-      ),
-    );
-  }
-
-  /// This note with only the newest [max] trace lines, keeping a first
-  /// line that says rebuilds were not recorded; null when nothing to cut.
-  Annotation? _traceLines(int max) {
-    final current = trace;
-    final lines = current?['lines'];
-    if (current == null || lines is! List<Object?> || lines.length <= max) {
-      return null;
-    }
-    final first = lines.isEmpty ? null : lines.first;
-    final head = first is String && first.startsWith(traceNotRecorded);
-    final body = head ? lines.sublist(1) : lines;
-    final keep = head ? max - 1 : max;
-    return copyWith(
-      trace: () => {
-        ...current,
-        'lines': [if (head) first, ...body.sublist(body.length - keep)],
-      },
-    );
-  }
-
   /// [json] (a [toJson] map, as the bridge stores it) as a note, or null
-  /// when it has no id.
-  ///
-  /// Reads defensively: a part of the wrong type is left empty, never
-  /// thrown on. A schema 1 note, written before notes had a status, was
-  /// sent, so it reads as [NoteStatus.submitted]. The screenshot's PNG is
-  /// never read: the bridge keeps it beside the JSON.
+  /// when it has no id. A part of the wrong type is left empty, never thrown
+  /// on. The screenshot's PNG is never read: the bridge keeps it beside the
+  /// JSON.
   static Annotation? fromJson(Map<String, Object?> json) {
-    final id = json['id'];
-    if (id is! String) return null;
-    final target = asJsonMap(json['target']);
-    final shot = json['screenshot'];
+    final id = json.str('id');
+    if (id == null) return null;
     return Annotation(
       id: id,
-      createdAt: asDate(json['createdAt']) ?? DateTime.utc(1970),
-      status:
-          NoteStatus.byName(json['status']) ??
-          (json['schema'] == 1 ? NoteStatus.submitted : NoteStatus.draft),
-      intent: AnnotationIntent.values.firstWhere(
-        (i) => i.name == json['intent'],
-        orElse: () => AnnotationIntent.improve,
-      ),
-      comment: asString(json['comment']) ?? '',
+      createdAt: json.date('createdAt') ?? DateTime.utc(1970),
+      status: NoteStatus.byName(json['status']) ?? _legacyStatus(json),
+      intent:
+          asEnum(AnnotationIntent.values, json['intent']) ??
+          AnnotationIntent.improve,
+      comment: json.str('comment') ?? '',
       app: AppInfo._fromJson(asJsonMap(json['app'])),
       page: PageInfo._fromJson(asJsonMap(json['page'])),
-      environment: switch (json['environment']) {
-        final Map<String, Object?> env when env.isNotEmpty => env,
-        _ => null,
-      },
-      finding: switch (json['finding']) {
-        final Map<String, Object?> finding when finding.isNotEmpty => finding,
-        _ => null,
-      },
-      checks: [
-        for (final check in asJsonList(json['checks']))
-          if (check is Map<String, Object?> && check['type'] is String) check,
-      ],
-      tweaks: [
-        for (final tweak in asJsonList(json['tweaks']))
-          if (tweak is Map<String, Object?> &&
-              tweak['property'] is String &&
-              tweak['from'] is String &&
-              tweak['to'] is String)
-            tweak,
-      ],
-      verification: switch (json['verification']) {
-        final Map<String, Object?> v when v.isNotEmpty => v,
-        _ => null,
-      },
-      trace: switch (json['trace']) {
-        final Map<String, Object?> t when t['lines'] is List<Object?> => t,
-        _ => null,
-      },
-      tape: switch (json['tape']) {
-        final Map<String, Object?> t when t['id'] is String => t,
-        _ => null,
-      },
-      target: TargetInfo._fromJson(target),
-      anchor: json['anchor'] is Map<String, Object?>
-          ? NoteAnchor.fromJson(json['anchor']! as Map<String, Object?>)
-          : null,
-      messages: [
-        for (final m in asJsonList(json['messages'])) ?NoteMessage.fromJson(m),
-      ],
-      ancestors: [
-        for (final a in asJsonList(json['ancestors']))
-          if (a is Map<String, Object?> && a['widget'] is String)
-            AncestorInfo(
-              widget: a['widget']! as String,
-              source: SourceRef._fromJson(a['source']),
-            ),
-      ],
-      // An older note's `frameworkChain` is ignored.
-      stateOwners: [
-        for (final o in asJsonList(json['stateOwners']))
-          ?StateOwnerInfo._fromJson(o),
-      ],
-      // A schema 10 note has no `rounds`.
-      rounds: [
-        for (final r in asJsonList(json['rounds']))
-          if (r is Map<String, Object?> && r['n'] is int) r,
-      ],
+      environment: json.nonEmptyMap('environment'),
+      finding: json.nonEmptyMap('finding'),
+      checks: json.items('checks', _checkOrNull),
+      tweaks: json.items('tweaks', _tweakOrNull),
+      verification: json.nonEmptyMap('verification'),
+      trace: json.nonEmptyMap(
+        'trace',
+        where: (t) => t['lines'] is List<Object?>,
+      ),
+      tape: json.nonEmptyMap('tape', where: (t) => t['id'] is String),
+      target: TargetInfo._fromJson(asJsonMap(json['target'])),
+      anchor: json.object('anchor', NoteAnchor.fromJson),
+      messages: json.items('messages', NoteMessage.fromJson),
+      ancestors: json.items('ancestors', AncestorInfo._fromJson),
+      stateOwners: json.items('stateOwners', StateOwnerInfo._fromJson),
+      rounds: json.items('rounds', _roundOrNull),
       siblings: SiblingsInfo._fromJson(json['siblings']),
-      subtree: asString(json['subtree']),
-      inherited: json['inherited'] is Map<String, Object?>
-          ? InheritedInfo._fromJson(json['inherited']! as Map<String, Object?>)
-          : null,
-      screenshot: shot is Map<String, Object?>
-          ? ScreenshotInfo._fromJson(shot)
-          : null,
+      subtree: json.str('subtree'),
+      inherited: json.object('inherited', InheritedInfo._fromJson),
+      screenshot: json.object('screenshot', ScreenshotInfo._fromJson),
       errors: asStrings(json['errors']),
       truncated: asStrings(json['truncated']),
     );
@@ -605,749 +409,4 @@ class Annotation {
     if (errors.isNotEmpty) 'errors': errors,
     if (truncated.isNotEmpty) 'truncated': truncated,
   };
-}
-
-class AppInfo {
-  const AppInfo({
-    required this.buildMode,
-    required this.platform,
-    this.projectRoot,
-    this.origin,
-  });
-
-  factory AppInfo._fromJson(Map<String, Object?> json) => AppInfo(
-    buildMode: asString(json['buildMode']) ?? 'debug',
-    platform: asString(json['platform']) ?? 'web',
-    projectRoot: asString(json['projectRoot']),
-    origin: asString(json['origin']),
-  );
-
-  /// `debug`, `profile` or `release`.
-  final String buildMode;
-
-  /// `web`, or a `TargetPlatform` name such as `android`.
-  final String platform;
-
-  /// Null when `PINPOINT_ROOT` is not set.
-  final String? projectRoot;
-
-  /// The page's origin on web, for example `http://localhost:5000`; null
-  /// elsewhere. Two apps can poll one bridge; each loads only the notes
-  /// with its own origin.
-  final String? origin;
-
-  Map<String, Object?> toJson() => {
-    'buildMode': buildMode,
-    'platform': platform,
-    'projectRoot': projectRoot,
-    'origin': origin,
-  };
-}
-
-/// The screen the note was written on.
-class PageInfo {
-  const PageInfo({
-    this.url,
-    this.route,
-    this.viewport,
-    this.devicePixelRatio,
-    this.textScale,
-    this.brightness,
-    this.locale,
-  });
-
-  factory PageInfo._fromJson(Map<String, Object?> json) => PageInfo(
-    url: asString(json['url']),
-    route: asString(json['route']),
-    viewport: PayloadSize._fromJson(json['viewport']),
-    devicePixelRatio: asDouble(json['devicePixelRatio']),
-    textScale: asDouble(json['textScale']),
-    brightness: asString(json['brightness']),
-    locale: asString(json['locale']),
-  );
-
-  /// The browser's URL on web; null elsewhere. Every query value is masked
-  /// (`?token=***`): a page URL can carry a session token.
-  final String? url;
-
-  /// The route name of the target's route, else from the URL.
-  final String? route;
-
-  /// Logical pixels.
-  final PayloadSize? viewport;
-
-  final double? devicePixelRatio;
-
-  /// The text scaler's factor for a 14 px font.
-  final double? textScale;
-
-  /// The platform brightness: `light` or `dark`.
-  final String? brightness;
-
-  /// For example `en_US`.
-  final String? locale;
-
-  Map<String, Object?> toJson() => {
-    'url': url,
-    'route': route,
-    'viewport': viewport?.toJson(),
-    'devicePixelRatio': jsonNumber(devicePixelRatio),
-    'textScale': jsonNumber(textScale),
-    'brightness': brightness,
-    'locale': locale,
-  };
-}
-
-/// The selected widget.
-class TargetInfo {
-  const TargetInfo({
-    required this.widget,
-    this.description,
-    this.key,
-    this.source,
-    required this.sourceUnavailable,
-    this.rect,
-    this.renderObject,
-    this.constraints,
-    this.parentData,
-    this.text,
-    this.properties = const <String, String>{},
-    this.sections = const <String, Map<String, String>>{},
-  });
-
-  factory TargetInfo._fromJson(Map<String, Object?> json) => TargetInfo(
-    widget: asString(json['widget']) ?? '?',
-    description: asString(json['description']),
-    key: asString(json['key']),
-    source: SourceRef._fromJson(json['source']),
-    sourceUnavailable: json['sourceUnavailable'] == true,
-    rect: PayloadRect._fromJson(json['rect']),
-    renderObject: asString(json['renderObject']),
-    constraints: asString(json['constraints']),
-    parentData: asString(json['parentData']),
-    text: asString(json['text']),
-    properties: asStringMap(json['properties']),
-    sections: {
-      for (final MapEntry(:key, :value) in asJsonMap(json['sections']).entries)
-        key: asStringMap(value),
-    },
-  );
-
-  /// The widget's type name, for example `Text`.
-  final String widget;
-
-  /// For example `Text("Save changes")`.
-  final String? description;
-
-  final String? key;
-
-  /// Null outside debug and for widgets with no local location.
-  final SourceRef? source;
-
-  /// True when no widget in the chain has a local location.
-  final bool sourceUnavailable;
-
-  /// Global logical pixels.
-  final PayloadRect? rect;
-
-  /// For example `RenderParagraph`.
-  final String? renderObject;
-
-  final String? constraints;
-  final String? parentData;
-
-  /// Text shown in the target's subtree. Masked for obscured fields.
-  final String? text;
-
-  /// The widget's own diagnostics, `name: description`.
-  final Map<String, String> properties;
-
-  /// The info panel's sections, `title: {name: label}`.
-  final Map<String, Map<String, String>> sections;
-
-  TargetInfo copyWith({
-    String? description,
-    String? text,
-    Map<String, String>? properties,
-    Map<String, Map<String, String>>? sections,
-  }) => TargetInfo(
-    widget: widget,
-    description: description ?? this.description,
-    key: key,
-    source: source,
-    sourceUnavailable: sourceUnavailable,
-    rect: rect,
-    renderObject: renderObject,
-    constraints: constraints,
-    parentData: parentData,
-    text: text ?? this.text,
-    properties: properties ?? this.properties,
-    sections: sections ?? this.sections,
-  );
-
-  TargetInfo? _clipProperties(int max) =>
-      properties.values.every((v) => v.length <= max)
-      ? null
-      : copyWith(
-          properties: {
-            for (final MapEntry(:key, :value) in properties.entries)
-              key: clipText(value, max),
-          },
-        );
-
-  TargetInfo? _firstProperties(int max) => properties.length <= max
-      ? null
-      : copyWith(properties: Map.fromEntries(properties.entries.take(max)));
-
-  TargetInfo? _clipSections(int max) =>
-      sections.values.every((s) => s.values.every((v) => v.length <= max))
-      ? null
-      : copyWith(
-          sections: {
-            for (final MapEntry(key: title, value: labels) in sections.entries)
-              title: {
-                for (final MapEntry(:key, :value) in labels.entries)
-                  key: clipText(value, max),
-              },
-          },
-        );
-
-  TargetInfo? _firstSections(int max) => sections.length <= max
-      ? null
-      : copyWith(sections: Map.fromEntries(sections.entries.take(max)));
-
-  TargetInfo? _clipText(int max) {
-    final value = text;
-    return value == null || value.length <= max
-        ? null
-        : copyWith(text: clipText(value, max));
-  }
-
-  TargetInfo? _clipDescription(int max) {
-    final value = description;
-    return value == null || value.length <= max
-        ? null
-        : copyWith(description: clipText(value, max));
-  }
-
-  Map<String, Object?> toJson() => {
-    'widget': widget,
-    'description': description,
-    'key': key,
-    'source': source?.toJson(),
-    'sourceUnavailable': sourceUnavailable,
-    'rect': rect?.toJson(),
-    'renderObject': renderObject,
-    'constraints': constraints,
-    'parentData': parentData,
-    'text': text,
-    'properties': properties,
-    'sections': sections,
-  };
-}
-
-/// A place in source. [file] is relative to the project root when it is
-/// under it.
-class SourceRef {
-  const SourceRef({
-    required this.file,
-    required this.line,
-    required this.column,
-  });
-
-  static SourceRef? _fromJson(Object? json) {
-    if (json is! Map<String, Object?>) return null;
-    final file = json['file'];
-    final line = json['line'];
-    if (file is! String || line is! int) return null;
-    final column = json['column'];
-    return SourceRef(
-      file: file,
-      line: line,
-      column: column is int ? column : 1,
-    );
-  }
-
-  final String file;
-
-  /// 1-based.
-  final int line;
-
-  /// 1-based.
-  final int column;
-
-  Map<String, Object?> toJson() => {
-    'file': file,
-    'line': line,
-    'column': column,
-  };
-}
-
-/// A local widget above the target.
-class AncestorInfo {
-  const AncestorInfo({required this.widget, this.source});
-
-  final String widget;
-  final SourceRef? source;
-
-  Map<String, Object?> toJson() => {
-    'widget': widget,
-    'source': source?.toJson(),
-  };
-}
-
-/// An object that holds state for the target widget (PLAN-v3 Milestone
-/// 19, step 4).
-class StateOwnerInfo {
-  const StateOwnerInfo({
-    required this.kind,
-    required this.type,
-    this.source,
-    this.dependencies = const <DependencyInfo>[],
-  });
-
-  static StateOwnerInfo? _fromJson(Object? json) {
-    if (json is! Map<String, Object?>) return null;
-    final kind = json['kind'];
-    final type = json['type'];
-    if (kind is! String || type is! String) return null;
-    return StateOwnerInfo(
-      kind: kind,
-      type: type,
-      source: SourceRef._fromJson(json['source']),
-      dependencies: [
-        // Schema 9 notes have no `dependencies`.
-        for (final d in asJsonList(json['dependencies']))
-          ?DependencyInfo._fromJson(d),
-      ],
-    );
-  }
-
-  /// `state` (a `State` of a widget made in the project), `provider` (a
-  /// provider-like scope), `notifier` (an `InheritedNotifier`) or `reader`
-  /// (a stateless widget made in the project that reads a state object).
-  final String kind;
-
-  /// For example `ProductDetailProvider`: the `State`'s type, or the value
-  /// type of the scope.
-  final String type;
-
-  /// The creating widget's file and line, when it is local.
-  final SourceRef? source;
-
-  /// The state objects this owner reads (PLAN-v3 Milestone 21, step 1), at
-  /// most [maxDependencies]: what its `build` asked for with `watch`, `of`
-  /// or `dependOnInheritedWidgetOfExactType`. Framework scopes such as
-  /// `MediaQuery` are left out. Empty for a provider-like scope.
-  final List<DependencyInfo> dependencies;
-
-  /// Most dependencies kept for one owner.
-  static const int maxDependencies = 4;
-
-  StateOwnerInfo withoutDependencies() =>
-      StateOwnerInfo(kind: kind, type: type, source: source);
-
-  Map<String, Object?> toJson() => {
-    'kind': kind,
-    'type': type,
-    'source': source?.toJson(),
-    if (dependencies.isNotEmpty)
-      'dependencies': [for (final d in dependencies) d.toJson()],
-  };
-}
-
-/// One object a state owner reads (PLAN-v3 Milestone 21, step 1).
-class DependencyInfo {
-  const DependencyInfo({
-    required this.kind,
-    required this.type,
-    required this.tag,
-    this.source,
-  });
-
-  static DependencyInfo? _fromJson(Object? json) {
-    if (json is! Map<String, Object?>) return null;
-    final kind = json['kind'];
-    final type = json['type'];
-    final tag = json['tag'];
-    if (kind is! String || type is! String || tag is! String) return null;
-    return DependencyInfo(
-      kind: kind,
-      type: type,
-      tag: tag,
-      source: SourceRef._fromJson(json['source']),
-    );
-  }
-
-  /// `provider` (a provider-like scope), `notifier` (an `InheritedNotifier`)
-  /// or `inherited` (any other inherited widget that is not the
-  /// framework's).
-  final String kind;
-
-  /// The provided value's type (`ProductDetailProvider`), or the inherited
-  /// widget's own type.
-  final String type;
-
-  /// A short name for the object, for example `#a1`. Two owners that show
-  /// the same tag read the same object. Stable while the lens runs.
-  final String tag;
-
-  /// Where the scope was created, when that is in the project.
-  final SourceRef? source;
-
-  Map<String, Object?> toJson() => {
-    'kind': kind,
-    'type': type,
-    'tag': tag,
-    'source': source?.toJson(),
-  };
-}
-
-/// The children of the nearest ancestor with more than one child.
-///
-/// [children] is a window around the target's branch: [firstIndex] is the
-/// index of its first entry, [count] the number of children in all.
-class SiblingsInfo {
-  const SiblingsInfo({
-    required this.parent,
-    required this.index,
-    required this.count,
-    required this.firstIndex,
-    required this.children,
-  });
-
-  static SiblingsInfo? _fromJson(Object? json) {
-    if (json is! Map<String, Object?>) return null;
-    final parent = json['parent'];
-    if (parent is! String) return null;
-    return SiblingsInfo(
-      parent: parent,
-      index: asInt(json['index']) ?? 0,
-      count: asInt(json['count']) ?? 0,
-      firstIndex: asInt(json['firstIndex']) ?? 0,
-      children: asStrings(json['children']),
-    );
-  }
-
-  final String parent;
-
-  /// The index of the child that holds the target.
-  final int index;
-
-  final int count;
-  final int firstIndex;
-  final List<String> children;
-
-  Map<String, Object?> toJson() => {
-    'parent': parent,
-    'index': index,
-    'count': count,
-    'firstIndex': firstIndex,
-    'children': children,
-  };
-}
-
-/// Inherited values seen by the target.
-class InheritedInfo {
-  const InheritedInfo({
-    this.themeBrightness,
-    this.useMaterial3,
-    this.textDirection,
-  });
-
-  factory InheritedInfo._fromJson(Map<String, Object?> json) => InheritedInfo(
-    themeBrightness: asString(json['themeBrightness']),
-    useMaterial3: json['useMaterial3'] is bool
-        ? json['useMaterial3']! as bool
-        : null,
-    textDirection: asString(json['textDirection']),
-  );
-
-  final String? themeBrightness;
-  final bool? useMaterial3;
-  final String? textDirection;
-
-  Map<String, Object?> toJson() => {
-    'themeBrightness': themeBrightness,
-    'useMaterial3': useMaterial3,
-    'textDirection': textDirection,
-  };
-}
-
-/// A PNG crop of the app around the target, with the target outlined.
-class ScreenshotInfo {
-  const ScreenshotInfo({
-    required this.file,
-    required this.pixelRatio,
-    required this.width,
-    required this.height,
-    this.crop,
-    this.hasPlatformViews = false,
-    this.debugPaint = const <String>[],
-    this.beforeAfter = false,
-    this.png,
-  });
-
-  factory ScreenshotInfo._fromJson(Map<String, Object?> json) => ScreenshotInfo(
-    file: asString(json['file']) ?? '',
-    pixelRatio: asDouble(json['pixelRatio']) ?? 1,
-    width: asInt(json['width']) ?? 0,
-    height: asInt(json['height']) ?? 0,
-    crop: PayloadRect._fromJson(json['crop']),
-    hasPlatformViews: json['hasPlatformViews'] == true,
-    debugPaint: asStrings(json['debugPaint']),
-    beforeAfter: json['beforeAfter'] == true,
-  );
-
-  /// The file name the receiver writes the image to: `<id>.png`.
-  final String file;
-
-  /// Image pixels per logical pixel.
-  final double pixelRatio;
-
-  /// In image pixels.
-  final int width;
-  final int height;
-
-  /// The captured part of the screen, in global logical pixels.
-  final PayloadRect? crop;
-
-  /// True when a platform view (`HtmlElementView`, a map, an iframe) is in
-  /// the crop. On web those render as empty areas, so the image is partial.
-  final bool hasPlatformViews;
-
-  /// The debug paint flags that were on, for example
-  /// `debugPaintSizeEnabled`. Their marks are in the image.
-  final List<String> debugPaint;
-
-  /// True when the image is two crops side by side: on the left the screen
-  /// without the note's tweaks, on the right with them.
-  final bool beforeAfter;
-
-  /// The PNG bytes. Never in [toJson] unless asked for.
-  final Uint8List? png;
-
-  Map<String, Object?> toJson({bool includeData = false}) => {
-    'file': file,
-    'pixelRatio': jsonNumber(pixelRatio),
-    'width': width,
-    'height': height,
-    'crop': crop?.toJson(),
-    'hasPlatformViews': hasPlatformViews,
-    'debugPaint': debugPaint,
-    'beforeAfter': beforeAfter,
-    if (includeData && png != null) 'data': base64Encode(png!),
-  };
-}
-
-/// A rect in global logical pixels, without `dart:ui`.
-class PayloadRect {
-  const PayloadRect(this.x, this.y, this.w, this.h);
-
-  static PayloadRect? _fromJson(Object? json) {
-    if (json is! Map<String, Object?>) return null;
-    final x = asDouble(json['x']);
-    final y = asDouble(json['y']);
-    final w = asDouble(json['w']);
-    final h = asDouble(json['h']);
-    if (x == null || y == null || w == null || h == null) return null;
-    return PayloadRect(x, y, w, h);
-  }
-
-  final double x;
-  final double y;
-  final double w;
-  final double h;
-
-  Map<String, Object?> toJson() => {
-    'x': jsonNumber(x),
-    'y': jsonNumber(y),
-    'w': jsonNumber(w),
-    'h': jsonNumber(h),
-  };
-}
-
-/// A size in logical pixels, without `dart:ui`.
-class PayloadSize {
-  const PayloadSize(this.width, this.height);
-
-  static PayloadSize? _fromJson(Object? json) {
-    if (json is! Map<String, Object?>) return null;
-    final width = asDouble(json['width']);
-    final height = asDouble(json['height']);
-    if (width == null || height == null) return null;
-    return PayloadSize(width, height);
-  }
-
-  final double width;
-  final double height;
-
-  Map<String, Object?> toJson() => {
-    'width': jsonNumber(width),
-    'height': jsonNumber(height),
-  };
-}
-
-/// [value] for JSON: null when not finite (JSON has no `Infinity` or `NaN`,
-/// and `jsonEncode` throws on them), rounded to 0.01, and an `int` when
-/// whole.
-num? jsonNumber(double? value) {
-  if (value == null || !value.isFinite) return null;
-  final rounded = (value * 100).roundToDouble() / 100;
-  return rounded == rounded.truncateToDouble() ? rounded.toInt() : rounded;
-}
-
-/// [time] in UTC to the second, for example `2026-11-10T14:32:05Z`.
-String formatTimestamp(DateTime time) {
-  final t = time.toUtc();
-  return '${t.year.toString().padLeft(4, '0')}-${_two(t.month)}-'
-      '${_two(t.day)}T${_two(t.hour)}:${_two(t.minute)}:${_two(t.second)}Z';
-}
-
-/// A new note id, for example `pp_20261110_143205_a1f3`: the UTC time to
-/// the second and four random hex digits.
-///
-/// It becomes a file name on the receiver, so it holds only `[a-z0-9_]`.
-String annotationId(DateTime time, math.Random random) {
-  final t = time.toUtc();
-  final suffix = random.nextInt(0x10000).toRadixString(16).padLeft(4, '0');
-  return 'pp_${t.year.toString().padLeft(4, '0')}${_two(t.month)}'
-      '${_two(t.day)}_${_two(t.hour)}${_two(t.minute)}${_two(t.second)}'
-      '_$suffix';
-}
-
-/// [text] cut to at most [max] UTF-16 code units, ending in "…" when cut.
-/// A surrogate pair is never split, so the result always encodes.
-String clipText(String text, int max) {
-  if (text.length <= max) return text;
-  if (max <= 1) return '…';
-  var end = max - 1;
-  final last = text.codeUnitAt(end - 1);
-  if (last >= 0xD800 && last <= 0xDBFF) end--;
-  return '${text.substring(0, end)}…';
-}
-
-String _two(int n) => n.toString().padLeft(2, '0');
-
-/// Where a note's pin belongs, in terms that outlive the widget.
-///
-/// A pin cannot hold an `Element`: elements die on rebuild, hot reload and
-/// restart. The anchor names the widget by its constructor call instead,
-/// and `SourceIndex` finds the live element again.
-class NoteAnchor {
-  const NoteAnchor({
-    this.file,
-    this.line,
-    this.column,
-    this.widget,
-    this.key,
-    this.ordinal = 0,
-    this.itemIndex,
-    this.route,
-  });
-
-  /// [json] (a [toJson] map) as an anchor. Reads defensively: a field of
-  /// the wrong type is left out.
-  factory NoteAnchor.fromJson(Map<String, Object?> json) {
-    final ordinal = json['ordinal'];
-    return NoteAnchor(
-      file: asString(json['file']),
-      line: asInt(json['line']),
-      column: asInt(json['column']),
-      widget: asString(json['widget']),
-      key: asString(json['key']),
-      ordinal: ordinal is int && ordinal >= 0 ? ordinal : 0,
-      itemIndex: asInt(json['itemIndex']),
-      route: asString(json['route']),
-    );
-  }
-
-  /// The source file, as in [SourceRef.file]: relative to the project root
-  /// when under it. Null outside debug, where no location exists.
-  final String? file;
-
-  /// 1-based.
-  final int? line;
-
-  /// 1-based.
-  final int? column;
-
-  /// The widget's type name, for example `Text`.
-  final String? widget;
-
-  /// The widget's key as text, for example `[<'save'>]`, or null.
-  final String? key;
-
-  /// Which of the widgets that match the rest of the anchor, in tree order.
-  /// One constructor call builds every row of a list.
-  final int ordinal;
-
-  /// The index of the lazy-list item (`ListView.builder`, `GridView`) the
-  /// widget is in, or null outside one. A scrolled list builds other items,
-  /// so the [ordinal] alone would move to another row.
-  final int? itemIndex;
-
-  /// The route the note was written on, for the agent and the bridge.
-  final String? route;
-
-  /// Whether a live widget can be looked up: only with a file and a line.
-  bool get resolvable => file != null && line != null;
-
-  /// This anchor at another place in the same file, for a widget that
-  /// moved after an edit. Each later edit is then measured from here.
-  NoteAnchor movedTo({required int line, int? column}) => NoteAnchor(
-    file: file,
-    line: line,
-    column: column,
-    widget: widget,
-    key: key,
-    ordinal: ordinal,
-    itemIndex: itemIndex,
-    route: route,
-  );
-
-  /// This anchor with [ordinal].
-  NoteAnchor withOrdinal(int ordinal) => NoteAnchor(
-    file: file,
-    line: line,
-    column: column,
-    widget: widget,
-    key: key,
-    ordinal: ordinal,
-    itemIndex: itemIndex,
-    route: route,
-  );
-
-  Map<String, Object?> toJson() => {
-    'file': file,
-    'line': line,
-    'column': column,
-    'widget': widget,
-    'key': key,
-    'ordinal': ordinal,
-    'itemIndex': itemIndex,
-    'route': route,
-  };
-
-  @override
-  bool operator ==(Object other) =>
-      other is NoteAnchor &&
-      other.file == file &&
-      other.line == line &&
-      other.column == column &&
-      other.widget == widget &&
-      other.key == key &&
-      other.ordinal == ordinal &&
-      other.itemIndex == itemIndex &&
-      other.route == route;
-
-  @override
-  int get hashCode =>
-      Object.hash(file, line, column, widget, key, ordinal, itemIndex, route);
-
-  @override
-  String toString() =>
-      'NoteAnchor(${widget ?? '?'} at ${file ?? '?'}:${line ?? '?'}'
-      '${itemIndex == null ? '' : ', item $itemIndex'}'
-      '${ordinal == 0 ? '' : ', #$ordinal'})';
 }

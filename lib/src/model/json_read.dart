@@ -38,6 +38,12 @@ Map<String, String> asStringMap(Object? value) => {
     if (value is String) key: value,
 };
 
+/// The value of [values] that [name] names, or null.
+T? asEnum<T extends Enum>(List<T> values, Object? name) => switch (name) {
+  final String text => values.asNameMap()[text],
+  _ => null,
+};
+
 /// [value] as JSON writes it: `96`, not `96.0`. Null for a non-number.
 String? jsonNumberText(Object? value) => switch (value) {
   final int n => '$n',
@@ -60,6 +66,15 @@ extension JsonRead on Map<String, Object?> {
     final map = asJsonMap(this[key]);
     return map.isNotEmpty && (where?.call(map) ?? true) ? map : null;
   }
+
+  /// The object at [key] read by [read], or null when it is not an object.
+  T? object<T extends Object>(
+    String key,
+    T Function(Map<String, Object?> json) read,
+  ) => switch (this[key]) {
+    final Map<String, Object?> map => read(map),
+    _ => null,
+  };
 
   /// The list at [key], each item read by [parse]. Items it rejects are dropped.
   List<T> items<T extends Object>(String key, T? Function(Object?) parse) => [
